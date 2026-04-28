@@ -12,5 +12,5 @@ idf_component_register(
         nvs_flash
         mdns
         esp_driver_gpio
-    EMBED_TXTFILES "spa/index.html" "spa/setup.html"
+    EMBED_TXTFILES "spa/index.html" "spa/setup.html" "spa/qrcode.min.js"
 )

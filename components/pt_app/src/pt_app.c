@@ -670,12 +670,27 @@ static esp_err_t api_print(httpd_req_t *req)
 extern const char index_html_start[] asm("_binary_index_html_start");
 extern const char index_html_end[]   asm("_binary_index_html_end");
 
+/* Vendored MIT QR-code generator (davidshimjs/qrcodejs) embedded as
+ * its own file because inlining 20 KB of minified code into the
+ * already-large index.html is unpleasant. Served at /qrcode.min.js
+ * so the SPA can `<script src=...>` it. */
+extern const char qrcode_js_start[] asm("_binary_qrcode_min_js_start");
+extern const char qrcode_js_end[]   asm("_binary_qrcode_min_js_end");
+
 static esp_err_t api_index(httpd_req_t *req)
 {
     cors_headers(req);
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, index_html_start,
                            index_html_end - index_html_start);
+}
+
+static esp_err_t api_qrcode_js(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/javascript");
+    return httpd_resp_send(req, qrcode_js_start,
+                           qrcode_js_end - qrcode_js_start);
 }
 
 static httpd_handle_t s_http;
@@ -732,6 +747,10 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/", .method = HTTP_GET,
         .handler = api_index, .user_ctx = NULL,
     };
+    static const httpd_uri_t qrcode_route = {
+        .uri = "/qrcode.min.js", .method = HTTP_GET,
+        .handler = api_qrcode_js, .user_ctx = NULL,
+    };
     static const httpd_uri_t cors_route = {
         .uri = "/*", .method = HTTP_OPTIONS,
         .handler = cors_preflight, .user_ctx = NULL,
@@ -744,6 +763,7 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &scan_route);
     httpd_register_uri_handler(s_http, &setup_route);
     httpd_register_uri_handler(s_http, &index_route);
+    httpd_register_uri_handler(s_http, &qrcode_route);
     httpd_register_uri_handler(s_http, &cors_route);
     return ESP_OK;
 }
