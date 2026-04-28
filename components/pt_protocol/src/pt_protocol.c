@@ -344,6 +344,3 @@ pt_err_t pt_bitmap_to_raster(
     return PT_OK;
 }
 
-/* Placeholder kept for the on-target main.c smoke test until Phase 4
- * wires in pt_session. Will be removed when no longer referenced. */
-void pt_protocol_placeholder(void) {}

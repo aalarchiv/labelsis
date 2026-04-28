@@ -50,9 +50,6 @@ static inline int pt_transport_recv(const pt_transport_t *t,
     return t->recv(t->ctx, out, cap, out_len, timeout_ms);
 }
 
-/* Removed once the real mock implementation lands in the Phase 3 issue. */
-void pt_transport_mock_placeholder(void);
-
 #ifdef __cplusplus
 }
 #endif

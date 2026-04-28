@@ -225,12 +225,6 @@ pt_err_t pt_bitmap_to_raster(
     uint8_t                  *out,
     size_t                   *out_rows);
 
-/* ======================================================== placeholder === */
-
-/* Removed when pt700-xmg lands actual encoder code. Keeps the link green
- * for the current main.c which only references the placeholder. */
-void pt_protocol_placeholder(void);
-
 #ifdef __cplusplus
 }
 #endif

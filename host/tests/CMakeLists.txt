@@ -25,3 +25,7 @@ add_test(NAME test_bitmap COMMAND test_bitmap)
 add_executable(test_encoder_vs_oracle test_encoder_vs_oracle.c)
 target_link_libraries(test_encoder_vs_oracle PRIVATE pt_protocol fixture)
 add_test(NAME test_encoder_vs_oracle COMMAND test_encoder_vs_oracle)
+
+add_executable(test_mock_transport test_mock_transport.c)
+target_link_libraries(test_mock_transport PRIVATE pt_protocol pt_transport)
+add_test(NAME test_mock_transport COMMAND test_mock_transport)
