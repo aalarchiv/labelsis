@@ -1,4 +1,16 @@
 # ESP32-S3 specific overlay.
+#
+# Tuned for ESP32-S3-DevKitC-1-N16R8: 16 MB QIO flash + 8 MB octal PSRAM.
+# A different S3 board (e.g. N8R2 with 8 MB flash + 2 MB quad PSRAM) needs
+# these flash/SPIRAM lines overridden — revisit during the S3-vs-S2
+# final-target decision.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
 # Bluetooth controller + NimBLE host compiled in but unused — leaves the
 # door open for the future BLE bridge source without a kernel reshuffle.
 # (The S2 variant has no BT radio so this section doesn't apply there.)
