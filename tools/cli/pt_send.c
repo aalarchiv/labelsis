@@ -178,6 +178,12 @@ static void log_status(const pt_status_t *s, void *unused)
         s->media_width_mm, s->media_type);
 }
 
+static void log_event(const char *msg, void *unused)
+{
+    (void)unused;
+    fprintf(stderr, "  event:  %s\n", msg);
+}
+
 /* ----------------------------------------------------------- error map */
 
 static const char *err_str(pt_err_t e)
@@ -233,7 +239,7 @@ int main(int argc, char **argv)
         case 'R': opts.compression = PT_COMPRESSION_NONE; break;
         case 'D': opts.margin_dots = (uint16_t)atoi(optarg); break;
         case 'W': width_override = atoi(optarg); break;
-        case 'v': opts.on_status = log_status; break;
+        case 'v': opts.on_status = log_status; opts.on_event = log_event; break;
         case 'I': info_only = true; break;
         case 'h': fputs(USAGE, stdout); return 0;
         default:  fputs(USAGE, stderr); return 2;

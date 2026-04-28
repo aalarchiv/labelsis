@@ -31,6 +31,12 @@ extern "C" {
  * verbose logging or to push live status to a UI. NULL = no observer. */
 typedef void (*pt_status_observer_fn)(const pt_status_t *s, void *user);
 
+/* Diagnostic callback for events that don't correspond to a received
+ * status message — e.g. an outgoing ESC i S poll. Lets pt_send -v
+ * surface what pt_session is doing internally without breaking
+ * pt_session's "no I/O" rule (the callback is the I/O, not us). */
+typedef void (*pt_event_fn)(const char *msg, void *user);
+
 typedef struct {
     pt_compression_t compression;        /* default TIFF (PackBits)      */
     bool             auto_cut;           /* default true                 */
@@ -43,6 +49,8 @@ typedef struct {
     uint32_t         print_timeout_ms;   /* total job, default 120000    */
     pt_status_observer_fn on_status;     /* default NULL                 */
     void                 *on_status_user;
+    pt_event_fn           on_event;      /* default NULL                 */
+    void                 *on_event_user;
 } pt_session_options_t;
 
 /* Populate `out` with the documented defaults above. */

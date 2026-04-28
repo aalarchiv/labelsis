@@ -22,6 +22,8 @@ void pt_session_options_default(pt_session_options_t *o)
     o->print_timeout_ms  = 120000;  /* 2 min — tolerates a 1 m label + cooling */
     o->on_status         = NULL;
     o->on_status_user    = NULL;
+    o->on_event          = NULL;
+    o->on_event_user     = NULL;
 }
 
 /* Send the full buffer or fail. */
@@ -140,6 +142,9 @@ static pt_err_t wait_print_done(pt_transport_t *t,
              * the case where the printer drops the request entirely
              * during heavy print rather than queueing it. */
             if (seen_printing) {
+                if (opts->on_event)
+                    opts->on_event("printer silent — polling ESC i S",
+                                   opts->on_event_user);
                 uint8_t cmd[8];
                 int n = pt_encode_status_request(cmd, sizeof cmd);
                 pt_err_t se = send_all(t, cmd, (size_t)n);
@@ -166,6 +171,11 @@ static pt_err_t wait_print_done(pt_transport_t *t,
         if (s.status_type == PT_STATUS_PHASE_CHANGE
             && s.phase_type == PT_PHASE_PRINTING) seen_printing = true;
     }
+    if (opts->on_event && seen_printing)
+        opts->on_event("printer entered print phase but never reported "
+                       "completion — likely wedged (try power-cycle + "
+                       "verify tape is loaded with a usable leader)",
+                       opts->on_event_user);
     return PT_ERR_TIMEOUT;
 }
 
