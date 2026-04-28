@@ -43,6 +43,11 @@ button.secondary { background:transparent; color:var(--accent); border:1px solid
     <div class="row">
       <label>password</label>
       <input id="password" type="password" placeholder="WPA2 passphrase">
+      <button id="reveal" class="secondary" type="button">show</button>
+    </div>
+    <div class="row">
+      <label>confirm</label>
+      <input id="password2" type="password" placeholder="re-enter">
     </div>
     <div class="row">
       <button id="save">save &amp; reboot</button>
@@ -87,8 +92,10 @@ async function scan() {
 async function save() {
   const ssid = document.getElementById("ssid-text").value.trim()
             || document.getElementById("ssid-select").value;
-  const password = document.getElementById("password").value;
+  const password  = document.getElementById("password").value;
+  const password2 = document.getElementById("password2").value;
   if (!ssid) { log("pick or type an SSID first", false); return; }
+  if (password !== password2) { log("passwords don't match", false); return; }
   const btn = document.getElementById("save");
   btn.disabled = true;
   log("saving…");
@@ -121,6 +128,15 @@ document.getElementById("rescan").addEventListener("click", scan);
 document.getElementById("save").addEventListener("click", save);
 document.getElementById("ssid-select").addEventListener("change", e => {
   document.getElementById("ssid-text").value = e.target.value;
+});
+
+let revealed = false;
+document.getElementById("reveal").addEventListener("click", () => {
+  revealed = !revealed;
+  const t = revealed ? "text" : "password";
+  document.getElementById("password").type  = t;
+  document.getElementById("password2").type = t;
+  document.getElementById("reveal").textContent = revealed ? "hide" : "show";
 });
 
 scan();
