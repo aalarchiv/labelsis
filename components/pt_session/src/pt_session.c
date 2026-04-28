@@ -19,7 +19,7 @@ void pt_session_options_default(pt_session_options_t *o)
     o->margin_dots       = 14;       /* ≈ 2 mm @ 180 dpi */
     o->recover_always_on = true;
     o->status_timeout_ms = 5000;
-    o->print_timeout_ms  = 60000;
+    o->print_timeout_ms  = 120000;  /* 2 min — tolerates a 1 m label + cooling */
 }
 
 /* Send the full buffer or fail. */
@@ -108,7 +108,14 @@ static pt_err_t wait_print_done(pt_transport_t *t,
             return e ? e : PT_ERR_TRANSPORT;
         }
         if (s.status_type == PT_STATUS_PRINTING_DONE) return PT_OK;
-        /* phase changes / notifications — keep reading without burning budget */
+        /* Real hardware sometimes skips PRINTING_DONE and jumps straight
+         * to PHASE_CHANGE → editing once the page is finished — accept
+         * that as completion too. (SDM §5.1 documents both messages but
+         * observed PT-P700 behaviour omits PRINTING_DONE in some configs.) */
+        if (s.status_type == PT_STATUS_PHASE_CHANGE
+            && s.phase_type == PT_PHASE_EDITING)
+            return PT_OK;
+        /* notifications, phase=printing, etc. — keep reading without burning budget */
     }
     return PT_ERR_TIMEOUT;
 }

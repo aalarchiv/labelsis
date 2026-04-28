@@ -36,10 +36,16 @@ static const char *USAGE =
     "\n"
     "Options:\n"
     "  --no-cut             disable auto-cut at end of job\n"
+    "  --chain              chain printing — skip the trailing feed+cut so the\n"
+    "                       NEXT job continues directly on this tape (saves the\n"
+    "                       ~25 mm leader the printer normally wastes between\n"
+    "                       jobs). Use this for series of related labels; the\n"
+    "                       last one in the series should NOT pass --chain so\n"
+    "                       the printer cuts and releases the strip.\n"
     "  --mirror             mirror-print (for transparent tape backside)\n"
     "  --no-compression     send raster rows raw (no PackBits)\n"
     "  --special-tape       disable cutter (fabric / iron-on tapes)\n"
-    "  --margin=DOTS        margin amount in dots (default 14 ≈ 2 mm)\n"
+    "  --margin=DOTS        leading margin in dots (default 14 ≈ 2 mm)\n"
     "  --width=MM           require this tape width (default: trust loaded tape)\n"
     "  -h, --help           show this help\n";
 
@@ -178,6 +184,7 @@ int main(int argc, char **argv)
 
     static const struct option longopts[] = {
         { "no-cut",         no_argument,       0, 'C' },
+        { "chain",          no_argument,       0, 'N' },
         { "mirror",         no_argument,       0, 'M' },
         { "no-compression", no_argument,       0, 'R' },
         { "special-tape",   no_argument,       0, 'S' },
@@ -190,6 +197,7 @@ int main(int argc, char **argv)
     while ((c = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
         switch (c) {
         case 'C': opts.auto_cut = false; break;
+        case 'N': opts.no_chain_print = false; break;
         case 'M': opts.mirror_print = true; break;
         case 'R': opts.compression = PT_COMPRESSION_NONE; break;
         case 'S': opts.special_tape = true; break;
@@ -221,6 +229,24 @@ int main(int argc, char **argv)
         return 1;
     }
     pt_transport_t t = pt_transport_libusb_transport(u);
+
+    /* Tape-fit check: if the PBM height exceeds the loaded tape's print
+     * pin count, the rows above and below the print area land in the
+     * margins and silently won't fire. Warn so the user can swap to a
+     * smaller PBM or wider tape rather than being surprised by clipping. */
+    pt_status_t st;
+    pt_err_t qerr = pt_session_query_status(&t, &st, NULL);
+    if (qerr == PT_OK) {
+        pt_tape_geometry_t g;
+        if (pt_tape_geometry_tze(st.media_width_mm, &g) == PT_OK
+            && pbm.height > g.print_pins) {
+            fprintf(stderr,
+                    "pt_send: WARNING: PBM is %d px tall but loaded %u mm tape "
+                    "has only %u print pins; top/bottom rows will be clipped to "
+                    "the margins. Use a %u-px-tall PBM for full coverage.\n",
+                    pbm.height, st.media_width_mm, g.print_pins, g.print_pins);
+        }
+    }
 
     fprintf(stderr, "pt_send: rendering %d × %d PBM as %zu raster rows\n",
             pbm.width, pbm.height, n_rows);
