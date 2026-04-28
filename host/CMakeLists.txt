@@ -37,6 +37,11 @@ if(LIBUSB_FOUND)
     target_link_libraries(pt_transport PUBLIC ${LIBUSB_LIBRARIES})
     set(PT_HAVE_LIBUSB ON)
     message(STATUS "libusb-1.0 ${LIBUSB_VERSION} found — pt_transport_libusb enabled")
+
+    # pt_send CLI lives in tools/cli/ but is wired into the host build
+    # so 'cmake --build build-host' also builds it.
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../tools/cli
+                     ${CMAKE_CURRENT_BINARY_DIR}/tools_cli)
 else()
     set(PT_HAVE_LIBUSB OFF)
     message(STATUS "libusb-1.0 NOT found — pt_transport_libusb disabled")
