@@ -22,8 +22,12 @@ extern "C" {
 #endif
 
 typedef struct {
-    const char *wifi_ssid;       /* required */
-    const char *wifi_password;   /* required */
+    /* Optional first-boot fallback creds. If NVS has stored creds, those
+     * win; otherwise these are tried, and persisted to NVS on first
+     * successful STA connect. NULL or empty → skip straight to AP-mode
+     * onboarding. */
+    const char *wifi_ssid;
+    const char *wifi_password;
     uint16_t    http_port;       /* default 80 if 0 */
     bool        use_usb_host;    /* false → mock transport (no printer needed) */
     uint32_t    usb_connect_timeout_ms;  /* default 10000 if 0 */

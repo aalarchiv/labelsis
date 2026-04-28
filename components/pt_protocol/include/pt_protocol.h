@@ -195,8 +195,7 @@ typedef enum {
 /* ============================================================ encoders == */
 
 /* Each pt_encode_* writes command bytes to buf and returns the number of
- * bytes written, or a negative pt_err_t on failure. Implementations land
- * in pt700-xmg (control commands) and pt700-979 (raster + packbits). */
+ * bytes written, or a negative pt_err_t on failure. */
 
 int pt_encode_invalidate        (uint8_t *buf, size_t cap);              /* 100x 0x00         */
 int pt_encode_init              (uint8_t *buf, size_t cap);              /* ESC @             */

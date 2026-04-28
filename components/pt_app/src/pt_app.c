@@ -20,6 +20,8 @@
 #include "mdns.h"
 #include "nvs_flash.h"
 
+#include "nvs.h"
+
 #include "pt_protocol.h"
 #include "pt_session.h"
 #include "pt_transport.h"
@@ -27,6 +29,61 @@
 #include "pt_transport_usb_host.h"
 
 static const char *TAG = "pt_app";
+
+/* ---------------------------------------------------- Wi-Fi creds (NVS) -- */
+
+/* Persist Wi-Fi creds in NVS so first-boot provisioning (whether via
+ * compiled-in cfg or AP-mode onboarding) is durable across reboots.
+ * Buffers sized for the IEEE 802.11 SSID (32 bytes + NUL) and the
+ * WPA2 PSK string form (64 chars + NUL). */
+#define CREDS_NS    "pt_app"
+#define CREDS_SSID  "ssid"
+#define CREDS_PASS  "pass"
+
+typedef struct {
+    char ssid[33];
+    char password[65];
+} wifi_creds_t;
+
+static esp_err_t creds_load(wifi_creds_t *out)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(CREDS_NS, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    size_t sz = sizeof out->ssid;
+    err = nvs_get_str(h, CREDS_SSID, out->ssid, &sz);
+    if (err == ESP_OK) {
+        sz = sizeof out->password;
+        err = nvs_get_str(h, CREDS_PASS, out->password, &sz);
+    }
+    nvs_close(h);
+    return err;
+}
+
+static esp_err_t creds_save(const char *ssid, const char *password)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(CREDS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_str(h, CREDS_SSID, ssid);
+    if (err == ESP_OK) err = nvs_set_str(h, CREDS_PASS, password);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+__attribute__((unused))
+static esp_err_t creds_clear(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(CREDS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_erase_key(h, CREDS_SSID);
+    nvs_erase_key(h, CREDS_PASS);
+    err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
 
 /* ------------------------------------------------------------ Wi-Fi --- */
 
@@ -399,9 +456,8 @@ static esp_err_t api_print(httpd_req_t *req)
 }
 
 /* Single-file SPA embedded via EMBED_TXTFILES in CMakeLists.txt — the
- * label designer (pt700-x4i). Inline CSS + JS so we don't need
- * LittleFS yet; the file is < 10 KB and lives in flash next to the
- * code. */
+ * label designer. Inline CSS + JS so we don't need LittleFS yet; the
+ * file is < 10 KB and lives in flash next to the code. */
 extern const char index_html_start[] asm("_binary_index_html_start");
 extern const char index_html_end[]   asm("_binary_index_html_end");
 
@@ -472,7 +528,7 @@ static esp_err_t mdns_up(void)
 
 esp_err_t pt_app_run(const pt_app_config_t *cfg)
 {
-    if (!cfg || !cfg->wifi_ssid || !cfg->wifi_password) return ESP_ERR_INVALID_ARG;
+    if (!cfg) return ESP_ERR_INVALID_ARG;
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -480,10 +536,34 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    ESP_LOGI(TAG, "wifi: connecting to %s", cfg->wifi_ssid);
-    if (wifi_sta_up(cfg->wifi_ssid, cfg->wifi_password) != ESP_OK) {
+    /* Resolve Wi-Fi creds: NVS wins if present, else fall back to the
+     * compiled-in cfg (and persist on first successful connect). */
+    wifi_creds_t stored = {0};
+    bool have_stored = (creds_load(&stored) == ESP_OK
+                        && stored.ssid[0] != '\0');
+    bool have_cfg    = (cfg->wifi_ssid && cfg->wifi_password
+                        && cfg->wifi_ssid[0] && cfg->wifi_password[0]);
+
+    const char *ssid     = have_stored ? stored.ssid     : have_cfg ? cfg->wifi_ssid     : NULL;
+    const char *password = have_stored ? stored.password : have_cfg ? cfg->wifi_password : NULL;
+
+    if (!ssid) {
+        ESP_LOGE(TAG, "wifi: no creds (NVS empty, no compiled-in fallback)");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_LOGI(TAG, "wifi: connecting to %s (%s)",
+             ssid, have_stored ? "from NVS" : "from cfg");
+    if (wifi_sta_up(ssid, password) != ESP_OK) {
         ESP_LOGE(TAG, "wifi: failed");
         return ESP_FAIL;
+    }
+    if (!have_stored) {
+        if (creds_save(ssid, password) == ESP_OK) {
+            ESP_LOGI(TAG, "wifi: persisted creds to NVS");
+        } else {
+            ESP_LOGW(TAG, "wifi: failed to persist creds to NVS");
+        }
     }
 
     transport_up(cfg);
