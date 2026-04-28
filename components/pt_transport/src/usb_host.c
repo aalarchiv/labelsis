@@ -254,16 +254,46 @@ static esp_err_t plite_unstick(usb_host_client_handle_t client_hdl,
     usb_transfer_t   *xfer_out = NULL, *xfer_in = NULL;
     esp_err_t         result = ESP_FAIL;
     if (!sem) goto cleanup;
-    if (usb_host_transfer_alloc(64, 0, &xfer_out) != ESP_OK) goto cleanup;
-    if (usb_host_transfer_alloc(64, 0, &xfer_in)  != ESP_OK) goto cleanup;
+    /* 1024 covers a full 512-byte data-out block + headroom; CSW is
+     * 13 bytes but esp-idf needs an MPS-aligned IN buffer. */
+    if (usb_host_transfer_alloc(1024, 0, &xfer_out) != ESP_OK) goto cleanup;
+    if (usb_host_transfer_alloc(1024, 0, &xfer_in)  != ESP_OK) goto cleanup;
 
-    /* SCSI BOT CBW (31 bytes): WRITE(10) of 1 block, but with
-     * data_transfer_len = 10 — the firmware sniffs the data-out
-     * content rather than honouring the SCSI block count. */
-    static const uint8_t cbw[31] = {
+    /* Reset the MSC endpoint to known state. Some devices NAK the
+     * first CBW after enumeration if Bulk-Only-Mass-Storage Reset
+     * (class request 0xFF) hasn't been issued first. */
+    usb_setup_packet_t reset_setup = {
+        .bmRequestType = 0x21,   /* class | interface | host->dev */
+        .bRequest      = 0xFF,
+        .wValue        = 0,
+        .wIndex        = intf,
+        .wLength       = 0,
+    };
+    memcpy(xfer_out->data_buffer, &reset_setup, sizeof reset_setup);
+    xfer_out->num_bytes        = sizeof reset_setup;
+    xfer_out->bEndpointAddress = 0;       /* control endpoint */
+    xfer_out->device_handle    = dev;
+    xfer_out->callback         = plite_xfer_cb;
+    xfer_out->context          = sem;
+    if (usb_host_transfer_submit_control(client_hdl, xfer_out) == ESP_OK) {
+        xSemaphoreTake(sem, pdMS_TO_TICKS(1000));
+    }
+
+    /* Send a full 512-byte data-out block (matches what a Windows
+     * raw-volume write of 10 bytes actually puts on the wire — the
+     * filesystem layer pads to sector size). The magic prefix sits
+     * at offset 0, the rest is zero. */
+    #define BOT_BLOCK 512
+    uint8_t *data_buf = xfer_out->data_buffer;
+    memset(data_buf, 0, BOT_BLOCK);
+    memcpy(data_buf, PLITE_UNSTICK_MAGIC, sizeof PLITE_UNSTICK_MAGIC);
+
+    /* SCSI BOT CBW (31 bytes): WRITE(10), 1 block (512 bytes),
+     * dCBWDataTransferLength = 512 to match the data-out below. */
+    uint8_t cbw[31] = {
         /* dCBWSignature "USBC" */ 'U','S','B','C',
         /* dCBWTag                */ 0xEF, 0xBE, 0xAD, 0xDE,
-        /* dCBWDataTransferLength */ 0x0A, 0x00, 0x00, 0x00,
+        /* dCBWDataTransferLength */ (BOT_BLOCK & 0xff), (BOT_BLOCK >> 8) & 0xff, 0x00, 0x00,
         /* bmCBWFlags  = OUT      */ 0x00,
         /* bCBWLUN                */ 0x00,
         /* bCBWCBLength = 10      */ 0x0A,
@@ -277,18 +307,17 @@ static esp_err_t plite_unstick(usb_host_client_handle_t client_hdl,
     };
 
     if (plite_xfer(xfer_out, dev, ep_out, cbw, sizeof cbw, sem) != ESP_OK) {
-        ESP_LOGW(TAG, "P-Lite: CBW write failed");
+        ESP_LOGW(TAG, "P-Lite: CBW write failed (status=%d)", xfer_out->status);
         goto cleanup;
     }
-    if (plite_xfer(xfer_out, dev, ep_out,
-                   PLITE_UNSTICK_MAGIC, sizeof PLITE_UNSTICK_MAGIC, sem) != ESP_OK) {
-        /* Often "fails" because the device is already flipping —
-         * keep going to read the CSW so any actual error surfaces. */
-        ESP_LOGD(TAG, "P-Lite: data-out incomplete (likely re-enumerating)");
+    if (plite_xfer(xfer_out, dev, ep_out, data_buf, BOT_BLOCK, sem) != ESP_OK) {
+        ESP_LOGW(TAG, "P-Lite: data-out failed (status=%d, likely already flipping)",
+                 xfer_out->status);
     }
-    /* CSW read. Often times out because the device has already
-     * detached to re-enumerate — that's the expected success case. */
-    plite_xfer(xfer_in, dev, ep_in, NULL, 13, sem);
+    if (plite_xfer(xfer_in, dev, ep_in, NULL, 13, sem) != ESP_OK) {
+        ESP_LOGD(TAG, "P-Lite: CSW read incomplete (status=%d, expected if re-enumerating)",
+                 xfer_in->status);
+    }
 
     ESP_LOGI(TAG, "P-Lite: unstick magic sent; awaiting re-enumeration");
     result = ESP_OK;
