@@ -69,7 +69,9 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
       <h2>Label</h2>
       <canvas id="preview" width="600" height="128"></canvas>
       <div class="row" style="margin-top:.75rem">
-        <button id="add-text" class="secondary" type="button">+ text</button>
+        <button id="add-text"  class="secondary" type="button">+ text</button>
+        <button id="add-image" class="secondary" type="button">+ image</button>
+        <input  id="image-file" type="file" accept="image/*" hidden>
         <button id="el-delete" class="secondary" type="button" disabled>delete</button>
         <span style="flex:1"></span>
         <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
@@ -99,6 +101,31 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
           <input id="el-x" type="number" min="0" style="max-width:90px">
           <label>y</label>
           <input id="el-y" type="number" min="0" max="127" style="max-width:90px">
+        </div>
+      </div>
+
+      <div id="props-image" hidden>
+        <div class="row" style="margin-bottom:.5rem">
+          <label>algorithm</label>
+          <select id="img-algo">
+            <option value="atkinson">Atkinson</option>
+            <option value="floyd-steinberg">Floyd-Steinberg</option>
+            <option value="threshold">Threshold</option>
+          </select>
+          <label>threshold</label>
+          <input id="img-threshold" type="range" min="32" max="224" value="128" style="max-width:140px">
+          <span id="img-threshold-val" class="dim">128</span>
+        </div>
+        <div class="row" style="margin-bottom:.5rem">
+          <label>height</label>
+          <input id="img-h" type="number" min="8" max="128" style="max-width:90px">
+          <span class="muted">(px; width scales)</span>
+        </div>
+        <div class="row">
+          <label>x</label>
+          <input id="img-x" type="number" min="0" style="max-width:90px">
+          <label>y</label>
+          <input id="img-y" type="number" min="0" max="127" style="max-width:90px">
         </div>
       </div>
     </div>
@@ -287,8 +314,111 @@ function drawText(ctx, el) {
   el._h = Math.ceil(el.size * 1.1);
 }
 
+/* --- image element + dithering -----------------------------------
+ *
+ * Port of niimblue/src/utils/post_process.ts (MIT) with the
+ * algorithms named consistently. We pre-dither once when the source,
+ * algorithm, threshold, or size changes — then drawImage() just
+ * blits the cached ImageData. Dragging stays cheap.
+ *
+ * Algorithms:
+ *   threshold       — straight luminance > N → black/white
+ *   floyd-steinberg — error-diffuses to right + down-3 neighbours
+ *   atkinson        — original Mac dither, gentler error spread
+ */
+
+function ditherImage(srcImageData, algorithm, threshold) {
+  const w = srcImageData.width, h = srcImageData.height;
+  const out = new ImageData(w, h);
+  const gray = new Float32Array(w * h);
+  const sd = srcImageData.data;
+  for (let i = 0; i < w * h; i++) {
+    const o = i * 4;
+    /* Apply alpha against white so transparent pixels print white. */
+    const a = sd[o + 3] / 255;
+    const r = sd[o]     * a + 255 * (1 - a);
+    const g = sd[o + 1] * a + 255 * (1 - a);
+    const b = sd[o + 2] * a + 255 * (1 - a);
+    gray[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+  }
+
+  if (algorithm === "threshold") {
+    for (let i = 0; i < w * h; i++) gray[i] = gray[i] < threshold ? 0 : 255;
+  } else if (algorithm === "floyd-steinberg") {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const old = gray[i];
+        const nw  = old < threshold ? 0 : 255;
+        const err = old - nw;
+        gray[i] = nw;
+        if (x + 1 < w)            gray[i + 1]      += err * 7 / 16;
+        if (x - 1 >= 0 && y+1 < h) gray[i + w - 1] += err * 3 / 16;
+        if (y + 1 < h)            gray[i + w]      += err * 5 / 16;
+        if (x + 1 < w  && y+1 < h) gray[i + w + 1] += err * 1 / 16;
+      }
+    }
+  } else if (algorithm === "atkinson") {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const old = gray[i];
+        const nw  = old < threshold ? 0 : 255;
+        const err = (old - nw) / 8;
+        gray[i] = nw;
+        if (x + 1 < w)             gray[i + 1]       += err;
+        if (x + 2 < w)             gray[i + 2]       += err;
+        if (x - 1 >= 0 && y+1 < h) gray[i + w - 1]   += err;
+        if (y + 1 < h)             gray[i + w]       += err;
+        if (x + 1 < w  && y+1 < h) gray[i + w + 1]   += err;
+        if (y + 2 < h)             gray[i + 2 * w]   += err;
+      }
+    }
+  }
+
+  for (let i = 0; i < w * h; i++) {
+    const v = gray[i] < 128 ? 0 : 255;
+    const o = i * 4;
+    out.data[o] = out.data[o + 1] = out.data[o + 2] = v;
+    out.data[o + 3] = 255;
+  }
+  return out;
+}
+
+/* Re-rasterise the source <img> at the current target height and run
+ * dither(). Call after src / algorithm / threshold / h changes. */
+function imageRebake(el) {
+  if (!el._img || !el._img.complete) return;
+  const ratio = el._img.naturalWidth / el._img.naturalHeight;
+  const h = Math.max(1, Math.min(HEAD_PX, el.h | 0));
+  const w = Math.max(1, Math.round(h * ratio));
+  const tmp = document.createElement("canvas");
+  tmp.width = w; tmp.height = h;
+  const tctx = tmp.getContext("2d");
+  tctx.fillStyle = "#fff";
+  tctx.fillRect(0, 0, w, h);
+  tctx.drawImage(el._img, 0, 0, w, h);
+  const src = tctx.getImageData(0, 0, w, h);
+  el._dithered = ditherImage(src, el.algorithm, el.threshold);
+}
+
+function drawImage(ctx, el) {
+  if (!el._dithered) imageRebake(el);
+  if (el._dithered) {
+    ctx.putImageData(el._dithered, el.x, el.y);
+    el._w = el._dithered.width;
+    el._h = el._dithered.height;
+  } else {
+    /* Source not loaded yet: draw a placeholder rectangle. */
+    el._w = 60; el._h = el.h | 0;
+    ctx.fillStyle = "#ddd";
+    ctx.fillRect(el.x, el.y, el._w, el._h);
+  }
+}
+
 function drawElement(ctx, el) {
-  if (el.type === "text") drawText(ctx, el);
+  if (el.type === "text")  drawText(ctx, el);
+  if (el.type === "image") drawImage(ctx, el);
 }
 
 function elementBounds(el) {
@@ -561,12 +691,20 @@ function syncPropsPanel() {
   const el = elementById(selectedId);
   document.getElementById("props-empty").hidden = !!el;
   document.getElementById("props-text").hidden  = !el || el.type !== "text";
+  document.getElementById("props-image").hidden = !el || el.type !== "image";
   if (el && el.type === "text") {
     document.getElementById("text").value = el.text;
     document.getElementById("size").value = el.size;
     document.getElementById("size-val").textContent = el.size + "px";
     document.getElementById("el-x").value = Math.round(el.x);
     document.getElementById("el-y").value = Math.round(el.y);
+  } else if (el && el.type === "image") {
+    document.getElementById("img-algo").value      = el.algorithm;
+    document.getElementById("img-threshold").value = el.threshold;
+    document.getElementById("img-threshold-val").textContent = el.threshold;
+    document.getElementById("img-h").value = el.h;
+    document.getElementById("img-x").value = Math.round(el.x);
+    document.getElementById("img-y").value = Math.round(el.y);
   }
 }
 
@@ -575,7 +713,12 @@ function bindPropInput(id, key, parseFn) {
     const el = elementById(selectedId);
     if (!el) return;
     el[key] = parseFn ? parseFn(e.target.value) : e.target.value;
-    if (id === "size") document.getElementById("size-val").textContent = el.size + "px";
+    if (id === "size")          document.getElementById("size-val").textContent = el.size + "px";
+    if (id === "img-threshold") document.getElementById("img-threshold-val").textContent = el.threshold;
+    /* Anything that affects the image bitmap must invalidate the
+     * cached dither so the next redraw rebakes. */
+    if (el.type === "image" && (id === "img-algo" || id === "img-threshold" || id === "img-h"))
+      el._dithered = null;
     redraw();
   });
 }
@@ -583,19 +726,53 @@ bindPropInput("text", "text");
 bindPropInput("size", "size", v => parseInt(v, 10));
 bindPropInput("el-x", "x",    v => parseInt(v, 10) || 0);
 bindPropInput("el-y", "y",    v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+bindPropInput("img-algo",      "algorithm");
+bindPropInput("img-threshold", "threshold", v => parseInt(v, 10));
+bindPropInput("img-h",         "h",         v => Math.max(8, Math.min(128, parseInt(v, 10) || 8)));
+bindPropInput("img-x",         "x",         v => parseInt(v, 10) || 0);
+bindPropInput("img-y",         "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+
+function rightmostX() {
+  let r = 14;
+  for (const e of elements) {
+    const b = elementBounds(e);
+    if (b.x + b.w > r) r = b.x + b.w + 12;
+  }
+  return r;
+}
 
 document.getElementById("add-text").addEventListener("click", () => {
   const el = defaultText();
-  /* Place new elements just to the right of the rightmost existing
-   * one so they're visible on first add. */
-  let rightmost = 14;
-  for (const e of elements) {
-    const b = elementBounds(e);
-    if (b.x + b.w > rightmost) rightmost = b.x + b.w + 12;
-  }
-  el.x = rightmost;
+  el.x = rightmostX();
   elements.push(el);
   selectElement(el.id);
+});
+
+document.getElementById("add-image").addEventListener("click", () => {
+  document.getElementById("image-file").click();
+});
+
+document.getElementById("image-file").addEventListener("change", async e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = () => {
+    const el = {
+      id: nextId++, type: "image",
+      x: rightmostX(), y: 0,
+      h: HEAD_PX,
+      algorithm: "atkinson",
+      threshold: 128,
+      _img: img,
+    };
+    imageRebake(el);
+    elements.push(el);
+    selectElement(el.id);
+  };
+  img.onerror = () => log("image load failed", false);
+  img.src = url;
+  e.target.value = "";  /* allow re-importing the same file */
 });
 
 document.getElementById("el-delete").addEventListener("click", () => {
