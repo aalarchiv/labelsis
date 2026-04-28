@@ -33,6 +33,7 @@
 
 static const char *USAGE =
     "Usage: pt_send [options] <input.pbm>\n"
+    "       pt_send --info\n"
     "\n"
     "Options:\n"
     "  --no-cut             disable auto-cut at end of job (use for tiny\n"
@@ -47,6 +48,7 @@ static const char *USAGE =
     "  --margin=DOTS        leading margin in dots (default 14 ≈ 2 mm)\n"
     "  --width=MM           require this tape width (default: trust loaded tape)\n"
     "  -v, --verbose        log every status message the printer emits\n"
+    "      --info           probe the connected printer + tape and exit\n"
     "  -h, --help           show this help\n";
 
 /* ----------------------------------------------------------- PBM reader */
@@ -209,6 +211,7 @@ int main(int argc, char **argv)
 
     int  width_override = 0;  /* 0 = auto */
 
+    bool info_only = false;
     static const struct option longopts[] = {
         { "no-cut",         no_argument,       0, 'C' },
         { "chain",          no_argument,       0, 'N' },
@@ -217,6 +220,7 @@ int main(int argc, char **argv)
         { "margin",         required_argument, 0, 'D' },
         { "width",          required_argument, 0, 'W' },
         { "verbose",        no_argument,       0, 'v' },
+        { "info",           no_argument,       0, 'I' },
         { "help",           no_argument,       0, 'h' },
         { 0, 0, 0, 0 },
     };
@@ -230,10 +234,55 @@ int main(int argc, char **argv)
         case 'D': opts.margin_dots = (uint16_t)atoi(optarg); break;
         case 'W': width_override = atoi(optarg); break;
         case 'v': opts.on_status = log_status; break;
+        case 'I': info_only = true; break;
         case 'h': fputs(USAGE, stdout); return 0;
         default:  fputs(USAGE, stderr); return 2;
         }
     }
+
+    if (info_only) {
+        pt_transport_libusb_t *u = pt_transport_libusb_open();
+        if (!u) {
+            fprintf(stderr, "pt_send: no PT-* found on USB.\n");
+            return 1;
+        }
+        pt_transport_t t = pt_transport_libusb_transport(u);
+        pt_status_t st;
+        if (pt_session_query_status(&t, &st, NULL) != PT_OK) {
+            fprintf(stderr, "pt_send: status query failed\n");
+            pt_transport_libusb_close(u);
+            return 1;
+        }
+        printf("Connected:\n");
+        printf("  model            0x%02x\n", st.model);
+        printf("  status type      0x%02x\n", st.status_type);
+        printf("  error1 / error2  0x%02x / 0x%02x\n", st.error1, st.error2);
+        printf("Loaded tape:\n");
+        printf("  width            %u mm (status byte 10)\n", st.media_width_mm);
+        printf("  type             0x%02x\n", st.media_type);
+        printf("  tape colour      0x%02x\n", st.tape_color_id);
+        printf("  text colour      0x%02x\n", st.text_color_id);
+
+        pt_tape_geometry_t g;
+        if (pt_tape_geometry_tze(st.media_width_mm, &g) == PT_OK) {
+            double mm_per_dot = 25.4 / 180.0;
+            uint8_t off = (g.tape_width_dots - g.print_pins) / 2;
+            printf("Geometry @ 180 dpi (SDM pp. 14, 20):\n");
+            printf("  print head       %u dots\n", g.total_pins);
+            printf("  tape width       %u dots (%.2f mm)\n",
+                   g.tape_width_dots, g.tape_width_dots * mm_per_dot);
+            printf("  print width      %u dots (%.2f mm)\n",
+                   g.print_pins, g.print_pins * mm_per_dot);
+            printf("  margin per side  %u dots (%.2f mm) of tape "
+                   "physically not addressable\n",
+                   off, off * mm_per_dot);
+            printf("  head left/right  %u / %u pins masked\n",
+                   g.left_margin_pins, g.right_margin_pins);
+        }
+        pt_transport_libusb_close(u);
+        return 0;
+    }
+
     if (optind >= argc) { fputs(USAGE, stderr); return 2; }
     const char *pbm_path = argv[optind];
 

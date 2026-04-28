@@ -65,12 +65,18 @@ typedef enum {
 } pt_media_type_t;
 
 /* Print head pin geometry for a given tape. Total is always 128 on the
- * H500/P700/E500. left + print + right == total. (SDM p. 20 TZe table.) */
+ * H500/P700/E500. left + print + right == total. (SDM p. 20 TZe table.)
+ *
+ * For physical tape dimensions and the non-printable margin built into
+ * the tape itself (separate from the head's geometry), see
+ * tape_width_dots and SDM p. 14 table — at 180 dpi each dot is
+ * 25.4/180 ≈ 0.141 mm. */
 typedef struct {
-    uint8_t total_pins;
-    uint8_t print_pins;
-    uint8_t left_margin_pins;
+    uint8_t total_pins;          /* always 128                                */
+    uint8_t print_pins;          /* dots that actually fire                  */
+    uint8_t left_margin_pins;    /* head pins between head edge & print area */
     uint8_t right_margin_pins;
+    uint8_t tape_width_dots;     /* physical tape width in 180-dpi dots       */
 } pt_tape_geometry_t;
 
 /* Look up pin geometry for a TZe tape width in mm.

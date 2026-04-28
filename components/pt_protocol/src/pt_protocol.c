@@ -19,13 +19,17 @@
 pt_err_t pt_tape_geometry_tze(uint8_t width_mm, pt_tape_geometry_t *out)
 {
     if (!out) return PT_ERR_INVALID_ARG;
-    static const struct { uint8_t w, left, print, right; } table[] = {
-        {  4, 52,  24, 52 },  /* 3.5 mm tape — status byte reports 4 */
-        {  6, 48,  32, 48 },
-        {  9, 39,  50, 39 },
-        { 12, 29,  70, 29 },
-        { 18,  8, 112,  8 },
-        { 24,  0, 128,  0 },
+    /* Pin layout from SDM p. 20 (left/print/right per 128-pin head) +
+     * physical tape width from SDM p. 14 (in 180-dpi dots). */
+    static const struct {
+        uint8_t w, left, print, right, tape_dots;
+    } table[] = {
+        {  4, 52,  24, 52,  24 },  /* 3.5 mm tape — status reports w=4   */
+        {  6, 48,  32, 48,  42 },
+        {  9, 39,  50, 39,  64 },
+        { 12, 29,  70, 29,  84 },
+        { 18,  8, 112,  8, 128 },
+        { 24,  0, 128,  0, 170 },  /* tape physically wider than head    */
     };
     for (size_t i = 0; i < sizeof table / sizeof table[0]; i++) {
         if (table[i].w == width_mm) {
@@ -33,6 +37,7 @@ pt_err_t pt_tape_geometry_tze(uint8_t width_mm, pt_tape_geometry_t *out)
             out->left_margin_pins   = table[i].left;
             out->print_pins         = table[i].print;
             out->right_margin_pins  = table[i].right;
+            out->tape_width_dots    = table[i].tape_dots;
             return PT_OK;
         }
     }
