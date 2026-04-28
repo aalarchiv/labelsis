@@ -33,3 +33,13 @@ add_test(NAME test_mock_transport COMMAND test_mock_transport)
 add_executable(test_session test_session.c)
 target_link_libraries(test_session PRIVATE pt_protocol pt_transport pt_session)
 add_test(NAME test_session COMMAND test_session)
+
+# Hardware-conditional smoke test for the libusb transport — needs a
+# real PT-* plugged in. CTest treats exit 77 as SKIP, so this is a
+# silent no-op without hardware.
+if(PT_HAVE_LIBUSB)
+    add_executable(smoke_libusb smoke_libusb.c)
+    target_link_libraries(smoke_libusb PRIVATE pt_protocol pt_transport pt_session)
+    add_test(NAME smoke_libusb COMMAND smoke_libusb)
+    set_tests_properties(smoke_libusb PROPERTIES SKIP_RETURN_CODE 77)
+endif()

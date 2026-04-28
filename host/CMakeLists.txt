@@ -22,6 +22,26 @@ add_library(pt_session STATIC ${PT_SESSION_SRCS})
 target_include_directories(pt_session PUBLIC ${PT_SESSION_INCLUDE_DIRS})
 target_link_libraries(pt_session PUBLIC pt_protocol pt_transport)
 
+# Optional Linux/macOS userspace transport — if libusb-1.0 is present,
+# pull pt_transport/src/libusb.c into the pt_transport library so the
+# pt_send CLI and the libusb smoke test can use it. The ESP-IDF
+# component build never sees this file.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(LIBUSB libusb-1.0)
+endif()
+if(LIBUSB_FOUND)
+    target_sources(pt_transport PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../components/pt_transport/src/libusb.c)
+    target_include_directories(pt_transport PRIVATE ${LIBUSB_INCLUDE_DIRS})
+    target_link_libraries(pt_transport PUBLIC ${LIBUSB_LIBRARIES})
+    set(PT_HAVE_LIBUSB ON)
+    message(STATUS "libusb-1.0 ${LIBUSB_VERSION} found — pt_transport_libusb enabled")
+else()
+    set(PT_HAVE_LIBUSB OFF)
+    message(STATUS "libusb-1.0 NOT found — pt_transport_libusb disabled")
+endif()
+
 # Test-only support library: oracle fixture loader.
 add_library(fixture STATIC lib/fixture.c)
 target_include_directories(fixture PUBLIC lib)
