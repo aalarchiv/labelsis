@@ -98,6 +98,190 @@ static void client_task(void *arg)
     vTaskDelete(NULL);
 }
 
+/* ----------------------------------------------- P-Lite auto-unstick --
+
+   The PT-* in P-Lite mode is single-function USB Mass Storage; there
+   is no printer-class interface to bind to until the firmware flips
+   itself out of EL mode. Brother's own host library BrUsbPrnIO.dll
+   (BrEsSwitchELtoETempW) does the flip programmatically by writing
+   10 magic bytes through the mass-storage SCSI BOT channel — the
+   firmware sniffs that exact prefix out of the WRITE(10) data-out
+   phase and triggers re-enumeration as PID 0x2061.
+
+   We replicate that here. The 10 bytes are:
+
+     1B 69 61 01 1B 69 55 66 00 00
+     ESC i a 01      = SDM-documented "switch protocol mode → raster"
+     ESC i U f 00 00 = undocumented Brother vendor escape that
+                       triggers the actual EL → E switch
+
+   Reverse-engineered from BrUsbPrnIO.dll v2024 (build path
+   D:\Jenkins\workspace\PrinterSettingTool\BrUsbPrnIO\src\Release\).
+   Verify on real hardware before relying on this in production —
+   the byte sequence is undocumented and could change. */
+
+#define MSC_CLASS    0x08
+#define MSC_SUBCLASS 0x06   /* SCSI                         */
+#define MSC_PROTOCOL 0x50   /* Bulk-Only Transport (BBB/BOT) */
+
+static const uint8_t PLITE_UNSTICK_MAGIC[10] = {
+    0x1B, 0x69, 0x61, 0x01,
+    0x1B, 0x69, 0x55, 0x66,
+    0x00, 0x00,
+};
+
+/* Same descriptor walk shape as pick_endpoints below, but matching
+ * the MSC interface (class 0x08, subclass 0x06, protocol 0x50) rather
+ * than printer-class (0x07). Used only on the unstick path. */
+static int find_msc_endpoints(usb_device_handle_t dev,
+                              uint8_t *intf_num,
+                              uint8_t *ep_in,  uint16_t *mps_in,
+                              uint8_t *ep_out, uint16_t *mps_out)
+{
+    const usb_config_desc_t *cfg = NULL;
+    if (usb_host_get_active_config_descriptor(dev, &cfg) != ESP_OK || !cfg)
+        return -1;
+    const uint8_t *p   = (const uint8_t *)cfg;
+    const uint8_t *end = p + cfg->wTotalLength;
+    p += cfg->bLength;
+
+    bool                   in_target = false;
+    const usb_intf_desc_t *cur       = NULL;
+    bool                   got_in = false, got_out = false;
+
+    while (p + 2 <= end) {
+        uint8_t bLength = p[0], bType = p[1];
+        if (bLength < 2 || p + bLength > end) break;
+
+        if (bType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+            const usb_intf_desc_t *intf = (const usb_intf_desc_t *)p;
+            in_target = (intf->bInterfaceClass    == MSC_CLASS
+                      && intf->bInterfaceSubClass == MSC_SUBCLASS
+                      && intf->bInterfaceProtocol == MSC_PROTOCOL);
+            if (in_target) { cur = intf; got_in = got_out = false; }
+        } else if (in_target && bType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
+            const usb_ep_desc_t *ep = (const usb_ep_desc_t *)p;
+            if ((ep->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK)
+                == USB_BM_ATTRIBUTES_XFER_BULK) {
+                if (ep->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK) {
+                    *ep_in  = ep->bEndpointAddress;
+                    *mps_in = ep->wMaxPacketSize;
+                    got_in  = true;
+                } else {
+                    *ep_out  = ep->bEndpointAddress;
+                    *mps_out = ep->wMaxPacketSize;
+                    got_out  = true;
+                }
+                if (got_in && got_out && cur) {
+                    *intf_num = cur->bInterfaceNumber;
+                    return 0;
+                }
+            }
+        }
+        p += bLength;
+    }
+    return -1;
+}
+
+static void plite_xfer_cb(usb_transfer_t *t)
+{
+    SemaphoreHandle_t sem = (SemaphoreHandle_t)t->context;
+    if (sem) xSemaphoreGive(sem);
+}
+
+/* One-shot transfer wrapper used during the unstick sequence. The
+ * device is brand new (we haven't touched its bulk endpoints before)
+ * so we don't bother with halt/flush/clear on timeout — the next
+ * transfer is the last we care about, and we close the device
+ * unconditionally afterwards. */
+static esp_err_t plite_xfer(usb_transfer_t *xfer,
+                            usb_device_handle_t dev,
+                            uint8_t ep_addr,
+                            const uint8_t *out_buf,
+                            int len,
+                            SemaphoreHandle_t sem)
+{
+    if (out_buf) memcpy(xfer->data_buffer, out_buf, (size_t)len);
+    xfer->num_bytes        = len;
+    xfer->bEndpointAddress = ep_addr;
+    xfer->device_handle    = dev;
+    xfer->callback         = plite_xfer_cb;
+    xfer->context          = sem;
+    if (usb_host_transfer_submit(xfer) != ESP_OK) return ESP_FAIL;
+    if (xSemaphoreTake(sem, pdMS_TO_TICKS(2000)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    return xfer->status == USB_TRANSFER_STATUS_COMPLETED ? ESP_OK : ESP_FAIL;
+}
+
+/* Send the BOT magic-bytes sequence to a freshly-enumerated P-Lite
+ * device. On success the device will re-enumerate as PID 0x2061
+ * within a few seconds; on failure the caller should leave the
+ * "P-Lite seen" hint flag set so the SPA can ask the user to use
+ * the physical slider as a fallback. */
+static esp_err_t plite_unstick(usb_host_client_handle_t client_hdl,
+                               usb_device_handle_t dev)
+{
+    uint8_t  intf, ep_in, ep_out;
+    uint16_t mps_in, mps_out;
+    if (find_msc_endpoints(dev, &intf, &ep_in, &mps_in, &ep_out, &mps_out) != 0) {
+        ESP_LOGW(TAG, "P-Lite: no MSC endpoints");
+        return ESP_FAIL;
+    }
+    if (usb_host_interface_claim(client_hdl, dev, intf, 0) != ESP_OK) {
+        ESP_LOGW(TAG, "P-Lite: MSC interface_claim failed");
+        return ESP_FAIL;
+    }
+
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    usb_transfer_t   *xfer_out = NULL, *xfer_in = NULL;
+    esp_err_t         result = ESP_FAIL;
+    if (!sem) goto cleanup;
+    if (usb_host_transfer_alloc(64, 0, &xfer_out) != ESP_OK) goto cleanup;
+    if (usb_host_transfer_alloc(64, 0, &xfer_in)  != ESP_OK) goto cleanup;
+
+    /* SCSI BOT CBW (31 bytes): WRITE(10) of 1 block, but with
+     * data_transfer_len = 10 — the firmware sniffs the data-out
+     * content rather than honouring the SCSI block count. */
+    static const uint8_t cbw[31] = {
+        /* dCBWSignature "USBC" */ 'U','S','B','C',
+        /* dCBWTag                */ 0xEF, 0xBE, 0xAD, 0xDE,
+        /* dCBWDataTransferLength */ 0x0A, 0x00, 0x00, 0x00,
+        /* bmCBWFlags  = OUT      */ 0x00,
+        /* bCBWLUN                */ 0x00,
+        /* bCBWCBLength = 10      */ 0x0A,
+        /* CBWCB: WRITE(10)       */ 0x2A,
+        /* flags                  */ 0x00,
+        /* LBA = 0                */ 0x00, 0x00, 0x00, 0x00,
+        /* group                  */ 0x00,
+        /* transfer length = 1    */ 0x00, 0x01,
+        /* control                */ 0x00,
+        /* CB pad to 16 bytes     */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+
+    if (plite_xfer(xfer_out, dev, ep_out, cbw, sizeof cbw, sem) != ESP_OK) {
+        ESP_LOGW(TAG, "P-Lite: CBW write failed");
+        goto cleanup;
+    }
+    if (plite_xfer(xfer_out, dev, ep_out,
+                   PLITE_UNSTICK_MAGIC, sizeof PLITE_UNSTICK_MAGIC, sem) != ESP_OK) {
+        /* Often "fails" because the device is already flipping —
+         * keep going to read the CSW so any actual error surfaces. */
+        ESP_LOGD(TAG, "P-Lite: data-out incomplete (likely re-enumerating)");
+    }
+    /* CSW read. Often times out because the device has already
+     * detached to re-enumerate — that's the expected success case. */
+    plite_xfer(xfer_in, dev, ep_in, NULL, 13, sem);
+
+    ESP_LOGI(TAG, "P-Lite: unstick magic sent; awaiting re-enumeration");
+    result = ESP_OK;
+
+cleanup:
+    if (xfer_out) usb_host_transfer_free(xfer_out);
+    if (xfer_in)  usb_host_transfer_free(xfer_in);
+    if (sem)      vSemaphoreDelete(sem);
+    usb_host_interface_release(client_hdl, dev, intf);
+    return result;
+}
+
 /* ----------------------------------------------------- descriptor walk */
 
 /* Search the active config for a printer-class interface (0x07) with
@@ -181,15 +365,19 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
                 if (desc->idProduct == PT_PIDS[i]) { match = true; break; }
         }
         if (!match) {
-            /* Same vendor, P-Lite mode? Flag for the app layer so the
-             * SPA can render a specific hint instead of "unavailable". */
+            /* Same vendor, P-Lite mode? Send the unstick magic over
+             * MSC; the device re-enumerates as PID 0x2061 and the
+             * next NEW_DEV event takes the normal printer path. */
             if (desc->idVendor == PT_VID) {
                 for (size_t i = 0; i < sizeof PT_PIDS_PLITE / sizeof PT_PIDS_PLITE[0]; i++) {
                     if (desc->idProduct == PT_PIDS_PLITE[i]) {
-                        ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) — "
-                                      "slide to E or hold PLite button 2s",
+                        ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) — sending unstick",
                                  desc->idProduct);
                         s_plite_seen = true;
+                        if (plite_unstick(u->client_hdl, dev) != ESP_OK) {
+                            ESP_LOGW(TAG, "P-Lite: auto-recovery failed; "
+                                          "slide to E or hold PLite button 2s");
+                        }
                         break;
                     }
                 }

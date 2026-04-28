@@ -28,7 +28,10 @@ void app_main(void)
         .use_usb_host           = true,   /* try the real printer first;
                                              falls back to mock after the
                                              usb_connect_timeout below */
-        .usb_connect_timeout_ms = 5000,
+        /* Generous timeout: a printer in P-Lite mode triggers our
+         * mass-storage unstick sequence, which takes several seconds
+         * to flip + re-enumerate as the printer-class PID. */
+        .usb_connect_timeout_ms = 12000,
         .reset_gpio_num         = 0,      /* BOOT button on most devkits;
                                              5 s hold wipes Wi-Fi creds */
     };
