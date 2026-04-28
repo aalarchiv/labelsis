@@ -29,3 +29,7 @@ add_test(NAME test_encoder_vs_oracle COMMAND test_encoder_vs_oracle)
 add_executable(test_mock_transport test_mock_transport.c)
 target_link_libraries(test_mock_transport PRIVATE pt_protocol pt_transport)
 add_test(NAME test_mock_transport COMMAND test_mock_transport)
+
+add_executable(test_session test_session.c)
+target_link_libraries(test_session PRIVATE pt_protocol pt_transport pt_session)
+add_test(NAME test_session COMMAND test_session)

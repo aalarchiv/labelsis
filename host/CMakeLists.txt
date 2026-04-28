@@ -9,6 +9,7 @@ add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 # byte-identical code on both targets.
 include(${CMAKE_CURRENT_SOURCE_DIR}/../components/pt_protocol/srcs.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../components/pt_transport/srcs.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../components/pt_session/srcs.cmake)
 
 add_library(pt_protocol STATIC ${PT_PROTOCOL_SRCS})
 target_include_directories(pt_protocol PUBLIC ${PT_PROTOCOL_INCLUDE_DIRS})
@@ -16,6 +17,10 @@ target_include_directories(pt_protocol PUBLIC ${PT_PROTOCOL_INCLUDE_DIRS})
 add_library(pt_transport STATIC ${PT_TRANSPORT_SRCS})
 target_include_directories(pt_transport PUBLIC ${PT_TRANSPORT_INCLUDE_DIRS})
 target_link_libraries(pt_transport PUBLIC pt_protocol)
+
+add_library(pt_session STATIC ${PT_SESSION_SRCS})
+target_include_directories(pt_session PUBLIC ${PT_SESSION_INCLUDE_DIRS})
+target_link_libraries(pt_session PUBLIC pt_protocol pt_transport)
 
 # Test-only support library: oracle fixture loader.
 add_library(fixture STATIC lib/fixture.c)

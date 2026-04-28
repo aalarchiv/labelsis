@@ -25,11 +25,22 @@ extern "C" {
 /* ============================================================== errors == */
 
 typedef enum {
-    PT_OK                =  0,
-    PT_ERR_BUF_TOO_SMALL = -1,  /* output buffer cannot hold the result */
-    PT_ERR_INVALID_ARG   = -2,  /* unknown enum / unsupported tape / etc. */
-    PT_ERR_BAD_LEN       = -3,  /* status buffer length != 32             */
-    PT_ERR_BAD_MAGIC     = -4,  /* status[0] (print-head mark) != 0x80    */
+    PT_OK                  =   0,
+    PT_ERR_BUF_TOO_SMALL   =  -1,  /* output buffer cannot hold the result        */
+    PT_ERR_INVALID_ARG     =  -2,  /* unknown enum / unsupported tape / etc.      */
+    PT_ERR_BAD_LEN         =  -3,  /* status buffer length != 32                  */
+    PT_ERR_BAD_MAGIC       =  -4,  /* status[0] (print-head mark) != 0x80         */
+    /* Session-level runtime errors (used by pt_session). */
+    PT_ERR_TRANSPORT       =  -5,  /* transport send/recv failed                  */
+    PT_ERR_TIMEOUT         =  -6,  /* timed out waiting for status                */
+    PT_ERR_NO_MEDIA        =  -7,  /* error1 bit 0                                */
+    PT_ERR_CUTTER_JAM      =  -8,  /* error1 bit 2                                */
+    PT_ERR_WEAK_BATTERY    =  -9,  /* error1 bit 3                                */
+    PT_ERR_HIGH_VOLTAGE    = -10,  /* error1 bit 6                                */
+    PT_ERR_REPLACE_MEDIA   = -11,  /* error2 bit 0                                */
+    PT_ERR_COVER_OPEN      = -12,  /* error2 bit 4                                */
+    PT_ERR_OVERHEAT        = -13,  /* error2 bit 5                                */
+    PT_ERR_MEDIA_MISMATCH  = -14,  /* loaded tape ≠ requested width               */
 } pt_err_t;
 
 /* =============================================================== model == */
