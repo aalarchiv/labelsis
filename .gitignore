@@ -3,3 +3,26 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# ESP-IDF build artifacts
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Host build artifacts
+build-host/
+build-oracle/
+
+# Editor scratch
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Third-party reference materials (Brother SDM PDF, OSS clones, installers).
+# 300+ MB and includes embedded .git repos — kept local. Track refs/README.md
+# so contributors know what should live here.
+refs/*
+!refs/README.md
