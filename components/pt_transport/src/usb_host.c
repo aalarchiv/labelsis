@@ -185,18 +185,8 @@ static int find_msc_endpoints(usb_device_handle_t dev,
 
 static void plite_xfer_cb(usb_transfer_t *t)
 {
-    /* Use the FromISR variant: esp-idf v5.5's usb_host invokes
-     * transfer callbacks while holding a port-mux spinlock; the
-     * regular xSemaphoreGive re-enters that critical section and
-     * trips the spinlock_acquire assert. The FromISR path skips
-     * vPortEnterCritical and is safe from any context. */
     SemaphoreHandle_t sem = (SemaphoreHandle_t)t->context;
-    if (sem) {
-        BaseType_t hpw = pdFALSE;
-        xSemaphoreGiveFromISR(sem, &hpw);
-        /* Not actually in ISR, so nothing meaningful to yield to. */
-        (void)hpw;
-    }
+    if (sem) xSemaphoreGive(sem);
 }
 
 /* One-shot transfer wrapper used during the unstick sequence. On
@@ -230,6 +220,18 @@ static esp_err_t plite_xfer(usb_transfer_t *xfer,
     }
     return xfer->status == USB_TRANSFER_STATUS_COMPLETED ? ESP_OK : ESP_FAIL;
 }
+
+/* The unstick logic lives in its own task because `on_client_event`
+ * runs *inside* the same `client_task` that drives
+ * `usb_host_client_handle_events` — and that's the only thing that
+ * dispatches transfer-completion callbacks. Blocking on a semaphore
+ * inside on_client_event deadlocks the very loop that would have
+ * given the semaphore. A separate task can wait freely while
+ * client_task keeps pumping events. */
+typedef struct {
+    usb_host_client_handle_t client_hdl;
+    usb_device_handle_t      dev;
+} plite_task_args_t;
 
 /* Send the BOT magic-bytes sequence to a freshly-enumerated P-Lite
  * device. On success the device will re-enumerate as PID 0x2061
@@ -330,6 +332,21 @@ cleanup:
     return result;
 }
 
+/* Spawned from on_client_event when a P-Lite-PID device shows up.
+ * Owns the device handle: closes it before exit so the host stack
+ * can recycle the address for the re-enumerated printer-class PID. */
+static void plite_unstick_task(void *arg)
+{
+    plite_task_args_t *args = arg;
+    if (plite_unstick(args->client_hdl, args->dev) != ESP_OK) {
+        ESP_LOGW(TAG, "P-Lite: auto-recovery failed; "
+                      "slide to E or hold PLite button 2s");
+    }
+    usb_host_device_close(args->client_hdl, args->dev);
+    free(args);
+    vTaskDelete(NULL);
+}
+
 /* ----------------------------------------------------- descriptor walk */
 
 /* Search the active config for a printer-class interface (0x07) with
@@ -413,18 +430,29 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
                 if (desc->idProduct == PT_PIDS[i]) { match = true; break; }
         }
         if (!match) {
-            /* Same vendor, P-Lite mode? Send the unstick magic over
-             * MSC; the device re-enumerates as PID 0x2061 and the
-             * next NEW_DEV event takes the normal printer path. */
+            /* Same vendor, P-Lite mode? Hand the device off to a
+             * dedicated task that sends the unstick magic. We can't
+             * do it inline here: on_client_event runs *inside*
+             * client_task (which drives handle_events and dispatches
+             * transfer callbacks), so any blocking wait would
+             * deadlock the very loop that gives the semaphore. */
             if (desc->idVendor == PT_VID) {
                 for (size_t i = 0; i < sizeof PT_PIDS_PLITE / sizeof PT_PIDS_PLITE[0]; i++) {
                     if (desc->idProduct == PT_PIDS_PLITE[i]) {
-                        ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) — sending unstick",
+                        ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) — spawning unstick task",
                                  desc->idProduct);
                         s_plite_seen = true;
-                        if (plite_unstick(u->client_hdl, dev) != ESP_OK) {
-                            ESP_LOGW(TAG, "P-Lite: auto-recovery failed; "
-                                          "slide to E or hold PLite button 2s");
+                        plite_task_args_t *args = calloc(1, sizeof *args);
+                        if (args) {
+                            args->client_hdl = u->client_hdl;
+                            args->dev        = dev;
+                            if (xTaskCreate(plite_unstick_task, "plite_uns",
+                                            4096, args,
+                                            tskIDLE_PRIORITY + 5, NULL) == pdPASS) {
+                                /* Task owns dev now; do NOT close it here. */
+                                return;
+                            }
+                            free(args);
                         }
                         break;
                     }
