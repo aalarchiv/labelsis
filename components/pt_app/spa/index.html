@@ -9,14 +9,17 @@
 * { box-sizing: border-box; }
 body { margin:0; font:14px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
 header { position:relative; padding:.75rem 1rem; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:.75rem; }
-h1 { margin:0; font-size:1rem; font-weight:600; }
+h1 { margin:0; font-size:1rem; font-weight:600; cursor:pointer; user-select:none; padding:.25rem .5rem; border-radius:4px; transition:background .1s; }
+h1:hover { background:rgba(255,255,255,.04); }
+h1.online::before  { content:"● "; color:var(--ok); }
+h1.offline::before { content:"● "; color:var(--err); }
+h1.busy::before    { content:"● "; color:var(--muted); }
 nav { display:flex; gap:.25rem; }
 nav a { color:var(--muted); text-decoration:none; padding:.4rem .75rem; border-radius:4px; font-size:.9rem; }
 nav a.active { color:var(--fg); background:rgba(88,166,255,.12); }
 nav a:hover { color:var(--fg); }
 .burger { display:none; background:transparent; border:0; cursor:pointer; padding:.4rem; margin-left:auto; }
 .burger span { display:block; width:22px; height:2px; background:var(--fg); margin:4px 0; border-radius:1px; }
-#conn { margin-left:auto; font-size:.85rem; }
 main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-direction:column; gap:1rem; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
@@ -46,24 +49,22 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
 </head>
 <body>
 <header>
-  <h1>pt700</h1>
+  <h1 id="title" title="click to toggle status">pt700</h1>
   <nav id="nav">
     <a href="#print"    data-view="print" class="active">Print</a>
     <a href="#wifi"     data-view="wifi">Wi-Fi</a>
     <a href="#settings" data-view="settings">Settings</a>
   </nav>
-  <span id="conn" class="dim">connecting…</span>
   <button id="burger" class="burger" aria-label="menu" aria-expanded="false">
     <span></span><span></span><span></span>
   </button>
 </header>
 <main>
+  <div id="status-panel" class="panel" hidden>
+    <h2>Printer</h2>
+    <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
+  </div>
   <section id="view-print">
-    <div class="panel">
-      <h2>Printer</h2>
-      <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
-    </div>
-
     <div class="panel">
       <h2>Label</h2>
       <div class="row" style="margin-bottom:.5rem">
@@ -184,19 +185,24 @@ async function refreshStatus() {
     const r = await fetch(apiURL("/api/status"));
     const j = await r.json();
     printer = j;
-    setConn(j.ok ? "online" : "error", j.ok);
+    setConnState(j);
     renderStatus(j);
     redraw();
   } catch (e) {
-    setConn("offline", false);
+    setConnState(null);
   }
 }
 
-function setConn(text, ok) {
-  const el = document.getElementById("conn");
-  el.textContent = text;
-  el.className = ok ? "kv-ok" : "kv-err";
+/* Drive the title-bar dot. Green only when there's a real printer
+ * attached AND no error bits set. Anything else (mock fallback,
+ * P-Lite mode, network down, error1/2 bits) is red. */
+function setConnState(j) {
+  const h1 = document.getElementById("title");
+  const ok = j && j.ok && j.transport === "usb_host"
+             && !j.error1 && !j.error2;
+  h1.className = ok ? "online" : "offline";
 }
+
 
 function renderStatus(j) {
   const g = document.getElementById("status");
@@ -547,6 +553,14 @@ document.getElementById("burger").addEventListener("click", () => {
   const nav = document.getElementById("nav");
   const open = nav.classList.toggle("open");
   document.getElementById("burger").setAttribute("aria-expanded", open ? "true" : "false");
+});
+
+/* h1 doubles as the connection indicator (green/red dot via CSS) and
+ * a click target that toggles the status panel — keeps the print
+ * panel uncluttered while still being one tap away from full status. */
+document.getElementById("title").addEventListener("click", () => {
+  const p = document.getElementById("status-panel");
+  p.hidden = !p.hidden;
 });
 
 /* ----- Wi-Fi tab (scan + save credentials) ---------------------- */
