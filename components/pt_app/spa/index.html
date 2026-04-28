@@ -69,10 +69,11 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
       <h2>Label</h2>
       <canvas id="preview" width="600" height="128"></canvas>
       <div class="row" style="margin-top:.75rem">
-        <button id="add-text"  class="secondary" type="button">+ text</button>
-        <button id="add-image" class="secondary" type="button">+ image</button>
-        <input  id="image-file" type="file" accept="image/*" hidden>
-        <button id="el-delete" class="secondary" type="button" disabled>delete</button>
+        <button id="add-text"    class="secondary" type="button">+ text</button>
+        <button id="add-image"   class="secondary" type="button">+ image</button>
+        <input  id="image-file"  type="file" accept="image/*" hidden>
+        <button id="add-barcode" class="secondary" type="button">+ barcode</button>
+        <button id="el-delete"   class="secondary" type="button" disabled>delete</button>
         <span style="flex:1"></span>
         <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
         <label><input id="mirror"   type="checkbox"> mirror</label>
@@ -101,6 +102,28 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
           <input id="el-x" type="number" min="0" style="max-width:90px">
           <label>y</label>
           <input id="el-y" type="number" min="0" max="127" style="max-width:90px">
+        </div>
+      </div>
+
+      <div id="props-barcode" hidden>
+        <div class="row" style="margin-bottom:.5rem">
+          <label>text</label>
+          <input id="bc-text" type="text" placeholder="ABC123 (Code128) or 12-digit (EAN13)">
+        </div>
+        <div class="row" style="margin-bottom:.5rem">
+          <label>type</label>
+          <select id="bc-sym">
+            <option value="code128b">Code 128 (B)</option>
+            <option value="ean13">EAN-13</option>
+          </select>
+          <label>height</label>
+          <input id="bc-h" type="number" min="16" max="128" style="max-width:90px">
+        </div>
+        <div class="row">
+          <label>x</label>
+          <input id="bc-x" type="number" min="0" style="max-width:90px">
+          <label>y</label>
+          <input id="bc-y" type="number" min="0" max="127" style="max-width:90px">
         </div>
       </div>
 
@@ -416,9 +439,136 @@ function drawImage(ctx, el) {
   }
 }
 
+/* --- barcodes: Code128B + EAN13 ----------------------------------
+ *
+ * Ported from niimblue/src/utils/barcode.ts (MIT). Two transcription
+ * typos in the upstream source — ASCII 36 ('$') and 41 (')') had 'h'
+ * characters in the bit pattern — are corrected here to '1'.
+ *
+ * Patterns are 11 modules each (stop is 13). 1 = black bar, 0 = white
+ * bar. Module width is 1 canvas pixel = 1 print dot at 180 dpi → ~0.14
+ * mm per module, sufficient for typical barcode scanners.
+ *
+ * Code128 indexing:
+ *   0..94   = ASCII 32..126
+ *   95..98  = US/DEL, FNC3, FNC2, SHIFT
+ *   99..104 = CODEC, CODEB, CODEA, FNC1, StartA, StartB, StartC
+ *   106     = Stop
+ */
+const CODE128_BP = [
+  "11011001100","11001101100","11001100110","10010011000",
+  "10010001100","10001001100","10011001000","10011000100",
+  "10001100100","11001001000","11001000100","11000100100",
+  "10110011100","10011011100","10011001110","10111001100",
+  "10011101100","10011100110","11001110010","11001011100",
+  "11001001110","11011100100","11001110100","11101101110",
+  "11101001100","11100101100","11100100110","11101100100",
+  "11100110100","11100110010","11011011000","11011000110",
+  "11000110110","10100011000","10001011000","10001000110",
+  "10110001000","10001101000","10001100010","11010001000",
+  "11000101000","11000100010","10110111000","10110001110",
+  "10001101110","10111011000","10111000110","10001110110",
+  "11101110110","11010001110","11000101110","11011101000",
+  "11011100010","11011101110","11101011000","11101000110",
+  "11100010110","11101101000","11101100010","11100011010",
+  "11101111010","11001000010","11110001010","10100110000",
+  "10100001100","10010110000","10010000110","10000101100",
+  "10000100110","10110010000","10110000100","10011010000",
+  "10011000010","10000110100","10000110010","11000010010",
+  "11001010000","11110111010","11000010100","10001111010",
+  "10100111100","10010111100","10010011110","10111100100",
+  "10011110100","10011110010","11110100100","11110010100",
+  "11110010010","11011011110","11011110110","11110110110",
+  "10101111000","10100011110","10001011110","10111101000",
+  "10111100010","11110101000","11110100010","10111011110",
+  "10111101110","11101011110","11110101110","11010000100",
+  "11010010000","11010011100",
+  "1100011101011",  /* [106] Stop pattern (13 modules) */
+];
+
+function code128b(data) {
+  if (data.length > 229) throw new Error("Code128B: data too long");
+  const out = [CODE128_BP[104]];      /* Start B */
+  let cs = 104;
+  for (let i = 0; i < data.length; i++) {
+    const ch = data.charCodeAt(i);
+    if (ch < 32 || ch > 126) throw new Error("Code128B: only ASCII 32-126");
+    const id = ch - 32;
+    out.push(CODE128_BP[id]);
+    cs += (i + 1) * id;
+  }
+  out.push(CODE128_BP[cs % 103]);    /* Checksum */
+  out.push(CODE128_BP[106]);         /* Stop */
+  return out.join("");
+}
+
+const EAN13_DIGIT_PATTERNS = {
+  "0":["0001101","0100111","1110010"], "1":["0011001","0110011","1100110"],
+  "2":["0010011","0011011","1101100"], "3":["0111101","0100001","1000010"],
+  "4":["0100011","0011101","1011100"], "5":["0110001","0111001","1001110"],
+  "6":["0101111","0000101","1010000"], "7":["0111011","0010001","1000100"],
+  "8":["0110111","0001001","1001000"], "9":["0001011","0010111","1110100"],
+};
+const EAN13_FIRST_DIGIT_MASKS = {
+  "0":"AAAAAA","1":"AABABB","2":"AABBAB","3":"AABBBA",
+  "4":"ABAABB","5":"ABBAAB","6":"ABBBAA","7":"ABABAB",
+  "8":"ABABBA","9":"ABBABA",
+};
+
+function ean13(data) {
+  if (data.length > 13) throw new Error("EAN13: too long (12-13 digits)");
+  if (data.length < 12) data = data.padEnd(12, "0");
+  if (!/^\d+$/.test(data)) throw new Error("EAN13: digits only");
+  let cs = 0;
+  for (let i = 0; i < 12; i++) cs += (i % 2 === 0 ? 1 : 3) * +data[i];
+  cs = (10 - (cs % 10)) % 10;
+  if (data.length === 12) data += cs;
+  else if (+data[12] !== cs) throw new Error("EAN13: bad checksum");
+  let bits = "101";  /* start guard */
+  const mask = EAN13_FIRST_DIGIT_MASKS[data[0]];
+  for (let i = 1; i < 7; i++) {
+    const tab = mask.charCodeAt(i - 1) - 65;  /* 'A'=0 'B'=1 (left side) */
+    bits += EAN13_DIGIT_PATTERNS[data[i]][tab];
+  }
+  bits += "01010";   /* center guard */
+  for (let i = 7; i < 13; i++) bits += EAN13_DIGIT_PATTERNS[data[i]][2];  /* C */
+  bits += "101";    /* stop guard */
+  return { text: data, bits };
+}
+
+/* Render the bit pattern as 1-module-wide vertical bars. */
+function drawBarcode(ctx, el) {
+  let bits, label;
+  try {
+    if (el.symbology === "ean13") {
+      const r = ean13(el.text); bits = r.bits; label = r.text;
+    } else {
+      bits = code128b(el.text); label = el.text;
+    }
+  } catch (e) {
+    /* Render an error placeholder so the user sees something instead
+     * of an invisible element when their input is invalid. */
+    el._w = 80; el._h = el.h | 0;
+    ctx.fillStyle = "#fdd";
+    ctx.fillRect(el.x, el.y, el._w, el._h);
+    ctx.fillStyle = "#900";
+    ctx.font = "10px sans-serif";
+    ctx.textBaseline = "top";
+    ctx.fillText(e.message.slice(0, 18), el.x + 2, el.y + 2);
+    return;
+  }
+  ctx.fillStyle = "#000";
+  for (let i = 0; i < bits.length; i++) {
+    if (bits[i] === "1") ctx.fillRect(el.x + i, el.y, 1, el.h);
+  }
+  el._w = bits.length;
+  el._h = el.h | 0;
+}
+
 function drawElement(ctx, el) {
-  if (el.type === "text")  drawText(ctx, el);
-  if (el.type === "image") drawImage(ctx, el);
+  if (el.type === "text")    drawText(ctx, el);
+  if (el.type === "image")   drawImage(ctx, el);
+  if (el.type === "barcode") drawBarcode(ctx, el);
 }
 
 function elementBounds(el) {
@@ -689,9 +839,10 @@ function selectElement(id) {
 
 function syncPropsPanel() {
   const el = elementById(selectedId);
-  document.getElementById("props-empty").hidden = !!el;
-  document.getElementById("props-text").hidden  = !el || el.type !== "text";
-  document.getElementById("props-image").hidden = !el || el.type !== "image";
+  document.getElementById("props-empty").hidden   = !!el;
+  document.getElementById("props-text").hidden    = !el || el.type !== "text";
+  document.getElementById("props-image").hidden   = !el || el.type !== "image";
+  document.getElementById("props-barcode").hidden = !el || el.type !== "barcode";
   if (el && el.type === "text") {
     document.getElementById("text").value = el.text;
     document.getElementById("size").value = el.size;
@@ -705,6 +856,12 @@ function syncPropsPanel() {
     document.getElementById("img-h").value = el.h;
     document.getElementById("img-x").value = Math.round(el.x);
     document.getElementById("img-y").value = Math.round(el.y);
+  } else if (el && el.type === "barcode") {
+    document.getElementById("bc-text").value = el.text;
+    document.getElementById("bc-sym").value  = el.symbology;
+    document.getElementById("bc-h").value    = el.h;
+    document.getElementById("bc-x").value    = Math.round(el.x);
+    document.getElementById("bc-y").value    = Math.round(el.y);
   }
 }
 
@@ -731,6 +888,11 @@ bindPropInput("img-threshold", "threshold", v => parseInt(v, 10));
 bindPropInput("img-h",         "h",         v => Math.max(8, Math.min(128, parseInt(v, 10) || 8)));
 bindPropInput("img-x",         "x",         v => parseInt(v, 10) || 0);
 bindPropInput("img-y",         "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+bindPropInput("bc-text",       "text");
+bindPropInput("bc-sym",        "symbology");
+bindPropInput("bc-h",          "h",         v => Math.max(16, Math.min(128, parseInt(v, 10) || 16)));
+bindPropInput("bc-x",          "x",         v => parseInt(v, 10) || 0);
+bindPropInput("bc-y",          "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
 
 function rightmostX() {
   let r = 14;
@@ -750,6 +912,18 @@ document.getElementById("add-text").addEventListener("click", () => {
 
 document.getElementById("add-image").addEventListener("click", () => {
   document.getElementById("image-file").click();
+});
+
+document.getElementById("add-barcode").addEventListener("click", () => {
+  const el = {
+    id: nextId++, type: "barcode",
+    x: rightmostX(), y: 24,
+    h: 60,
+    symbology: "code128b",
+    text: "ABC123",
+  };
+  elements.push(el);
+  selectElement(el.id);
 });
 
 document.getElementById("image-file").addEventListener("change", async e => {
