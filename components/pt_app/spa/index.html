@@ -88,11 +88,11 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
     <details class="panel" id="tpl-panel">
       <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;">Template &amp; CSV data</summary>
       <p class="muted" style="margin:.75rem 0 .5rem;">Paste CSV with a header row. Use <code>{column}</code> in the
-      label text above to substitute. Optional <code>$times</code>
+      label text above to substitute. Optional <code>$copies</code>
       column repeats a row N times in batch print. Date helpers:
       <code>{$dt|YYYY-MM-DD}</code>, <code>{$time|HH:mm}</code>,
       <code>{$now}</code> (ISO) — work without CSV too.</p>
-      <textarea id="csv" rows="6" placeholder="name,$times&#10;Alice,2&#10;Bob,1"
+      <textarea id="csv" rows="6" placeholder="name,$copies&#10;Alice,2&#10;Bob,1"
                 style="width:100%; background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical;"></textarea>
       <div class="row" style="margin-top:.5rem;">
         <span class="muted" id="tpl-cols">no data</span>
@@ -320,7 +320,7 @@ function log(msg, ok) {
 
 /* ----- template engine — vanilla port of niimblue's CSV templating
  * (refs/niimblue/src/utils/canvas_preprocess.ts, MIT). Supports
- * {column} substitution and a $times column for per-row repeat count.
+ * {column} substitution and a $copies column for per-row repeat count.
  * Date helpers and richer formats can land later. ----------------- */
 
 let csvData = { headers: [], data: [] };
@@ -399,10 +399,27 @@ function csvRender() {
   document.getElementById("tpl-cols").textContent = cols.length
     ? `columns: ${cols.map(c => "{" + c + "}").join("  ")}`
     : "no data";
-  document.getElementById("tpl-rowinfo").textContent = csvData.data.length
-    ? `row ${csvCurrentRow + 1} of ${csvData.data.length}`
-    : "—";
-  document.getElementById("print-all").hidden = csvData.data.length === 0;
+
+  /* prev/next walks by row, but the indicator and "Print all" button
+   * count actual labels — a row with $copies=5 advances the displayed
+   * number by 5, not 1. Matches what doPrintAll() actually emits. */
+  const info = document.getElementById("tpl-rowinfo");
+  const allBtn = document.getElementById("print-all");
+  if (csvData.data.length) {
+    const times = csvData.data.map(r => Math.max(1, parseInt(r["$copies"], 10) || 1));
+    const total = times.reduce((s, t) => s + t, 0);
+    const start = times.slice(0, csvCurrentRow).reduce((s, t) => s + t, 0) + 1;
+    const end   = start + times[csvCurrentRow] - 1;
+    info.textContent = (start === end)
+      ? `label ${start} of ${total}`
+      : `labels ${start}–${end} of ${total}`;
+    allBtn.textContent = `Print all ${total} labels`;
+    allBtn.hidden = false;
+  } else {
+    info.textContent = "—";
+    allBtn.textContent = "Print all rows";
+    allBtn.hidden = true;
+  }
 }
 
 function csvUpdate() {
@@ -419,11 +436,11 @@ async function doPrintAll() {
   btn.disabled = printBtn.disabled = true;
   let ok = 0, fail = 0;
   const total = csvData.data.reduce((s, r) =>
-      s + Math.max(1, parseInt(r["$times"], 10) || 1), 0);
+      s + Math.max(1, parseInt(r["$copies"], 10) || 1), 0);
   try {
     for (let i = 0; i < csvData.data.length; i++) {
       csvCurrentRow = i; csvRender(); redraw();
-      const copies = Math.max(1, parseInt(csvData.data[i]["$times"], 10) || 1);
+      const copies = Math.max(1, parseInt(csvData.data[i]["$copies"], 10) || 1);
       for (let j = 0; j < copies; j++) {
         log(`row ${i+1}/${csvData.data.length} copy ${j+1}/${copies}  (total ${ok+fail+1}/${total})`);
         try { await postPrint(); ok++; }
