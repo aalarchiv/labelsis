@@ -210,7 +210,10 @@ document.getElementById("size").addEventListener("input", redraw);
 document.getElementById("print").addEventListener("click", doPrint);
 
 refreshStatus();
-setInterval(refreshStatus, 30000);
+/* Poll every 3 s. Status changes (cover open, tape change, error
+ * clears) need to surface fast enough to feel live; 3 s is a few
+ * dozen requests/min, well within what the printer + ESP can handle. */
+setInterval(refreshStatus, 3000);
 redraw();
 </script>
 </body>
