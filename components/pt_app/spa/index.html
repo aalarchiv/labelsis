@@ -67,16 +67,11 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
   <section id="view-print">
     <div class="panel">
       <h2>Label</h2>
-      <div class="row" style="margin-bottom:.5rem">
-        <input id="text" type="text" placeholder='Type text — use {column} to substitute from CSV below' value="hello">
-      </div>
-      <div class="row" style="margin-bottom:.75rem">
-        <label>size</label>
-        <input id="size" type="range" min="20" max="120" value="80">
-        <span id="size-val" class="dim">80px</span>
-      </div>
       <canvas id="preview" width="600" height="128"></canvas>
       <div class="row" style="margin-top:.75rem">
+        <button id="add-text" class="secondary" type="button">+ text</button>
+        <button id="el-delete" class="secondary" type="button" disabled>delete</button>
+        <span style="flex:1"></span>
         <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
         <label><input id="mirror"   type="checkbox"> mirror</label>
         <label><input id="chain"    type="checkbox"> chain</label>
@@ -84,6 +79,28 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
         <button id="print-all" class="secondary" hidden>Print all rows</button>
       </div>
       <div id="log"></div>
+    </div>
+
+    <div class="panel" id="props-panel">
+      <h2 id="props-title">Element</h2>
+      <div id="props-empty" class="muted">Click an element on the canvas to edit it, or hit <b>+ text</b> to add one.</div>
+      <div id="props-text" hidden>
+        <div class="row" style="margin-bottom:.5rem">
+          <label>text</label>
+          <input id="text" type="text" placeholder='Type text — use {column} for CSV substitution'>
+        </div>
+        <div class="row" style="margin-bottom:.5rem">
+          <label>size</label>
+          <input id="size" type="range" min="20" max="120" value="80">
+          <span id="size-val" class="dim">80px</span>
+        </div>
+        <div class="row">
+          <label>x</label>
+          <input id="el-x" type="number" min="0" style="max-width:90px">
+          <label>y</label>
+          <input id="el-y" type="number" min="0" max="127" style="max-width:90px">
+        </div>
+      </div>
     </div>
 
     <details class="panel" id="tpl-panel">
@@ -232,40 +249,110 @@ function renderStatus(j) {
   }
 }
 
-function redraw() {
-  const c    = document.getElementById("preview");
-  const text = renderTextForPreview();
-  const size = parseInt(document.getElementById("size").value, 10);
-  document.getElementById("size-val").textContent = size + "px";
+/* ----- label model: positioned elements --------------------------
+ *
+ * Each element is a {type, x, y, ...params}. Elements render in
+ * array order (last drawn = topmost). x/y are the element's anchor
+ * in canvas pixels (= 180-dpi dots). For text, anchor = top-left.
+ * Image/QR/barcode types land in their own follow-up issues; this
+ * scaffolding is type-dispatched so adding them is a render-fn +
+ * a property-panel section, not a rewrite.
+ */
+const HEAD_PX = 128;          /* PT-* head height */
+let elements  = [];
+let selectedId = null;
+let nextId    = 1;
 
-  const tape    = printer && printer.ok ? TAPES[printer.media_width_mm] : TAPES[24];
-  const headPx  = 128;
-  const printPx = tape ? tape.print : 128;
+function defaultText() {
+  return { id: nextId++, type: "text", x: 14, y: 0, text: "hello", size: 80 };
+}
+
+function elementById(id) {
+  return elements.find(e => e.id === id);
+}
+
+/* Render text into the canvas context and populate _w/_h on the
+ * element for hit-testing later. The text value is run through
+ * substitute() so {col} / {$dt} / etc. work in the live preview. */
+function drawText(ctx, el) {
+  const value = substitute(el.text, csvData.data[csvCurrentRow] || {});
+  ctx.font = `${el.size}px sans-serif`;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#000";
+  ctx.fillText(value, el.x, el.y);
+  /* approximate height: most fonts the descent + ascent ~ size; we
+   * pad a bit so hit-test feels generous. */
+  el._w = Math.ceil(ctx.measureText(value).width);
+  el._h = Math.ceil(el.size * 1.1);
+}
+
+function drawElement(ctx, el) {
+  if (el.type === "text") drawText(ctx, el);
+}
+
+function elementBounds(el) {
+  return { x: el.x, y: el.y, w: el._w || 0, h: el._h || 0 };
+}
+
+/* Walk back-to-front so the topmost (last-drawn) element wins ties. */
+function hitTest(x, y) {
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const b = elementBounds(elements[i]);
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return elements[i];
+  }
+  return null;
+}
+
+/* forPrint=true skips the UI overlays (margin tint, selection ring)
+ * so packRaster reads only the elements that should actually print.
+ * The current overlay colors threshold-to-white anyway, but this
+ * keeps the print path robust to future palette changes. */
+function redraw(forPrint = false) {
+  const c    = document.getElementById("preview");
+  const ctx  = c.getContext("2d");
+  const tape = printer && printer.ok ? TAPES[printer.media_width_mm] : TAPES[24];
+  const printPx  = tape ? tape.print  : 128;
   const marginPx = tape ? tape.margin : 0;
 
-  // Measure text width at the chosen size, compute canvas width with
-  // a 14-dot leading margin matching the default pt_session option.
-  const ctx = c.getContext("2d");
-  ctx.font = `${size}px sans-serif`;
-  const width = Math.max(40, Math.ceil(ctx.measureText(text).width) + 28);
-  c.width  = width;
-  c.height = headPx;
+  /* First pass: dry-run draw on a scratch canvas to measure widths
+   * so we can size the visible canvas to fit the rightmost element. */
+  const scratch = document.createElement("canvas");
+  scratch.width = scratch.height = HEAD_PX;
+  const sctx = scratch.getContext("2d");
+  let maxRight = 40;
+  for (const el of elements) {
+    drawElement(sctx, el);
+    const b = elementBounds(el);
+    if (b.x + b.w > maxRight) maxRight = b.x + b.w;
+  }
 
-  // White background, then black text.
+  c.width  = Math.ceil(maxRight) + 14;
+  c.height = HEAD_PX;
+  /* White ground, then elements, then UI overlays. */
   ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, width, headPx);
-  ctx.fillStyle = "#000";
-  ctx.font = `${size}px sans-serif`;
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "left";
-  // Centre vertically inside the print area; render only into print pins.
-  ctx.fillText(text, 14, marginPx + printPx / 2);
+  ctx.fillRect(0, 0, c.width, c.height);
+  for (const el of elements) drawElement(ctx, el);
 
-  // Indicate the non-printable margins on the preview only (these are
-  // NOT sent to the printer, they're a UI hint).
-  ctx.fillStyle = "rgba(255,80,80,.18)";
-  ctx.fillRect(0, 0, width, marginPx);
-  ctx.fillRect(0, marginPx + printPx, width, marginPx);
+  if (forPrint) return;
+
+  /* Non-printable tape margins (UI hint only — NOT sent to printer). */
+  if (marginPx) {
+    ctx.fillStyle = "rgba(255,80,80,.18)";
+    ctx.fillRect(0, 0, c.width, marginPx);
+    ctx.fillRect(0, marginPx + printPx, c.width, marginPx);
+  }
+
+  /* Selection ring on top. */
+  const sel = elementById(selectedId);
+  if (sel) {
+    const b = elementBounds(sel);
+    ctx.strokeStyle = "#58a6ff";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+    ctx.setLineDash([]);
+  }
 }
 
 /* Pack the current canvas to the 16-byte-per-raster-row layout
@@ -290,7 +377,9 @@ function packRaster(canvas) {
 
 async function postPrint() {
   const c    = document.getElementById("preview");
+  redraw(true);              /* clean canvas: elements only */
   const body = packRaster(c);
+  redraw();                  /* restore overlay UI */
   const headers = {
     "Content-Type":   "application/octet-stream",
     "X-Auto-Cut":     document.getElementById("auto-cut").checked.toString(),
@@ -393,13 +482,6 @@ function formatDate(d, fmt) {
     .replace(/ss/g,   pad(d.getSeconds()));
 }
 
-function renderTextForPreview() {
-  const tpl = document.getElementById("text").value || "";
-  const row = csvData.data[csvCurrentRow];
-  /* substitute() always runs so $dt/$now/$time work even without CSV. */
-  return substitute(tpl, row || {});
-}
-
 function csvRender() {
   const cols = csvData.headers.filter(h => h && !h.startsWith("$"));
   document.getElementById("tpl-cols").textContent = cols.length
@@ -465,8 +547,102 @@ async function doPrintAll() {
   }
 }
 
-document.getElementById("text").addEventListener("input", redraw);
-document.getElementById("size").addEventListener("input", redraw);
+/* Property panel ↔ selected element. Inputs read/write the
+ * currently-selected element; if nothing's selected they're
+ * inert (the props-empty hint shows instead of the form). */
+function selectElement(id) {
+  selectedId = id;
+  syncPropsPanel();
+  document.getElementById("el-delete").disabled = (id == null);
+  redraw();
+}
+
+function syncPropsPanel() {
+  const el = elementById(selectedId);
+  document.getElementById("props-empty").hidden = !!el;
+  document.getElementById("props-text").hidden  = !el || el.type !== "text";
+  if (el && el.type === "text") {
+    document.getElementById("text").value = el.text;
+    document.getElementById("size").value = el.size;
+    document.getElementById("size-val").textContent = el.size + "px";
+    document.getElementById("el-x").value = Math.round(el.x);
+    document.getElementById("el-y").value = Math.round(el.y);
+  }
+}
+
+function bindPropInput(id, key, parseFn) {
+  document.getElementById(id).addEventListener("input", e => {
+    const el = elementById(selectedId);
+    if (!el) return;
+    el[key] = parseFn ? parseFn(e.target.value) : e.target.value;
+    if (id === "size") document.getElementById("size-val").textContent = el.size + "px";
+    redraw();
+  });
+}
+bindPropInput("text", "text");
+bindPropInput("size", "size", v => parseInt(v, 10));
+bindPropInput("el-x", "x",    v => parseInt(v, 10) || 0);
+bindPropInput("el-y", "y",    v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+
+document.getElementById("add-text").addEventListener("click", () => {
+  const el = defaultText();
+  /* Place new elements just to the right of the rightmost existing
+   * one so they're visible on first add. */
+  let rightmost = 14;
+  for (const e of elements) {
+    const b = elementBounds(e);
+    if (b.x + b.w > rightmost) rightmost = b.x + b.w + 12;
+  }
+  el.x = rightmost;
+  elements.push(el);
+  selectElement(el.id);
+});
+
+document.getElementById("el-delete").addEventListener("click", () => {
+  if (selectedId == null) return;
+  elements = elements.filter(e => e.id !== selectedId);
+  selectElement(null);
+});
+
+/* Pointer-event drag on the canvas. Convert client coords to canvas
+ * coords (CSS scaling) so it works on retina + zoomed pages. */
+const canvas = document.getElementById("preview");
+let drag = null;
+function evtToCanvas(ev) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (ev.clientX - r.left) * (canvas.width  / r.width),
+    y: (ev.clientY - r.top)  * (canvas.height / r.height),
+  };
+}
+canvas.addEventListener("pointerdown", ev => {
+  const p = evtToCanvas(ev);
+  const hit = hitTest(p.x, p.y);
+  selectElement(hit ? hit.id : null);
+  if (hit) {
+    drag = { id: hit.id, dx: p.x - hit.x, dy: p.y - hit.y };
+    canvas.setPointerCapture(ev.pointerId);
+  }
+});
+canvas.addEventListener("pointermove", ev => {
+  if (!drag) return;
+  const p = evtToCanvas(ev);
+  const el = elementById(drag.id);
+  if (!el) return;
+  el.x = Math.max(0, p.x - drag.dx);
+  el.y = Math.max(0, Math.min(HEAD_PX - 1, p.y - drag.dy));
+  syncPropsPanel();
+  redraw();
+});
+canvas.addEventListener("pointerup",   () => drag = null);
+canvas.addEventListener("pointercancel", () => drag = null);
+
+/* Delete key removes the selected element (when not typing in an input). */
+document.addEventListener("keydown", ev => {
+  if (ev.key !== "Delete" && ev.key !== "Backspace") return;
+  if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
+  if (selectedId != null) { ev.preventDefault(); document.getElementById("el-delete").click(); }
+});
 document.getElementById("print").addEventListener("click", doPrint);
 document.getElementById("print-all").addEventListener("click", doPrintAll);
 document.getElementById("csv").addEventListener("input", csvUpdate);
@@ -651,6 +827,10 @@ function wifiInit() {
 }
 
 /* ----- boot ---------------------------------------------------- */
+
+/* Seed one text element + select it so the page isn't empty. */
+elements.push(defaultText());
+selectElement(elements[0].id);
 
 refreshStatus();
 /* Poll every 3 s. Status changes (cover open, tape change, error
