@@ -25,9 +25,10 @@ void app_main(void)
         .wifi_ssid              = WIFI_SSID,
         .wifi_password          = WIFI_PASSWORD,
         .http_port              = 80,
-        .use_usb_host           = false,  /* mock by default; flip to true
-                                             when a real PT-* is wired up */
-        .usb_connect_timeout_ms = 10000,
+        .use_usb_host           = true,   /* try the real printer first;
+                                             falls back to mock after the
+                                             usb_connect_timeout below */
+        .usb_connect_timeout_ms = 5000,
         .reset_gpio_num         = 0,      /* BOOT button on most devkits;
                                              5 s hold wipes Wi-Fi creds */
     };

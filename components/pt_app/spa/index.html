@@ -97,8 +97,13 @@ function setConn(text, ok) {
 function renderStatus(j) {
   const g = document.getElementById("status");
   g.innerHTML = "";
+  /* Transport row up top so it's always obvious whether the values
+   * below come from the printer or the in-memory mock. */
+  const tx = j.transport || "?";
+  const txCls = tx === "usb_host" ? "kv-ok" : "kv-err";
+  g.innerHTML = `<span class="k">transport</span><span class="${txCls}">${tx}${tx === "mock" ? " (no printer)" : ""}</span>`;
   if (!j.ok) {
-    g.innerHTML = `<span class="k">error</span><span class="kv-err">${j.error}</span>`;
+    g.innerHTML += `<span class="k">error</span><span class="kv-err">${j.error}</span>`;
     return;
   }
   const tape = TAPES[j.media_width_mm];

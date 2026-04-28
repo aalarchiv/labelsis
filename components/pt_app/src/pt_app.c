@@ -267,6 +267,7 @@ static esp_err_t wifi_ap_up(const char *ssid)
 static pt_transport_t            s_transport;
 static pt_transport_mock_t       s_mock;
 static pt_transport_usb_host_t  *s_usb;
+static const char               *s_transport_name = "none";
 
 static void transport_up(const pt_app_config_t *cfg)
 {
@@ -274,13 +275,15 @@ static void transport_up(const pt_app_config_t *cfg)
         uint32_t to = cfg->usb_connect_timeout_ms ? cfg->usb_connect_timeout_ms : 10000;
         s_usb = pt_transport_usb_host_open(to);
         if (s_usb) {
-            s_transport = pt_transport_usb_host_transport(s_usb);
+            s_transport      = pt_transport_usb_host_transport(s_usb);
+            s_transport_name = "usb_host";
             ESP_LOGI(TAG, "transport: usb_host (PT-* attached)");
             return;
         }
         ESP_LOGW(TAG, "USB host open failed — falling back to mock");
     }
-    s_transport = pt_transport_mock_init(&s_mock);
+    s_transport      = pt_transport_mock_init(&s_mock);
+    s_transport_name = "mock";
     ESP_LOGI(TAG, "transport: mock (no real printer)");
 }
 
@@ -313,11 +316,13 @@ static esp_err_t api_status(httpd_req_t *req)
     int  n;
     if (err != PT_OK) {
         n = snprintf(body, sizeof body,
-                     "{\"ok\":false,\"error\":\"%s\"}", err_kind(err));
+                     "{\"ok\":false,\"transport\":\"%s\",\"error\":\"%s\"}",
+                     s_transport_name, err_kind(err));
         httpd_resp_set_status(req, "503 Service Unavailable");
     } else {
         n = snprintf(body, sizeof body,
             "{\"ok\":true,"
+            "\"transport\":\"%s\","
             "\"model\":%u,"
             "\"media_width_mm\":%u,"
             "\"media_type\":%u,"
@@ -327,6 +332,7 @@ static esp_err_t api_status(httpd_req_t *req)
             "\"error2\":%u,"
             "\"status_type\":%u,"
             "\"phase_type\":%u}",
+            s_transport_name,
             (unsigned)st.model,
             (unsigned)st.media_width_mm,
             (unsigned)st.media_type,
@@ -357,9 +363,10 @@ static esp_err_t api_info(httpd_req_t *req)
     pt_status_t st;
     pt_err_t err = pt_session_query_status(&s_transport, &st, NULL);
     if (err != PT_OK) {
-        char body[96];
+        char body[128];
         int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"error\":\"%s\"}", err_kind(err));
+                         "{\"ok\":false,\"transport\":\"%s\",\"error\":\"%s\"}",
+                         s_transport_name, err_kind(err));
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_send(req, body, n);
@@ -372,9 +379,10 @@ static esp_err_t api_info(httpd_req_t *req)
     unsigned offside = have_geom
         ? (unsigned)((g.tape_width_dots - g.print_pins) / 2u) : 0;
 
-    char body[384];
+    char body[416];
     int  n = snprintf(body, sizeof body,
         "{\"ok\":true,"
+        "\"transport\":\"%s\","
         "\"model\":%u,"
         "\"media_width_mm\":%u,"
         "\"media_type\":%u,"
@@ -387,6 +395,7 @@ static esp_err_t api_info(httpd_req_t *req)
             "\"left_margin_pins\":%u,"
             "\"right_margin_pins\":%u,"
             "\"non_printable_dots_per_side\":%u}}",
+        s_transport_name,
         (unsigned)st.model,
         (unsigned)st.media_width_mm,
         (unsigned)st.media_type,
