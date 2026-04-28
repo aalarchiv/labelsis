@@ -66,7 +66,7 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
     <div class="panel">
       <h2>Label</h2>
       <div class="row" style="margin-bottom:.5rem">
-        <input id="text" type="text" placeholder="Type label text" value="hello">
+        <input id="text" type="text" placeholder='Type text — use {column} to substitute from CSV below' value="hello">
       </div>
       <div class="row" style="margin-bottom:.75rem">
         <label>size</label>
@@ -79,9 +79,27 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
         <label><input id="mirror"   type="checkbox"> mirror</label>
         <label><input id="chain"    type="checkbox"> chain</label>
         <button id="print">Print</button>
+        <button id="print-all" class="secondary" hidden>Print all rows</button>
       </div>
       <div id="log"></div>
     </div>
+
+    <details class="panel" id="tpl-panel">
+      <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;">Template &amp; CSV data</summary>
+      <p class="muted" style="margin:.75rem 0 .5rem;">Paste CSV with a header row. Use <code>{column}</code> in the
+      label text above to substitute. Optional <code>$times</code>
+      column repeats a row N times in batch print.</p>
+      <textarea id="csv" rows="6" placeholder="name,$times&#10;Alice,2&#10;Bob,1"
+                style="width:100%; background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical;"></textarea>
+      <div class="row" style="margin-top:.5rem;">
+        <span class="muted" id="tpl-cols">no data</span>
+      </div>
+      <div class="row" style="margin-top:.5rem;">
+        <button id="tpl-prev" class="secondary" type="button">prev</button>
+        <span class="muted" id="tpl-rowinfo">—</span>
+        <button id="tpl-next" class="secondary" type="button">next</button>
+      </div>
+    </details>
   </section>
 
   <section id="view-wifi" hidden>
@@ -179,7 +197,7 @@ function renderStatus(j) {
 
 function redraw() {
   const c    = document.getElementById("preview");
-  const text = document.getElementById("text").value || "";
+  const text = renderTextForPreview();
   const size = parseInt(document.getElementById("size").value, 10);
   document.getElementById("size-val").textContent = size + "px";
 
@@ -233,7 +251,7 @@ function packRaster(canvas) {
   return out;
 }
 
-async function doPrint() {
+async function postPrint() {
   const c    = document.getElementById("preview");
   const body = packRaster(c);
   const headers = {
@@ -242,15 +260,21 @@ async function doPrint() {
     "X-Mirror":       document.getElementById("mirror").checked.toString(),
     "X-Chain":        document.getElementById("chain").checked.toString(),
   };
-  log(`POST /api/print   ${body.length} bytes`);
+  const r = await fetch("/api/print", { method: "POST", headers, body });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error);
+  return j;
+}
+
+async function doPrint() {
   const btn = document.getElementById("print");
   btn.disabled = true;
+  log("printing…");
   try {
-    const r = await fetch("/api/print", { method: "POST", headers, body });
-    const j = await r.json();
-    log(j.ok ? `done — ${j.rows} rows` : `error: ${j.error}`, j.ok);
+    const j = await postPrint();
+    log(`done — ${j.rows} rows`, true);
   } catch (e) {
-    log(`network: ${e.message}`, false);
+    log(`error: ${e.message}`, false);
   } finally {
     btn.disabled = false;
     refreshStatus();
@@ -263,9 +287,119 @@ function log(msg, ok) {
   el.className = ok === undefined ? "" : (ok ? "kv-ok" : "kv-err");
 }
 
+/* ----- template engine — vanilla port of niimblue's CSV templating
+ * (refs/niimblue/src/utils/canvas_preprocess.ts, MIT). Supports
+ * {column} substitution and a $times column for per-row repeat count.
+ * Date helpers and richer formats can land later. ----------------- */
+
+let csvData = { headers: [], data: [] };
+let csvCurrentRow = 0;
+
+function parseCSV(text) {
+  const rows = [];
+  let cur = [], field = "", inQuote = false, fieldStart = true;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuote) {
+      if      (c === '"' && text[i+1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQuote = false;
+      else field += c;
+    } else {
+      if      (c === '"' && fieldStart) { inQuote = true; fieldStart = false; }
+      else if (c === ',')               { cur.push(field); field = ""; fieldStart = true; }
+      else if (c === '\r')              { /* swallowed; \n closes row */ }
+      else if (c === '\n')              { cur.push(field); rows.push(cur); cur = []; field = ""; fieldStart = true; }
+      else                              { field += c; fieldStart = false; }
+    }
+  }
+  if (field !== "" || cur.length) { cur.push(field); rows.push(cur); }
+  while (rows.length && rows[rows.length-1].length === 1 && rows[rows.length-1][0] === "") rows.pop();
+  if (!rows.length) return { headers: [], data: [] };
+  const headers = rows[0].map(h => h.trim());
+  const data = rows.slice(1)
+    .filter(r => r.some(f => f.length))
+    .map(r => {
+      const o = {};
+      headers.forEach((h, i) => o[h] = (r[i] !== undefined ? r[i] : ""));
+      return o;
+    });
+  return { headers, data };
+}
+
+function substitute(tpl, row) {
+  return tpl.replace(/\{\s*([\w$]+)\s*\}/g, (m, key) =>
+    row[key] !== undefined ? String(row[key]) : m);
+}
+
+function renderTextForPreview() {
+  const tpl = document.getElementById("text").value || "";
+  const row = csvData.data[csvCurrentRow];
+  return row ? substitute(tpl, row) : tpl;
+}
+
+function csvRender() {
+  const cols = csvData.headers.filter(h => h && !h.startsWith("$"));
+  document.getElementById("tpl-cols").textContent = cols.length
+    ? `columns: ${cols.map(c => "{" + c + "}").join("  ")}`
+    : "no data";
+  document.getElementById("tpl-rowinfo").textContent = csvData.data.length
+    ? `row ${csvCurrentRow + 1} of ${csvData.data.length}`
+    : "—";
+  document.getElementById("print-all").hidden = csvData.data.length === 0;
+}
+
+function csvUpdate() {
+  const text = document.getElementById("csv").value;
+  csvData = text.trim() ? parseCSV(text) : { headers: [], data: [] };
+  if (csvCurrentRow >= csvData.data.length) csvCurrentRow = 0;
+  csvRender();
+  redraw();
+}
+
+async function doPrintAll() {
+  const btn       = document.getElementById("print-all");
+  const printBtn  = document.getElementById("print");
+  btn.disabled = printBtn.disabled = true;
+  let ok = 0, fail = 0;
+  const total = csvData.data.reduce((s, r) =>
+      s + Math.max(1, parseInt(r["$times"], 10) || 1), 0);
+  try {
+    for (let i = 0; i < csvData.data.length; i++) {
+      csvCurrentRow = i; csvRender(); redraw();
+      const copies = Math.max(1, parseInt(csvData.data[i]["$times"], 10) || 1);
+      for (let j = 0; j < copies; j++) {
+        log(`row ${i+1}/${csvData.data.length} copy ${j+1}/${copies}  (total ${ok+fail+1}/${total})`);
+        try { await postPrint(); ok++; }
+        catch (e) {
+          fail++;
+          log(`row ${i+1}: ${e.message}`, false);
+          if (!confirm(`row ${i+1} failed: ${e.message}\n\ncontinue with remaining rows?`)) throw e;
+        }
+      }
+    }
+    log(`batch done — ${ok} printed${fail ? `, ${fail} failed` : ""}`, !fail);
+  } catch (e) { /* already logged */ }
+  finally {
+    btn.disabled = printBtn.disabled = false;
+    refreshStatus();
+  }
+}
+
 document.getElementById("text").addEventListener("input", redraw);
 document.getElementById("size").addEventListener("input", redraw);
 document.getElementById("print").addEventListener("click", doPrint);
+document.getElementById("print-all").addEventListener("click", doPrintAll);
+document.getElementById("csv").addEventListener("input", csvUpdate);
+document.getElementById("tpl-prev").addEventListener("click", () => {
+  if (!csvData.data.length) return;
+  csvCurrentRow = (csvCurrentRow - 1 + csvData.data.length) % csvData.data.length;
+  csvRender(); redraw();
+});
+document.getElementById("tpl-next").addEventListener("click", () => {
+  if (!csvData.data.length) return;
+  csvCurrentRow = (csvCurrentRow + 1) % csvData.data.length;
+  csvRender(); redraw();
+});
 
 /* ----- view switcher (Print / Wi-Fi) + burger menu --------------- */
 
