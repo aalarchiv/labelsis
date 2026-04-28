@@ -172,6 +172,130 @@ static esp_err_t api_status(httpd_req_t *req)
     return httpd_resp_send(req, body, n);
 }
 
+/* Read a header value as a boolean (case-insensitive "true"/"false"),
+ * leaving *dst untouched if the header isn't present. */
+static void hdr_bool(httpd_req_t *req, const char *name, bool *dst)
+{
+    char v[16];
+    if (httpd_req_get_hdr_value_str(req, name, v, sizeof v) != ESP_OK) return;
+    if (strcasecmp(v, "true") == 0 || strcmp(v, "1") == 0) *dst = true;
+    else if (strcasecmp(v, "false") == 0 || strcmp(v, "0") == 0) *dst = false;
+}
+
+/* POST /api/print
+ * Body  : raw 1-bit raster, n_rows × 16 bytes (the layout
+ *         pt_bitmap_to_raster produces).
+ * Headers (all optional):
+ *   X-Tape-Width-Mm    require this width or fail (default: trust loaded)
+ *   X-Auto-Cut         "true"|"false"   default true
+ *   X-Chain            "true"|"false"   default false; true also disables
+ *                                       auto-cut (PT-P700 specific, see
+ *                                       pt_send --chain)
+ *   X-Mirror           "true"|"false"   default false
+ *   X-No-Compression   "true"|"false"   default false (= TIFF/PackBits)
+ *   X-Margin-Dots      integer          default 14 (~ 2 mm @ 180 dpi)
+ * Reply : application/json
+ *   ok=true  : {"ok":true,"rows":N}
+ *   ok=false : {"ok":false,"error":"<kind>"}    + 4xx/5xx status
+ */
+#define MAX_PRINT_BODY (128 * 1024)
+
+static esp_err_t api_print(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total % 16 != 0 || total > MAX_PRINT_BODY) {
+        httpd_resp_set_status(req, total > MAX_PRINT_BODY
+                              ? "413 Payload Too Large" : "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        const char *what = (total <= 0)            ? "missing_body"
+                         : (total > MAX_PRINT_BODY) ? "too_large"
+                                                    : "length_not_aligned_16";
+        char body[96];
+        int n = snprintf(body, sizeof body,
+                         "{\"ok\":false,\"error\":\"%s\"}", what);
+        return httpd_resp_send(req, body, n);
+    }
+
+    uint8_t *buf = malloc((size_t)total);
+    if (!buf) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
+    }
+
+    int rcvd = 0;
+    while (rcvd < total) {
+        int n = httpd_req_recv(req, (char *)(buf + rcvd), total - rcvd);
+        if (n <= 0) {
+            free(buf);
+            return ESP_FAIL;  /* connection closed */
+        }
+        rcvd += n;
+    }
+
+    pt_session_options_t opts;
+    pt_session_options_default(&opts);
+
+    char hbuf[16];
+    hdr_bool(req, "X-Auto-Cut", &opts.auto_cut);
+    hdr_bool(req, "X-Mirror",   &opts.mirror_print);
+    /* --chain implies no_chain_print=false AND auto_cut=false on PT-P700
+     * (see pt_send --chain). Apply the same coupling here. */
+    bool chain = false;
+    hdr_bool(req, "X-Chain", &chain);
+    if (chain) { opts.no_chain_print = false; opts.auto_cut = false; }
+
+    bool no_compress = false;
+    hdr_bool(req, "X-No-Compression", &no_compress);
+    if (no_compress) opts.compression = PT_COMPRESSION_NONE;
+
+    if (httpd_req_get_hdr_value_str(req, "X-Margin-Dots",
+                                    hbuf, sizeof hbuf) == ESP_OK) {
+        opts.margin_dots = (uint16_t)atoi(hbuf);
+    }
+    uint8_t width = 0;
+    if (httpd_req_get_hdr_value_str(req, "X-Tape-Width-Mm",
+                                    hbuf, sizeof hbuf) == ESP_OK) {
+        width = (uint8_t)atoi(hbuf);
+    }
+
+    size_t   n_rows = (size_t)total / 16;
+    pt_err_t err = pt_session_print_raster(&s_transport, buf,
+                                           n_rows, width, &opts);
+    free(buf);
+
+    char rbody[128];
+    int  rlen;
+    if (err == PT_OK) {
+        rlen = snprintf(rbody, sizeof rbody,
+                        "{\"ok\":true,\"rows\":%u}", (unsigned)n_rows);
+    } else {
+        rlen = snprintf(rbody, sizeof rbody,
+                        "{\"ok\":false,\"error\":\"%s\"}", err_kind(err));
+        switch (err) {
+        case PT_ERR_NO_MEDIA:
+        case PT_ERR_REPLACE_MEDIA:
+        case PT_ERR_COVER_OPEN:
+        case PT_ERR_MEDIA_MISMATCH:
+        case PT_ERR_CUTTER_JAM:
+            httpd_resp_set_status(req, "409 Conflict");
+            break;
+        case PT_ERR_OVERHEAT:
+        case PT_ERR_WEAK_BATTERY:
+        case PT_ERR_HIGH_VOLTAGE:
+            httpd_resp_set_status(req, "503 Service Unavailable");
+            break;
+        case PT_ERR_TIMEOUT:
+            httpd_resp_set_status(req, "504 Gateway Timeout");
+            break;
+        default:
+            httpd_resp_set_status(req, "500 Internal Server Error");
+        }
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, rbody, rlen);
+}
+
 /* Index page placeholder until the SPA lands (pt700-x4i). */
 static esp_err_t api_index(httpd_req_t *req)
 {
@@ -199,11 +323,16 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/status", .method = HTTP_GET,
         .handler = api_status, .user_ctx = NULL,
     };
+    static const httpd_uri_t print_route = {
+        .uri = "/api/print", .method = HTTP_POST,
+        .handler = api_print, .user_ctx = NULL,
+    };
     static const httpd_uri_t index_route = {
         .uri = "/", .method = HTTP_GET,
         .handler = api_index, .user_ctx = NULL,
     };
     httpd_register_uri_handler(s_http, &status_route);
+    httpd_register_uri_handler(s_http, &print_route);
     httpd_register_uri_handler(s_http, &index_route);
     return ESP_OK;
 }
