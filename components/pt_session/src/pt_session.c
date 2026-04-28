@@ -97,27 +97,32 @@ static pt_err_t send_row(pt_transport_t *t,
     return send_all(t, buf, (size_t)n);
 }
 
-/* After Ctrl-Z, the SDM §5.1 diagram shows Phase=Printing, Printing-done,
- * Phase=Editing all coming back unsolicited. Real PT-P700 behaviour
- * (verified via libusb capture) is different: it sends Phase=Printing
- * once, then goes silent for the duration of the print, and never sends
- * the completion or trailing phase-change. The host must POLL via ESC
- * i S to learn when the print is done — exactly what refs/ptouch-770
- * does in practice.
+/* PT-P700 completion semantics, observed empirically over libusb on a
+ * real device (Apr 2026):
  *
- * Strategy:
- *   1. Read messages with a `step` timeout. If anything we recognise
- *      indicates completion (PRINTING_DONE, or a phase-change/reply
- *      with phase=editing), succeed.
- *   2. Track whether we've seen phase=printing — once we have, we know
- *      the printer is mid-job.
- *   3. On the FIRST timeout AFTER phase=printing, send a single ESC i S
- *      to ask for current state. The reply tells us whether the print
- *      finished (phase=editing → done) or is still running
- *      (phase=printing → keep waiting; the next timeout polls again).
+ *   - After Ctrl-Z the printer pushes ONE status message
+ *     (status_type=phase-change, phase=printing) and then goes
+ *     completely silent for the rest of the job — it does NOT push the
+ *     "printing-done" or trailing "phase-change → editing" that SDM §5.1
+ *     shows in its diagram.
+ *   - It also does NOT respond to ESC i S sent after Ctrl-Z. We tested
+ *     up to 24 polls over 2 minutes; zero replies. So the polling
+ *     strategy ptouch-770 uses (which kernel-blocks on read with no
+ *     timeout) doesn't translate to libusb either: there's nothing to
+ *     read.
+ *   - Errors the printer DOES surface (cover-open / overheat / cutter-
+ *     jam mid-print) come as unsolicited STATUS_ERROR_OCCURRED messages
+ *     during the wait window — those we still want to catch.
+ *   - The "no tape inside cartridge" case the user wants to detect is
+ *     hardware-invisible: PT-P700's sensor reports cartridge-presence,
+ *     not tape-remaining, so error1 stays 0x00 even with an empty
+ *     cartridge. The print just silently doesn't appear.
  *
- * Bound: print_timeout_ms total wall-clock budget (default 120s) and a
- * 64-message hard cap as runaway guard. */
+ * Strategy: trust phase=printing as the completion signal. After
+ * receiving it, wait one short window for any unsolicited error
+ * message; if none arrives, succeed. The next job's invalidate + ESC @
+ * (per SDM, "also used to cancel printing") resets any wedged state if
+ * the printer got stuck mid-print. */
 static pt_err_t wait_print_done(pt_transport_t *t,
                                 const pt_session_options_t *opts)
 {
@@ -130,25 +135,13 @@ static pt_err_t wait_print_done(pt_transport_t *t,
         pt_status_t s;
         pt_err_t err = recv_status(t, &s, step);
         if (err == PT_ERR_TIMEOUT) {
-            /* On every timeout once the print has started, poke the
-             * printer with ESC i S. The printer may queue the request
-             * until it finishes the actual print and only then reply,
-             * which is why we MUST keep waiting (down to budget) for
-             * the response rather than bailing on the next timeout.
-             * ptouch-770 + printer-driver-ptouch poll the same way and
-             * the printer tolerates it (despite SDM §4 ESC i S note).
-             *
-             * Re-polling on each timeout (not just the first) covers
-             * the case where the printer drops the request entirely
-             * during heavy print rather than queueing it. */
             if (seen_printing) {
                 if (opts->on_event)
-                    opts->on_event("printer silent — polling ESC i S",
+                    opts->on_event("phase=printing confirmed; assuming "
+                                   "completion (PT-P700 does not push "
+                                   "completion messages)",
                                    opts->on_event_user);
-                uint8_t cmd[8];
-                int n = pt_encode_status_request(cmd, sizeof cmd);
-                pt_err_t se = send_all(t, cmd, (size_t)n);
-                if (se != PT_OK) return se;
+                return PT_OK;
             }
             budget = (budget > step) ? budget - step : 0;
             continue;
@@ -161,9 +154,9 @@ static pt_err_t wait_print_done(pt_transport_t *t,
             pt_err_t e = map_errors(&s);
             return e ? e : PT_ERR_TRANSPORT;
         }
+        /* Unlikely on PT-P700 but if a future firmware does push these,
+         * accept them. */
         if (s.status_type == PT_STATUS_PRINTING_DONE) return PT_OK;
-        /* Any phase=editing signal — whether unsolicited PHASE_CHANGE
-         * or a REPLY to one of our polls — means the print is done. */
         if (s.phase_type == PT_PHASE_EDITING
             && (s.status_type == PT_STATUS_PHASE_CHANGE
              || s.status_type == PT_STATUS_REPLY)) return PT_OK;
@@ -171,11 +164,6 @@ static pt_err_t wait_print_done(pt_transport_t *t,
         if (s.status_type == PT_STATUS_PHASE_CHANGE
             && s.phase_type == PT_PHASE_PRINTING) seen_printing = true;
     }
-    if (opts->on_event && seen_printing)
-        opts->on_event("printer entered print phase but never reported "
-                       "completion — likely wedged (try power-cycle + "
-                       "verify tape is loaded with a usable leader)",
-                       opts->on_event_user);
     return PT_ERR_TIMEOUT;
 }
 
