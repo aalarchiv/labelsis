@@ -21,3 +21,7 @@ add_test(NAME test_packbits COMMAND test_packbits)
 add_executable(test_bitmap test_bitmap.c)
 target_link_libraries(test_bitmap PRIVATE pt_protocol)
 add_test(NAME test_bitmap COMMAND test_bitmap)
+
+add_executable(test_encoder_vs_oracle test_encoder_vs_oracle.c)
+target_link_libraries(test_encoder_vs_oracle PRIVATE pt_protocol fixture)
+add_test(NAME test_encoder_vs_oracle COMMAND test_encoder_vs_oracle)

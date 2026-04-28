@@ -181,7 +181,11 @@ int pt_encode_raster_row(uint8_t *buf, size_t cap,
     if (!buf || !row) return PT_ERR_INVALID_ARG;
     if (row_len > 0xffff) return PT_ERR_INVALID_ARG;
     if (cap < 3 + row_len) return PT_ERR_BUF_TOO_SMALL;
-    buf[0] = 0x67;  /* 'g' */
+    /* Opcode 0x47 ('G'), not 0x67 ('g') as the SDM v1.11 §3 table states.
+     * Both refs/printer-driver-ptouch (CUPS) and refs/ptouch-770 emit 0x47
+     * and print successfully on real hardware (PT-H500/P700/E500); the
+     * SDM appears to have a typo on this single byte. */
+    buf[0] = 0x47;
     buf[1] = (uint8_t)( row_len       & 0xff);
     buf[2] = (uint8_t)((row_len >> 8) & 0xff);
     memcpy(buf + 3, row, row_len);

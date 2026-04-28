@@ -190,6 +190,8 @@ int pt_encode_mode_settings     (uint8_t *buf, size_t cap, const pt_mode_setting
 int pt_encode_advanced_settings (uint8_t *buf, size_t cap, const pt_advanced_settings_t *a);
 int pt_encode_margin            (uint8_t *buf, size_t cap, uint16_t margin_dots);
 int pt_encode_compression       (uint8_t *buf, size_t cap, pt_compression_t mode);
+/* NB: emits 0x47 ('G') as the opcode; SDM v1.11 §3 says 0x67 ('g') but
+ * the OSS implementations all use 0x47 and it prints — see the impl. */
 int pt_encode_raster_row        (uint8_t *buf, size_t cap, const uint8_t *row, size_t row_len);
 int pt_encode_zero_row          (uint8_t *buf, size_t cap);              /* Z = 0x5A          */
 int pt_encode_print_page        (uint8_t *buf, size_t cap);              /* FF = 0x0C         */

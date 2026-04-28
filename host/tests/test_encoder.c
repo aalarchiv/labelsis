@@ -152,8 +152,9 @@ static void test_raster_row(void)
     uint8_t buf[32] = {0};
     int n = pt_encode_raster_row(buf, sizeof buf, row, 16);
     EXPECT(n == 19, "raster row length");
-    EXPECT(buf[0] == 0x67 && buf[1] == 0x10 && buf[2] == 0x00,
-           "raster row framing g 0x10 0x00");
+    /* Opcode 0x47 ('G'), not 0x67 — see pt_encode_raster_row impl note. */
+    EXPECT(buf[0] == 0x47 && buf[1] == 0x10 && buf[2] == 0x00,
+           "raster row framing G 0x10 0x00");
     EXPECT_BYTES(buf + 3, row, 16, "raster row payload");
 }
 
