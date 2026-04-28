@@ -2,36 +2,35 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "pt_protocol.h"
-#include "pt_transport_mock.h"
+#include "pt_app.h"
+
+/* Real Wi-Fi creds, gitignored — copy main/wifi_credentials.example.h
+ * to main/wifi_credentials.h and fill in your SSID + password. Falls
+ * back to placeholder values when absent so CI / sandbox builds still
+ * succeed (they just won't associate). */
+#if __has_include("wifi_credentials.h")
+#  include "wifi_credentials.h"
+#else
+#  define WIFI_SSID     "pt700-build-no-creds"
+#  define WIFI_PASSWORD "set-via-wifi_credentials.h"
+#endif
 
 static const char *TAG = "pt700";
 
-/* On-target smoke test: drive a short job through the mock transport and
- * log its outcome. Proves pt_protocol + pt_transport_mock are alive on
- * ESP32-S3. Real USB host transport + HTTP app land in later phases. */
 void app_main(void)
 {
     ESP_LOGI(TAG, "pt700 print server booting");
 
-    static pt_transport_mock_t mock;
-    pt_transport_t t = pt_transport_mock_init(&mock);
+    pt_app_config_t cfg = {
+        .wifi_ssid              = WIFI_SSID,
+        .wifi_password          = WIFI_PASSWORD,
+        .http_port              = 80,
+        .use_usb_host           = false,  /* mock by default; flip to true
+                                             when a real PT-* is wired up */
+        .usb_connect_timeout_ms = 10000,
+    };
+    pt_app_run(&cfg);
 
-    uint8_t cmd[8];
-    int n = pt_encode_status_request(cmd, sizeof cmd);
-    pt_transport_send(&t, cmd, (size_t)n);
-
-    uint8_t resp[64];
-    size_t  resp_len = 0;
-    pt_transport_recv(&t, resp, sizeof resp, &resp_len, 100);
-
-    pt_status_t status;
-    if (pt_status_decode(resp, resp_len, &status) == PT_OK) {
-        ESP_LOGI(TAG, "mock printer: model=0x%02x media=%umm type=0x%02x",
-                 status.model, status.media_width_mm, status.media_type);
-    }
-
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-    }
+    /* HTTP server runs on its own task; main can sleep. */
+    while (1) vTaskDelay(pdMS_TO_TICKS(60000));
 }

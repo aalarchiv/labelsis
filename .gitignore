@@ -21,6 +21,10 @@ build-oracle/
 *.swp
 *.swo
 
+# Per-developer Wi-Fi credentials — checked-in template is
+# main/wifi_credentials.example.h; the active file is gitignored.
+main/wifi_credentials.h
+
 # Third-party reference materials (Brother SDM PDF, OSS clones, installers).
 # 300+ MB and includes embedded .git repos — kept local. Track refs/README.md
 # so contributors know what should live here.
