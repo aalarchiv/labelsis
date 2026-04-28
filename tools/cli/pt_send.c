@@ -306,10 +306,7 @@ int main(int argc, char **argv)
     }
     pt_transport_t t = pt_transport_libusb_transport(u);
 
-    /* Tape-fit check: if the PBM height exceeds the loaded tape's print
-     * pin count, the rows above and below the print area land in the
-     * margins and silently won't fire. Warn so the user can swap to a
-     * smaller PBM or wider tape rather than being surprised by clipping. */
+    /* Tape-fit + short-label warnings. */
     pt_status_t st;
     pt_err_t qerr = pt_session_query_status(&t, &st, NULL);
     if (qerr == PT_OK) {
@@ -321,6 +318,18 @@ int main(int argc, char **argv)
                     "has only %u print pins; top/bottom rows will be clipped to "
                     "the margins. Use a %u-px-tall PBM for full coverage.\n",
                     pbm.height, st.media_width_mm, g.print_pins, g.print_pins);
+        }
+        /* The cutter struggles with very short labels — they can be
+         * pushed back into the printer body and jam. ~30 mm is the
+         * empirical safe minimum. PBM "width" is the feed-direction
+         * dimension; at 180 dpi each pixel = 25.4/180 ≈ 0.141 mm. */
+        double label_mm = pbm.width * 25.4 / 180.0;
+        if (label_mm < 30.0 && opts.auto_cut) {
+            fprintf(stderr,
+                    "pt_send: WARNING: label is only %.1f mm long; auto-cut "
+                    "may push it into the printer body where it can jam. "
+                    "Consider --no-cut or --chain for short labels.\n",
+                    label_mm);
         }
     }
 

@@ -95,22 +95,54 @@ static pt_err_t send_row(pt_transport_t *t,
     return send_all(t, buf, (size_t)n);
 }
 
-/* After Ctrl-Z, the printer emits Phase=Printing, Printing-done, then
- * Phase=Editing per SDM §5.1. Loop reading status messages until we see
- * PRINTING_DONE or an error. Bound the loop two ways: a print-time
- * budget that ticks down only on TIMEOUT (so a chatty sequence of phase
- * changes doesn't burn the budget), and a hard cap of 64 messages as a
- * runaway guard. */
+/* After Ctrl-Z, the SDM §5.1 diagram shows Phase=Printing, Printing-done,
+ * Phase=Editing all coming back unsolicited. Real PT-P700 behaviour
+ * (verified via libusb capture) is different: it sends Phase=Printing
+ * once, then goes silent for the duration of the print, and never sends
+ * the completion or trailing phase-change. The host must POLL via ESC
+ * i S to learn when the print is done — exactly what refs/ptouch-770
+ * does in practice.
+ *
+ * Strategy:
+ *   1. Read messages with a `step` timeout. If anything we recognise
+ *      indicates completion (PRINTING_DONE, or a phase-change/reply
+ *      with phase=editing), succeed.
+ *   2. Track whether we've seen phase=printing — once we have, we know
+ *      the printer is mid-job.
+ *   3. On the FIRST timeout AFTER phase=printing, send a single ESC i S
+ *      to ask for current state. The reply tells us whether the print
+ *      finished (phase=editing → done) or is still running
+ *      (phase=printing → keep waiting; the next timeout polls again).
+ *
+ * Bound: print_timeout_ms total wall-clock budget (default 120s) and a
+ * 64-message hard cap as runaway guard. */
 static pt_err_t wait_print_done(pt_transport_t *t,
                                 const pt_session_options_t *opts)
 {
-    const uint32_t step = opts->status_timeout_ms;
+    const uint32_t step     = opts->status_timeout_ms;
     uint32_t       budget   = opts->print_timeout_ms;
     size_t         messages = 0;
+    bool           seen_printing = false;
+    bool           awaiting_poll = false;  /* we just sent ESC i S */
+
     while (budget > 0 && messages < 64) {
         pt_status_t s;
         pt_err_t err = recv_status(t, &s, step);
         if (err == PT_ERR_TIMEOUT) {
+            if (seen_printing && !awaiting_poll) {
+                /* Print started, printer went silent. Poke it. */
+                uint8_t cmd[8];
+                int n = pt_encode_status_request(cmd, sizeof cmd);
+                pt_err_t se = send_all(t, cmd, (size_t)n);
+                if (se != PT_OK) return se;
+                awaiting_poll = true;
+                continue;  /* re-loop to read the reply without burning budget */
+            }
+            if (awaiting_poll) {
+                /* We sent ESC i S but heard nothing back — printer is
+                 * truly stuck. Stop. */
+                return PT_ERR_TIMEOUT;
+            }
             budget = (budget > step) ? budget - step : 0;
             continue;
         }
@@ -123,14 +155,19 @@ static pt_err_t wait_print_done(pt_transport_t *t,
             return e ? e : PT_ERR_TRANSPORT;
         }
         if (s.status_type == PT_STATUS_PRINTING_DONE) return PT_OK;
-        /* Real hardware sometimes skips PRINTING_DONE and jumps straight
-         * to PHASE_CHANGE → editing once the page is finished — accept
-         * that as completion too. (SDM §5.1 documents both messages but
-         * observed PT-P700 behaviour omits PRINTING_DONE in some configs.) */
         if (s.status_type == PT_STATUS_PHASE_CHANGE
-            && s.phase_type == PT_PHASE_EDITING)
-            return PT_OK;
-        /* notifications, phase=printing, etc. — keep reading without burning budget */
+            && s.phase_type == PT_PHASE_EDITING) return PT_OK;
+        if (awaiting_poll
+            && s.status_type == PT_STATUS_REPLY
+            && s.phase_type == PT_PHASE_EDITING) return PT_OK;
+
+        if (s.status_type == PT_STATUS_PHASE_CHANGE
+            && s.phase_type == PT_PHASE_PRINTING) seen_printing = true;
+
+        /* If our explicit poll returned phase=printing, the print is
+         * still running — clear awaiting_poll so the next timeout polls
+         * again. */
+        awaiting_poll = false;
     }
     return PT_ERR_TIMEOUT;
 }
