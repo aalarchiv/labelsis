@@ -8,14 +8,21 @@
 :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --err:#f85149; --panel:#161b22; --line:#30363d; }
 * { box-sizing: border-box; }
 body { margin:0; font:14px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
-header { padding:1rem; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
-h1 { margin:0; font-size:1.1rem; font-weight:600; }
+header { position:relative; padding:.75rem 1rem; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:.75rem; }
+h1 { margin:0; font-size:1rem; font-weight:600; }
+nav { display:flex; gap:.25rem; }
+nav a { color:var(--muted); text-decoration:none; padding:.4rem .75rem; border-radius:4px; font-size:.9rem; }
+nav a.active { color:var(--fg); background:rgba(88,166,255,.12); }
+nav a:hover { color:var(--fg); }
+.burger { display:none; background:transparent; border:0; cursor:pointer; padding:.4rem; margin-left:auto; }
+.burger span { display:block; width:22px; height:2px; background:var(--fg); margin:4px 0; border-radius:1px; }
+#conn { margin-left:auto; font-size:.85rem; }
 main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-direction:column; gap:1rem; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
 label { font-size:.85rem; color:var(--muted); }
-input[type=text], input[type=number] { background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:inherit; flex:1; min-width:160px; }
+input[type=text], input[type=number], input[type=password], select { background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:inherit; flex:1; min-width:160px; }
 input[type=range] { flex:1; }
 button { background:var(--accent); color:#fff; border:0; border-radius:4px; padding:.6rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
 button:disabled { background:var(--muted); cursor:not-allowed; }
@@ -25,40 +32,88 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
 .status-grid .k { color:var(--muted); }
 .kv-ok  { color:var(--ok); }
 .kv-err { color:var(--err); }
-#log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
+.muted { color:var(--muted); font-size:.85rem; }
+#log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
 .dim  { opacity:.6; }
+@media (max-width: 600px) {
+  .burger { display:block; }
+  nav { display:none; position:absolute; top:100%; left:0; right:0; flex-direction:column; background:var(--panel); border-bottom:1px solid var(--line); padding:.5rem; z-index:10; gap:0; }
+  nav.open { display:flex; }
+  nav a { padding:.6rem .75rem; }
+  #conn { margin-left:0; }
+}
 </style>
 </head>
 <body>
 <header>
   <h1>pt700</h1>
+  <nav id="nav">
+    <a href="#print" data-view="print" class="active">Print</a>
+    <a href="#wifi"  data-view="wifi">Wi-Fi</a>
+  </nav>
   <span id="conn" class="dim">connecting…</span>
+  <button id="burger" class="burger" aria-label="menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
 </header>
 <main>
-  <div class="panel">
-    <h2>Printer</h2>
-    <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
-  </div>
+  <section id="view-print">
+    <div class="panel">
+      <h2>Printer</h2>
+      <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
+    </div>
 
-  <div class="panel">
-    <h2>Label</h2>
-    <div class="row" style="margin-bottom:.5rem">
-      <input id="text" type="text" placeholder="Type label text" value="hello">
+    <div class="panel">
+      <h2>Label</h2>
+      <div class="row" style="margin-bottom:.5rem">
+        <input id="text" type="text" placeholder="Type label text" value="hello">
+      </div>
+      <div class="row" style="margin-bottom:.75rem">
+        <label>size</label>
+        <input id="size" type="range" min="20" max="120" value="80">
+        <span id="size-val" class="dim">80px</span>
+      </div>
+      <canvas id="preview" width="600" height="128"></canvas>
+      <div class="row" style="margin-top:.75rem">
+        <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
+        <label><input id="mirror"   type="checkbox"> mirror</label>
+        <label><input id="chain"    type="checkbox"> chain</label>
+        <button id="print">Print</button>
+      </div>
+      <div id="log"></div>
     </div>
-    <div class="row" style="margin-bottom:.75rem">
-      <label>size</label>
-      <input id="size" type="range" min="20" max="120" value="80">
-      <span id="size-val" class="dim">80px</span>
+  </section>
+
+  <section id="view-wifi" hidden>
+    <div class="panel">
+      <h2>Wi-Fi</h2>
+      <p class="muted">Pick a network and enter the password. Saving reboots
+      the device into the new network. If it can't connect, the next boot
+      brings up the <b>pt700-setup</b> AP for re-onboarding.</p>
+      <div class="row" style="margin-bottom:.5rem">
+        <label>network</label>
+        <select id="wifi-ssid-select"><option value="">(scanning…)</option></select>
+        <button id="wifi-rescan" class="secondary">rescan</button>
+      </div>
+      <div class="row" style="margin-bottom:.5rem">
+        <label>or type</label>
+        <input id="wifi-ssid-text" type="text" placeholder="SSID">
+      </div>
+      <div class="row" style="margin-bottom:.5rem">
+        <label>password</label>
+        <input id="wifi-password" type="password" placeholder="WPA2 passphrase">
+        <button id="wifi-reveal" class="secondary" type="button">show</button>
+      </div>
+      <div class="row" style="margin-bottom:.75rem">
+        <label>confirm</label>
+        <input id="wifi-password2" type="password" placeholder="re-enter">
+      </div>
+      <div class="row">
+        <button id="wifi-save">save &amp; reboot</button>
+      </div>
+      <div id="wifi-log"></div>
     </div>
-    <canvas id="preview" width="600" height="128"></canvas>
-    <div class="row" style="margin-top:.75rem">
-      <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
-      <label><input id="mirror"   type="checkbox"> mirror</label>
-      <label><input id="chain"    type="checkbox"> chain</label>
-      <button id="print">Print</button>
-    </div>
-    <div id="log"></div>
-  </div>
+  </section>
 </main>
 <script>
 "use strict";
@@ -208,6 +263,117 @@ function log(msg, ok) {
 document.getElementById("text").addEventListener("input", redraw);
 document.getElementById("size").addEventListener("input", redraw);
 document.getElementById("print").addEventListener("click", doPrint);
+
+/* ----- view switcher (Print / Wi-Fi) + burger menu --------------- */
+
+function showView(name) {
+  document.querySelectorAll("section[id^=view-]").forEach(s => {
+    s.hidden = (s.id !== "view-" + name);
+  });
+  document.querySelectorAll("nav a").forEach(a => {
+    a.classList.toggle("active", a.dataset.view === name);
+  });
+  document.getElementById("nav").classList.remove("open");
+  document.getElementById("burger").setAttribute("aria-expanded", "false");
+  if (name === "wifi" && !wifiInited) wifiInit();
+}
+document.querySelectorAll("nav a").forEach(a => {
+  a.addEventListener("click", e => { e.preventDefault(); showView(a.dataset.view); });
+});
+document.getElementById("burger").addEventListener("click", () => {
+  const nav = document.getElementById("nav");
+  const open = nav.classList.toggle("open");
+  document.getElementById("burger").setAttribute("aria-expanded", open ? "true" : "false");
+});
+
+/* ----- Wi-Fi tab (scan + save credentials) ---------------------- */
+
+let wifiInited = false;
+let wifiRevealed = false;
+
+async function wifiScan() {
+  const sel = document.getElementById("wifi-ssid-select");
+  sel.innerHTML = "<option value=''>(scanning…)</option>";
+  try {
+    const r = await fetch("/api/scan");
+    const j = await r.json();
+    sel.innerHTML = "";
+    if (!j.ok || !j.networks.length) {
+      sel.innerHTML = "<option value=''>(no networks found)</option>";
+      return;
+    }
+    const best = {};
+    for (const n of j.networks) {
+      if (!n.ssid) continue;
+      if (!best[n.ssid] || best[n.ssid].rssi < n.rssi) best[n.ssid] = n;
+    }
+    const list = Object.values(best).sort((a,b) => b.rssi - a.rssi);
+    sel.innerHTML = "<option value=''>(pick or type below)</option>";
+    for (const n of list) {
+      const o = document.createElement("option");
+      o.value = n.ssid;
+      const lock = n.auth === 0 ? "" : "* ";
+      o.textContent = `${lock}${n.ssid}  (${n.rssi} dBm)`;
+      sel.appendChild(o);
+    }
+  } catch (e) {
+    sel.innerHTML = "<option value=''>(scan failed)</option>";
+  }
+}
+
+async function wifiSave() {
+  const ssid = document.getElementById("wifi-ssid-text").value.trim()
+            || document.getElementById("wifi-ssid-select").value;
+  const password  = document.getElementById("wifi-password").value;
+  const password2 = document.getElementById("wifi-password2").value;
+  if (!ssid) { wifiLog("pick or type an SSID first", false); return; }
+  if (password !== password2) { wifiLog("passwords don't match", false); return; }
+  const btn = document.getElementById("wifi-save");
+  btn.disabled = true;
+  wifiLog("saving…");
+  try {
+    const r = await fetch("/api/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ssid, password }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      wifiLog("saved — rebooting. Reload http://pt700.local/ once it's back.", true);
+    } else {
+      wifiLog(`error: ${j.error}`, false);
+      btn.disabled = false;
+    }
+  } catch (e) {
+    wifiLog(`network: ${e.message}`, false);
+    btn.disabled = false;
+  }
+}
+
+function wifiLog(msg, ok) {
+  const el = document.getElementById("wifi-log");
+  el.textContent = msg;
+  el.className = ok === undefined ? "" : (ok ? "kv-ok" : "kv-err");
+}
+
+function wifiInit() {
+  wifiInited = true;
+  document.getElementById("wifi-rescan").addEventListener("click", wifiScan);
+  document.getElementById("wifi-save").addEventListener("click", wifiSave);
+  document.getElementById("wifi-ssid-select").addEventListener("change", e => {
+    document.getElementById("wifi-ssid-text").value = e.target.value;
+  });
+  document.getElementById("wifi-reveal").addEventListener("click", () => {
+    wifiRevealed = !wifiRevealed;
+    const t = wifiRevealed ? "text" : "password";
+    document.getElementById("wifi-password").type  = t;
+    document.getElementById("wifi-password2").type = t;
+    document.getElementById("wifi-reveal").textContent = wifiRevealed ? "hide" : "show";
+  });
+  wifiScan();
+}
+
+/* ----- boot ---------------------------------------------------- */
 
 refreshStatus();
 /* Poll every 3 s. Status changes (cover open, tape change, error

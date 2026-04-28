@@ -646,6 +646,12 @@ static esp_err_t api_index(httpd_req_t *req)
 
 static httpd_handle_t s_http;
 
+/* Forward decls: api_scan and api_setup are defined further down with
+ * the AP-onboarding handlers, but the STA-mode http_up registers them
+ * too so the SPA's Wi-Fi tab can re-provision in place. */
+static esp_err_t api_scan(httpd_req_t *req);
+static esp_err_t api_setup(httpd_req_t *req);
+
 static esp_err_t http_up(uint16_t port)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
@@ -674,6 +680,14 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/feed", .method = HTTP_POST,
         .handler = api_feed, .user_ctx = NULL,
     };
+    static const httpd_uri_t scan_route = {
+        .uri = "/api/scan", .method = HTTP_GET,
+        .handler = api_scan, .user_ctx = NULL,
+    };
+    static const httpd_uri_t setup_route = {
+        .uri = "/api/setup", .method = HTTP_POST,
+        .handler = api_setup, .user_ctx = NULL,
+    };
     static const httpd_uri_t index_route = {
         .uri = "/", .method = HTTP_GET,
         .handler = api_index, .user_ctx = NULL,
@@ -683,6 +697,8 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &print_route);
     httpd_register_uri_handler(s_http, &cut_route);
     httpd_register_uri_handler(s_http, &feed_route);
+    httpd_register_uri_handler(s_http, &scan_route);
+    httpd_register_uri_handler(s_http, &setup_route);
     httpd_register_uri_handler(s_http, &index_route);
     return ESP_OK;
 }
