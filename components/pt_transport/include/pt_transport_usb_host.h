@@ -15,6 +15,7 @@
  * so a single source supports both.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "pt_transport.h"
@@ -36,6 +37,13 @@ pt_transport_t pt_transport_usb_host_transport(pt_transport_usb_host_t *u);
 
 /* Release the device, free transfers, stop tasks, uninstall stack. */
 void pt_transport_usb_host_close(pt_transport_usb_host_t *u);
+
+/* True when, during the most recent open() probe, a PT-* in P-Lite
+ * mode (PIDs 0x2064 / 0x2065) was enumerated. The device exposes USB
+ * Mass Storage in that state — no printer interface to bind to — so
+ * open() returns NULL, but a caller can check this to render a
+ * specific UI hint instead of generic "no printer". */
+bool pt_transport_usb_host_plite_seen(void);
 
 #ifdef __cplusplus
 }

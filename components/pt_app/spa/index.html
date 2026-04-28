@@ -156,7 +156,10 @@ function renderStatus(j) {
    * below come from the printer or the in-memory mock. */
   const tx = j.transport || "?";
   const txCls = tx === "usb_host" ? "kv-ok" : "kv-err";
-  g.innerHTML = `<span class="k">transport</span><span class="${txCls}">${tx}${tx === "mock" ? " (no printer)" : ""}</span>`;
+  let txLabel = tx;
+  if (tx === "mock")  txLabel += " (no printer)";
+  if (tx === "plite") txLabel = "P-Lite mode — slide switch to E or hold PLite button 2s";
+  g.innerHTML = `<span class="k">transport</span><span class="${txCls}">${txLabel}</span>`;
   if (!j.ok) {
     g.innerHTML += `<span class="k">error</span><span class="kv-err">${j.error}</span>`;
     return;

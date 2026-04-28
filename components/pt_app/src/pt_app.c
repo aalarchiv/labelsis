@@ -280,6 +280,12 @@ static void transport_up(const pt_app_config_t *cfg)
             ESP_LOGI(TAG, "transport: usb_host (PT-* attached)");
             return;
         }
+        if (pt_transport_usb_host_plite_seen()) {
+            s_transport      = pt_transport_mock_init(&s_mock);
+            s_transport_name = "plite";
+            ESP_LOGW(TAG, "transport: PT-* in P-Lite mode (no printer interface)");
+            return;
+        }
         ESP_LOGW(TAG, "USB host open failed — falling back to mock");
     }
     s_transport      = pt_transport_mock_init(&s_mock);

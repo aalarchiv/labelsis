@@ -26,6 +26,24 @@ static const uint16_t PT_PIDS[] = {
     0x2061,  /* PT-P700 */
 };
 
+/* Same VID, different firmware mode: when the side slider is in P-Lite
+ * position the PT-* enumerates as USB Mass Storage (a virtual disk
+ * containing Brother's "P-touch Editor Lite") with one of these PIDs
+ * and exposes no printer-class interface — see the research notes in
+ * the SDM (mode 3 = P-touch Template) and ptouch-esp32 prior art. We
+ * can't drive prints in that state, but flagging it lets the SPA show
+ * the user a useful "slide to E or hold the PLite button" hint
+ * instead of generic "unavailable". */
+static const uint16_t PT_PIDS_PLITE[] = {
+    0x2064,  /* PT-P700 in P-Lite mode */
+    0x2065,  /* PT-P750W in P-Lite mode */
+};
+
+/* Sticky flag set by on_client_event when a P-Lite-mode PT-* shows up
+ * during the open() probe. Cleared on close() and on the next open()
+ * attempt so a stale detection doesn't bleed into a later session. */
+static volatile bool s_plite_seen;
+
 /* Bulk transfers: PT-* MPS is 64 bytes per the SDM. We allocate 1 KB
  * per direction so a status read can request 64 (one MPS) and an OUT
  * write can fit a multi-row chunk. */
@@ -163,6 +181,19 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
                 if (desc->idProduct == PT_PIDS[i]) { match = true; break; }
         }
         if (!match) {
+            /* Same vendor, P-Lite mode? Flag for the app layer so the
+             * SPA can render a specific hint instead of "unavailable". */
+            if (desc->idVendor == PT_VID) {
+                for (size_t i = 0; i < sizeof PT_PIDS_PLITE / sizeof PT_PIDS_PLITE[0]; i++) {
+                    if (desc->idProduct == PT_PIDS_PLITE[i]) {
+                        ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) — "
+                                      "slide to E or hold PLite button 2s",
+                                 desc->idProduct);
+                        s_plite_seen = true;
+                        break;
+                    }
+                }
+            }
             usb_host_device_close(u->client_hdl, dev);
             return;
         }
@@ -303,6 +334,8 @@ done:
 
 pt_transport_usb_host_t *pt_transport_usb_host_open(uint32_t connect_timeout_ms)
 {
+    s_plite_seen = false;
+
     struct pt_transport_usb_host *u = calloc(1, sizeof *u);
     if (!u) return NULL;
 
@@ -362,6 +395,11 @@ fail:
 pt_transport_t pt_transport_usb_host_transport(pt_transport_usb_host_t *u)
 {
     return (pt_transport_t){ .send = usb_send, .recv = usb_recv, .ctx = u };
+}
+
+bool pt_transport_usb_host_plite_seen(void)
+{
+    return s_plite_seen;
 }
 
 void pt_transport_usb_host_close(pt_transport_usb_host_t *u)
