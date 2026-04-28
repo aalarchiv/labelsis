@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pt700</title>
+<style>
+:root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --err:#f85149; --panel:#161b22; --line:#30363d; }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+header { padding:1rem; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+h1 { margin:0; font-size:1.1rem; font-weight:600; }
+main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-direction:column; gap:1rem; }
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
+.panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+.row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+label { font-size:.85rem; color:var(--muted); }
+input[type=text], input[type=number] { background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:inherit; flex:1; min-width:160px; }
+input[type=range] { flex:1; }
+button { background:var(--accent); color:#fff; border:0; border-radius:4px; padding:.6rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
+button:disabled { background:var(--muted); cursor:not-allowed; }
+button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+canvas { display:block; max-width:100%; image-rendering:pixelated; background:#fff; border:1px solid var(--line); border-radius:4px; }
+.status-grid { display:grid; grid-template-columns:auto 1fr; gap:.25rem .75rem; font-size:.85rem; }
+.status-grid .k { color:var(--muted); }
+.kv-ok  { color:var(--ok); }
+.kv-err { color:var(--err); }
+#log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
+.dim  { opacity:.6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>pt700</h1>
+  <span id="conn" class="dim">connecting…</span>
+</header>
+<main>
+  <div class="panel">
+    <h2>Printer</h2>
+    <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
+  </div>
+
+  <div class="panel">
+    <h2>Label</h2>
+    <div class="row" style="margin-bottom:.5rem">
+      <input id="text" type="text" placeholder="Type label text" value="hello">
+    </div>
+    <div class="row" style="margin-bottom:.75rem">
+      <label>size</label>
+      <input id="size" type="range" min="20" max="120" value="80">
+      <span id="size-val" class="dim">80px</span>
+    </div>
+    <canvas id="preview" width="600" height="128"></canvas>
+    <div class="row" style="margin-top:.75rem">
+      <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
+      <label><input id="mirror"   type="checkbox"> mirror</label>
+      <label><input id="chain"    type="checkbox"> chain</label>
+      <button id="print">Print</button>
+    </div>
+    <div id="log"></div>
+  </div>
+</main>
+<script>
+"use strict";
+
+// SDM p.20 / p.14 tape geometry table (mirrors pt_tape_geometry_tze).
+const TAPES = {
+  4:  { print: 24,  margin: 52 },
+  6:  { print: 32,  margin: 48 },
+  9:  { print: 50,  margin: 39 },
+  12: { print: 70,  margin: 29 },
+  18: { print: 112, margin: 8 },
+  24: { print: 128, margin: 0 },
+};
+
+let printer = null;  // last /api/status response
+
+async function refreshStatus() {
+  try {
+    const r = await fetch("/api/status");
+    const j = await r.json();
+    printer = j;
+    setConn(j.ok ? "online" : "error", j.ok);
+    renderStatus(j);
+    redraw();
+  } catch (e) {
+    setConn("offline", false);
+  }
+}
+
+function setConn(text, ok) {
+  const el = document.getElementById("conn");
+  el.textContent = text;
+  el.className = ok ? "kv-ok" : "kv-err";
+}
+
+function renderStatus(j) {
+  const g = document.getElementById("status");
+  g.innerHTML = "";
+  if (!j.ok) {
+    g.innerHTML = `<span class="k">error</span><span class="kv-err">${j.error}</span>`;
+    return;
+  }
+  const tape = TAPES[j.media_width_mm];
+  const rows = [
+    ["model",        "0x" + j.model.toString(16)],
+    ["tape",         `${j.media_width_mm} mm  (${tape ? tape.print : "?"} print pins)`],
+    ["error1/2",     `${j.error1.toString(16)} / ${j.error2.toString(16)}`,
+                     (j.error1 || j.error2) ? "kv-err" : "kv-ok"],
+    ["status",       j.status_type === 0 ? "idle" : `0x${j.status_type.toString(16)}`],
+  ];
+  for (const [k, v, cls] of rows) {
+    g.innerHTML += `<span class="k">${k}</span><span class="${cls||""}">${v}</span>`;
+  }
+}
+
+function redraw() {
+  const c    = document.getElementById("preview");
+  const text = document.getElementById("text").value || "";
+  const size = parseInt(document.getElementById("size").value, 10);
+  document.getElementById("size-val").textContent = size + "px";
+
+  const tape    = printer && printer.ok ? TAPES[printer.media_width_mm] : TAPES[24];
+  const headPx  = 128;
+  const printPx = tape ? tape.print : 128;
+  const marginPx = tape ? tape.margin : 0;
+
+  // Measure text width at the chosen size, compute canvas width with
+  // a 14-dot leading margin matching the default pt_session option.
+  const ctx = c.getContext("2d");
+  ctx.font = `${size}px sans-serif`;
+  const width = Math.max(40, Math.ceil(ctx.measureText(text).width) + 28);
+  c.width  = width;
+  c.height = headPx;
+
+  // White background, then black text.
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, headPx);
+  ctx.fillStyle = "#000";
+  ctx.font = `${size}px sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  // Centre vertically inside the print area; render only into print pins.
+  ctx.fillText(text, 14, marginPx + printPx / 2);
+
+  // Indicate the non-printable margins on the preview only (these are
+  // NOT sent to the printer, they're a UI hint).
+  ctx.fillStyle = "rgba(255,80,80,.18)";
+  ctx.fillRect(0, 0, width, marginPx);
+  ctx.fillRect(0, marginPx + printPx, width, marginPx);
+}
+
+/* Pack the current canvas to the 16-byte-per-raster-row layout
+ * pt_bitmap_to_raster expects: for each raster line (= canvas column),
+ * 16 bytes encoding the 128 pins MSB-first. */
+function packRaster(canvas) {
+  const ctx  = canvas.getContext("2d");
+  const w    = canvas.width;
+  const data = ctx.getImageData(0, 0, w, canvas.height).data;
+  const out  = new Uint8Array(w * 16);
+  const h    = Math.min(canvas.height, 128);
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + x) * 4;
+      // Treat any pixel below the threshold as black.
+      const lum = (data[i] + data[i+1] + data[i+2]) / 3;
+      if (lum < 128) out[x * 16 + (y >> 3)] |= 0x80 >> (y & 7);
+    }
+  }
+  return out;
+}
+
+async function doPrint() {
+  const c    = document.getElementById("preview");
+  const body = packRaster(c);
+  const headers = {
+    "Content-Type":   "application/octet-stream",
+    "X-Auto-Cut":     document.getElementById("auto-cut").checked.toString(),
+    "X-Mirror":       document.getElementById("mirror").checked.toString(),
+    "X-Chain":        document.getElementById("chain").checked.toString(),
+  };
+  log(`POST /api/print   ${body.length} bytes`);
+  const btn = document.getElementById("print");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/print", { method: "POST", headers, body });
+    const j = await r.json();
+    log(j.ok ? `done — ${j.rows} rows` : `error: ${j.error}`, j.ok);
+  } catch (e) {
+    log(`network: ${e.message}`, false);
+  } finally {
+    btn.disabled = false;
+    refreshStatus();
+  }
+}
+
+function log(msg, ok) {
+  const el = document.getElementById("log");
+  el.textContent = msg;
+  el.className = ok === undefined ? "" : (ok ? "kv-ok" : "kv-err");
+}
+
+document.getElementById("text").addEventListener("input", redraw);
+document.getElementById("size").addEventListener("input", redraw);
+document.getElementById("print").addEventListener("click", doPrint);
+
+refreshStatus();
+setInterval(refreshStatus, 30000);
+redraw();
+</script>
+</body>
+</html>

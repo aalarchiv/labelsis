@@ -296,17 +296,18 @@ static esp_err_t api_print(httpd_req_t *req)
     return httpd_resp_send(req, rbody, rlen);
 }
 
-/* Index page placeholder until the SPA lands (pt700-x4i). */
+/* Single-file SPA embedded via EMBED_TXTFILES in CMakeLists.txt — the
+ * label designer (pt700-x4i). Inline CSS + JS so we don't need
+ * LittleFS yet; the file is < 10 KB and lives in flash next to the
+ * code. */
+extern const char index_html_start[] asm("_binary_index_html_start");
+extern const char index_html_end[]   asm("_binary_index_html_end");
+
 static esp_err_t api_index(httpd_req_t *req)
 {
-    static const char body[] =
-        "<!doctype html><meta charset=utf-8>"
-        "<title>pt700</title>"
-        "<h1>pt700</h1>"
-        "<p>API up. SPA pending — see "
-        "<code>GET /api/status</code> for now.</p>";
     httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, body, sizeof body - 1);
+    return httpd_resp_send(req, index_html_start,
+                           index_html_end - index_html_start);
 }
 
 static httpd_handle_t s_http;
