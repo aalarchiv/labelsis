@@ -48,8 +48,9 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
 <header>
   <h1>pt700</h1>
   <nav id="nav">
-    <a href="#print" data-view="print" class="active">Print</a>
-    <a href="#wifi"  data-view="wifi">Wi-Fi</a>
+    <a href="#print"    data-view="print" class="active">Print</a>
+    <a href="#wifi"     data-view="wifi">Wi-Fi</a>
+    <a href="#settings" data-view="settings">Settings</a>
   </nav>
   <span id="conn" class="dim">connecting…</span>
   <button id="burger" class="burger" aria-label="menu" aria-expanded="false">
@@ -98,6 +99,11 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
         <button id="tpl-prev" class="secondary" type="button">prev</button>
         <span class="muted" id="tpl-rowinfo">—</span>
         <button id="tpl-next" class="secondary" type="button">next</button>
+        <span style="flex:1"></span>
+        <button id="csv-import" class="secondary" type="button">import…</button>
+        <button id="csv-export" class="secondary" type="button">export</button>
+        <button id="csv-clear"  class="secondary" type="button">clear</button>
+        <input id="csv-file" type="file" accept=".csv,.tsv,text/csv,text/plain,text/tab-separated-values" hidden>
       </div>
     </details>
   </section>
@@ -132,9 +138,32 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
       <div id="wifi-log"></div>
     </div>
   </section>
+
+  <section id="view-settings" hidden>
+    <div class="panel">
+      <h2>Settings</h2>
+      <p class="muted">When the SPA is loaded outside the device (localhost dev server), set <b>API host</b> to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this. Some browsers block file://&nbsp;→&nbsp;http:// fetch — serve the spa/ directory with <code>python3 -m http.server</code> if so.</p>
+      <div class="row" style="margin-bottom:.5rem;">
+        <label>API host</label>
+        <input id="api-host" type="text" placeholder="(empty = same origin, e.g. http://pt700.local)">
+      </div>
+      <div class="row">
+        <button id="api-host-save">save</button>
+        <button id="api-host-clear" class="secondary">clear</button>
+      </div>
+      <div id="settings-log" class="muted" style="margin-top:.5rem;"></div>
+    </div>
+  </section>
 </main>
 <script>
 "use strict";
+
+/* When the SPA runs outside the device (file://, localhost, etc.),
+ * apiHost prefixes every /api/... request so the page can hit a real
+ * pt700 over the LAN. Empty = same-origin, which is the embedded
+ * default. Persisted to localStorage from the Settings tab. */
+let apiHost = (localStorage.getItem("pt700:apiHost") || "").replace(/\/+$/, "");
+function apiURL(path) { return apiHost + path; }
 
 // SDM p.20 / p.14 tape geometry table (mirrors pt_tape_geometry_tze).
 const TAPES = {
@@ -150,7 +179,7 @@ let printer = null;  // last /api/status response
 
 async function refreshStatus() {
   try {
-    const r = await fetch("/api/status");
+    const r = await fetch(apiURL("/api/status"));
     const j = await r.json();
     printer = j;
     setConn(j.ok ? "online" : "error", j.ok);
@@ -260,7 +289,7 @@ async function postPrint() {
     "X-Mirror":       document.getElementById("mirror").checked.toString(),
     "X-Chain":        document.getElementById("chain").checked.toString(),
   };
-  const r = await fetch("/api/print", { method: "POST", headers, body });
+  const r = await fetch(apiURL("/api/print"), { method: "POST", headers, body });
   const j = await r.json();
   if (!j.ok) throw new Error(j.error);
   return j;
@@ -401,7 +430,59 @@ document.getElementById("tpl-next").addEventListener("click", () => {
   csvRender(); redraw();
 });
 
-/* ----- view switcher (Print / Wi-Fi) + burger menu --------------- */
+/* CSV import/export — file <-> textarea round-trip. */
+document.getElementById("csv-import").addEventListener("click", () => {
+  document.getElementById("csv-file").click();
+});
+document.getElementById("csv-file").addEventListener("change", async e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const text = await f.text();
+  document.getElementById("csv").value = text;
+  csvUpdate();
+  e.target.value = "";  /* allow re-importing the same filename */
+});
+document.getElementById("csv-export").addEventListener("click", () => {
+  const text = document.getElementById("csv").value;
+  if (!text.trim()) return;
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+  a.download = `pt700-labels-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 0);
+});
+document.getElementById("csv-clear").addEventListener("click", () => {
+  if (document.getElementById("csv").value && !confirm("clear all CSV data?")) return;
+  document.getElementById("csv").value = "";
+  csvUpdate();
+});
+
+/* Settings tab — API host. */
+document.getElementById("api-host").value = apiHost;
+function settingsLog(msg, ok) {
+  const el = document.getElementById("settings-log");
+  el.textContent = msg;
+  el.className = ok === undefined ? "muted" : (ok ? "kv-ok" : "kv-err");
+}
+document.getElementById("api-host-save").addEventListener("click", () => {
+  const v = document.getElementById("api-host").value.trim().replace(/\/+$/, "");
+  apiHost = v;
+  if (v) localStorage.setItem("pt700:apiHost", v);
+  else   localStorage.removeItem("pt700:apiHost");
+  settingsLog(v ? `API host = ${v}` : "API host cleared (using same origin)", true);
+  refreshStatus();
+});
+document.getElementById("api-host-clear").addEventListener("click", () => {
+  document.getElementById("api-host").value = "";
+  apiHost = "";
+  localStorage.removeItem("pt700:apiHost");
+  settingsLog("API host cleared (using same origin)", true);
+  refreshStatus();
+});
+
+/* ----- view switcher (Print / Wi-Fi / Settings) + burger menu ---- */
 
 function showView(name) {
   document.querySelectorAll("section[id^=view-]").forEach(s => {
@@ -432,7 +513,7 @@ async function wifiScan() {
   const sel = document.getElementById("wifi-ssid-select");
   sel.innerHTML = "<option value=''>(scanning…)</option>";
   try {
-    const r = await fetch("/api/scan");
+    const r = await fetch(apiURL("/api/scan"));
     const j = await r.json();
     sel.innerHTML = "";
     if (!j.ok || !j.networks.length) {
@@ -469,7 +550,7 @@ async function wifiSave() {
   btn.disabled = true;
   wifiLog("saving…");
   try {
-    const r = await fetch("/api/setup", {
+    const r = await fetch(apiURL("/api/setup"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ssid, password }),

@@ -295,6 +295,29 @@ static void transport_up(const pt_app_config_t *cfg)
 
 /* ----------------------------------------------------------- HTTP API --- */
 
+/* Permissive CORS so the SPA can be developed and tested from any
+ * origin (e.g. file://, localhost dev server) hitting a real device
+ * over the LAN. Same security posture as before: the API has no auth,
+ * anyone reachable on the LAN could already drive it from a same-
+ * origin tool — CORS just lets browser pages do it too. */
+static void cors_headers(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin",  "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Max-Age",       "3600");
+}
+
+/* OPTIONS catch-all — answers CORS preflight for any path with the
+ * shared CORS headers. Browsers fire this before any non-simple
+ * request (Content-Type: application/json, custom X-* headers, etc.). */
+static esp_err_t cors_preflight(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
+}
+
 /* Serializes whole pt_session operations across HTTP worker threads.
  * pt_transport already mutexes individual send/recv pairs, but a print
  * is many recvs in a row (wait_print_done loops on status messages
@@ -333,6 +356,7 @@ static const char *err_kind(pt_err_t e)
 
 static esp_err_t api_status(httpd_req_t *req)
 {
+    cors_headers(req);
     /* Short wait — a status poll that races with a long print should
      * fail fast as "busy" rather than holding the connection while the
      * print finishes. */
@@ -394,6 +418,7 @@ static void hdr_bool(httpd_req_t *req, const char *name, bool *dst)
 /* GET /api/info — geometry + identity + non-printable margins. */
 static esp_err_t api_info(httpd_req_t *req)
 {
+    cors_headers(req);
     if (!SESSION_LOCK(500)) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "application/json");
@@ -459,6 +484,7 @@ static esp_err_t api_info(httpd_req_t *req)
  * normal feed/cut path runs. */
 static esp_err_t feed_or_cut(httpd_req_t *req, bool do_cut, uint16_t dots)
 {
+    cors_headers(req);
     /* Wait the full session-lock window — feed/cut still go through
      * pt_session_print_raster (with a one-row zero job), so they need
      * exclusive printer access for the duration. */
@@ -532,6 +558,7 @@ static esp_err_t api_feed(httpd_req_t *req)
 
 static esp_err_t api_print(httpd_req_t *req)
 {
+    cors_headers(req);
     int total = req->content_len;
     if (total <= 0 || total % 16 != 0 || total > MAX_PRINT_BODY) {
         httpd_resp_set_status(req, total > MAX_PRINT_BODY
@@ -645,6 +672,7 @@ extern const char index_html_end[]   asm("_binary_index_html_end");
 
 static esp_err_t api_index(httpd_req_t *req)
 {
+    cors_headers(req);
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, index_html_start,
                            index_html_end - index_html_start);
@@ -661,8 +689,11 @@ static esp_err_t api_setup(httpd_req_t *req);
 static esp_err_t http_up(uint16_t port)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.server_port = port ? port : 80;
+    cfg.server_port      = port ? port : 80;
     cfg.lru_purge_enable = true;
+    /* Wildcard matching enables the OPTIONS catch-all below; specific
+     * routes still match exactly. */
+    cfg.uri_match_fn     = httpd_uri_match_wildcard;
 
     if (httpd_start(&s_http, &cfg) != ESP_OK) return ESP_FAIL;
 
@@ -698,6 +729,10 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/", .method = HTTP_GET,
         .handler = api_index, .user_ctx = NULL,
     };
+    static const httpd_uri_t cors_route = {
+        .uri = "/*", .method = HTTP_OPTIONS,
+        .handler = cors_preflight, .user_ctx = NULL,
+    };
     httpd_register_uri_handler(s_http, &status_route);
     httpd_register_uri_handler(s_http, &info_route);
     httpd_register_uri_handler(s_http, &print_route);
@@ -706,6 +741,7 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &scan_route);
     httpd_register_uri_handler(s_http, &setup_route);
     httpd_register_uri_handler(s_http, &index_route);
+    httpd_register_uri_handler(s_http, &cors_route);
     return ESP_OK;
 }
 
@@ -722,6 +758,7 @@ extern const char setup_html_end[]   asm("_binary_setup_html_end");
  * see non-success HTML and most phones surface a "sign in" notice. */
 static esp_err_t ap_setup_page(httpd_req_t *req)
 {
+    cors_headers(req);
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, setup_html_start,
                            setup_html_end - setup_html_start);
@@ -749,6 +786,7 @@ static void send_json_string(httpd_req_t *req, const uint8_t *s, size_t n)
  * up). Returns up to 30 best-RSSI APs; the page dedupes by SSID. */
 static esp_err_t api_scan(httpd_req_t *req)
 {
+    cors_headers(req);
     wifi_scan_config_t sc = {0};
     if (esp_wifi_scan_start(&sc, true) != ESP_OK) {
         httpd_resp_set_status(req, "503 Service Unavailable");
@@ -815,6 +853,7 @@ static bool extract_str(const char *body, const char *key,
  * to NVS, replies, then reboots so the next boot enters STA mode. */
 static esp_err_t api_setup(httpd_req_t *req)
 {
+    cors_headers(req);
     char body[300];
     int  total = req->content_len;
     if (total <= 0 || total >= (int)sizeof body) {
@@ -878,9 +917,14 @@ static esp_err_t http_ap_up(void)
         .uri = "/*", .method = HTTP_GET,
         .handler = ap_setup_page, .user_ctx = NULL,
     };
+    static const httpd_uri_t cors_route = {
+        .uri = "/*", .method = HTTP_OPTIONS,
+        .handler = cors_preflight, .user_ctx = NULL,
+    };
     httpd_register_uri_handler(s_http, &scan_route);
     httpd_register_uri_handler(s_http, &setup_route);
     httpd_register_uri_handler(s_http, &catch_all);
+    httpd_register_uri_handler(s_http, &cors_route);
     return ESP_OK;
 }
 
