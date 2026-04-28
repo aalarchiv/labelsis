@@ -1,7 +1,9 @@
 /*
- * pt_app — Wi-Fi + HTTP + transport glue. MVP scope: brings everything
- * up and serves /api/status. Print, cut, feed, SPA, AP onboarding land
- * in follow-up issues without changing this skeleton.
+ * pt_app — Wi-Fi + HTTP + transport glue. Owns:
+ *   - NVS-persisted Wi-Fi creds with first-boot fallback to compiled-in
+ *   - SoftAP onboarding ("pt700-setup" + setup page) when no creds
+ *   - STA bring-up + transport open + mDNS + the HTTP API
+ *   - long-press GPIO that wipes creds and re-enters AP mode
  */
 
 #include "pt_app.h"
@@ -9,18 +11,19 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "mdns.h"
-#include "nvs_flash.h"
-
 #include "nvs.h"
+#include "nvs_flash.h"
 
 #include "pt_protocol.h"
 #include "pt_session.h"
@@ -72,7 +75,6 @@ static esp_err_t creds_save(const char *ssid, const char *password)
     return err;
 }
 
-__attribute__((unused))  /* used by the GPIO reset path (follow-up). */
 static esp_err_t creds_clear(void)
 {
     nvs_handle_t h;
@@ -83,6 +85,61 @@ static esp_err_t creds_clear(void)
     err = nvs_commit(h);
     nvs_close(h);
     return err;
+}
+
+/* ----------------------------------------------------- reset button -- */
+
+#define RESET_HOLD_MS  5000   /* duration to qualify as a long press */
+#define RESET_POLL_MS  50     /* GPIO sample period */
+
+/* Polls an active-low input. Holding it for RESET_HOLD_MS clears creds
+ * and reboots — next boot enters AP-mode onboarding. We sample rather
+ * than use an ISR because debounce + duration tracking is simpler in a
+ * task, and the work is trivial (20 reads/s, costs ~nothing). */
+static void reset_button_task(void *arg)
+{
+    int gpio = (int)(intptr_t)arg;
+    gpio_config_t gc = {
+        .pin_bit_mask = 1ULL << gpio,
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&gc) != ESP_OK) {
+        ESP_LOGW(TAG, "reset: gpio %d config failed — disabling", gpio);
+        vTaskDelete(NULL);
+    }
+
+    TickType_t pressed_at = 0;
+    while (1) {
+        bool       down = (gpio_get_level(gpio) == 0);
+        TickType_t now  = xTaskGetTickCount();
+        if (down && pressed_at == 0) {
+            pressed_at = now;
+        } else if (!down) {
+            pressed_at = 0;
+        } else if ((now - pressed_at) >= pdMS_TO_TICKS(RESET_HOLD_MS)) {
+            ESP_LOGW(TAG, "reset: long press on gpio %d — clearing creds", gpio);
+            creds_clear();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            esp_restart();
+        }
+        vTaskDelay(pdMS_TO_TICKS(RESET_POLL_MS));
+    }
+}
+
+static void reset_button_up(int gpio)
+{
+    if (gpio < 0) {
+        ESP_LOGI(TAG, "reset: disabled (gpio < 0)");
+        return;
+    }
+    BaseType_t r = xTaskCreate(reset_button_task, "rstbtn", 2048,
+                               (void *)(intptr_t)gpio,
+                               tskIDLE_PRIORITY + 1, NULL);
+    if (r != pdPASS) ESP_LOGW(TAG, "reset: task create failed");
+    else             ESP_LOGI(TAG, "reset: gpio %d, hold %d ms", gpio, RESET_HOLD_MS);
 }
 
 /* ------------------------------------------------------------ Wi-Fi --- */
@@ -764,6 +821,10 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
+
+    /* Start the reset-button watcher first so a stuck button can rescue
+     * a board that would otherwise wedge in a connect/AP loop. */
+    reset_button_up(cfg->reset_gpio_num);
 
     /* Resolve Wi-Fi creds: NVS wins if present, else fall back to the
      * compiled-in cfg (and persist on first successful connect). */

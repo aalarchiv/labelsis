@@ -28,6 +28,8 @@ void app_main(void)
         .use_usb_host           = false,  /* mock by default; flip to true
                                              when a real PT-* is wired up */
         .usb_connect_timeout_ms = 10000,
+        .reset_gpio_num         = 0,      /* BOOT button on most devkits;
+                                             5 s hold wipes Wi-Fi creds */
     };
     pt_app_run(&cfg);
 

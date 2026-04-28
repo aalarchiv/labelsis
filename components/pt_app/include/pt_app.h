@@ -31,6 +31,11 @@ typedef struct {
     uint16_t    http_port;       /* default 80 if 0 */
     bool        use_usb_host;    /* false → mock transport (no printer needed) */
     uint32_t    usb_connect_timeout_ms;  /* default 10000 if 0 */
+    /* Active-low button (with internal pull-up) that, when held for
+     * 5 s, wipes Wi-Fi creds from NVS and reboots into AP-mode
+     * onboarding. Set to a negative value to disable. GPIO 0 is the
+     * BOOT button on most ESP32-S2/S3 devkits. */
+    int         reset_gpio_num;
 } pt_app_config_t;
 
 /* Bring everything up. Returns ESP_OK once the HTTP server is listening
