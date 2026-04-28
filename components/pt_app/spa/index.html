@@ -89,7 +89,9 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
       <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;">Template &amp; CSV data</summary>
       <p class="muted" style="margin:.75rem 0 .5rem;">Paste CSV with a header row. Use <code>{column}</code> in the
       label text above to substitute. Optional <code>$times</code>
-      column repeats a row N times in batch print.</p>
+      column repeats a row N times in batch print. Date helpers:
+      <code>{$dt|YYYY-MM-DD}</code>, <code>{$time|HH:mm}</code>,
+      <code>{$now}</code> (ISO) — work without CSV too.</p>
       <textarea id="csv" rows="6" placeholder="name,$times&#10;Alice,2&#10;Bob,1"
                 style="width:100%; background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical;"></textarea>
       <div class="row" style="margin-top:.5rem;">
@@ -355,15 +357,41 @@ function parseCSV(text) {
   return { headers, data };
 }
 
+/* {col} for CSV cell, optional |format. Special keys $dt/$now/$time
+ * substitute the current date/time; format string accepts YYYY MM DD
+ * HH mm ss tokens (zero-padded). Examples:
+ *   {name}                   - column lookup
+ *   {$dt|YYYY-MM-DD}         - 2026-04-28
+ *   {$time|HH:mm}            - 14:32
+ *   {$now}                   - 2026-04-28T14:32:07.123Z (ISO)
+ */
 function substitute(tpl, row) {
-  return tpl.replace(/\{\s*([\w$]+)\s*\}/g, (m, key) =>
-    row[key] !== undefined ? String(row[key]) : m);
+  return tpl.replace(/\{\s*([\w$]+)\s*(?:\|\s*([^}]+?)\s*)?\}/g, (m, key, fmt) => {
+    if (key === "$dt" || key === "$now")
+      return fmt ? formatDate(new Date(), fmt) : new Date().toISOString();
+    if (key === "$time")
+      return formatDate(new Date(), fmt || "HH:mm:ss");
+    if (row && row[key] !== undefined) return String(row[key]);
+    return m;
+  });
+}
+
+function formatDate(d, fmt) {
+  const pad = n => String(n).padStart(2, "0");
+  return fmt
+    .replace(/YYYY/g, d.getFullYear())
+    .replace(/MM/g,   pad(d.getMonth() + 1))
+    .replace(/DD/g,   pad(d.getDate()))
+    .replace(/HH/g,   pad(d.getHours()))
+    .replace(/mm/g,   pad(d.getMinutes()))
+    .replace(/ss/g,   pad(d.getSeconds()));
 }
 
 function renderTextForPreview() {
   const tpl = document.getElementById("text").value || "";
   const row = csvData.data[csvCurrentRow];
-  return row ? substitute(tpl, row) : tpl;
+  /* substitute() always runs so $dt/$now/$time work even without CSV. */
+  return substitute(tpl, row || {});
 }
 
 function csvRender() {
