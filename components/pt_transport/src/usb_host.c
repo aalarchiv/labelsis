@@ -281,21 +281,15 @@ static esp_err_t plite_unstick(usb_host_client_handle_t client_hdl,
         xSemaphoreTake(sem, pdMS_TO_TICKS(1000));
     }
 
-    /* Send a full 512-byte data-out block (matches what a Windows
-     * raw-volume write of 10 bytes actually puts on the wire — the
-     * filesystem layer pads to sector size). The magic prefix sits
-     * at offset 0, the rest is zero. */
-    #define BOT_BLOCK 512
-    uint8_t *data_buf = xfer_out->data_buffer;
-    memset(data_buf, 0, BOT_BLOCK);
-    memcpy(data_buf, PLITE_UNSTICK_MAGIC, sizeof PLITE_UNSTICK_MAGIC);
-
-    /* SCSI BOT CBW (31 bytes): WRITE(10), 1 block (512 bytes),
-     * dCBWDataTransferLength = 512 to match the data-out below. */
+    /* SCSI BOT CBW (31 bytes): WRITE(10) of 1 block, with
+     * dCBWDataTransferLength = 10 (just the magic). Mismatch with
+     * the SCSI block count is intentional — Brother's firmware
+     * sniffs the data-out content rather than honouring a real
+     * disk-sector write. */
     uint8_t cbw[31] = {
         /* dCBWSignature "USBC" */ 'U','S','B','C',
         /* dCBWTag                */ 0xEF, 0xBE, 0xAD, 0xDE,
-        /* dCBWDataTransferLength */ (BOT_BLOCK & 0xff), (BOT_BLOCK >> 8) & 0xff, 0x00, 0x00,
+        /* dCBWDataTransferLength */ 0x0A, 0x00, 0x00, 0x00,
         /* bmCBWFlags  = OUT      */ 0x00,
         /* bCBWLUN                */ 0x00,
         /* bCBWCBLength = 10      */ 0x0A,
@@ -312,13 +306,27 @@ static esp_err_t plite_unstick(usb_host_client_handle_t client_hdl,
         ESP_LOGW(TAG, "P-Lite: CBW write failed (status=%d)", xfer_out->status);
         goto cleanup;
     }
-    if (plite_xfer(xfer_out, dev, ep_out, data_buf, BOT_BLOCK, sem) != ESP_OK) {
-        ESP_LOGW(TAG, "P-Lite: data-out failed (status=%d, likely already flipping)",
-                 xfer_out->status);
+    ESP_LOGI(TAG, "P-Lite: CBW ok (status=%d, sent=%d)",
+             xfer_out->status, xfer_out->actual_num_bytes);
+
+    if (plite_xfer(xfer_out, dev, ep_out,
+                   PLITE_UNSTICK_MAGIC, sizeof PLITE_UNSTICK_MAGIC, sem) != ESP_OK) {
+        ESP_LOGW(TAG, "P-Lite: data-out failed (status=%d)", xfer_out->status);
+    } else {
+        ESP_LOGI(TAG, "P-Lite: data-out ok (status=%d, sent=%d)",
+                 xfer_out->status, xfer_out->actual_num_bytes);
     }
-    if (plite_xfer(xfer_in, dev, ep_in, NULL, 13, sem) != ESP_OK) {
+
+    /* CSW IN must be MPS-aligned (esp-idf rejects sub-MPS IN sizes).
+     * Round 13 up to the next MPS multiple; firmware short-packets at
+     * 13 bytes which completes the transfer cleanly. */
+    size_t csw_len = ((13 + mps_in - 1) / mps_in) * mps_in;
+    if (plite_xfer(xfer_in, dev, ep_in, NULL, csw_len, sem) != ESP_OK) {
         ESP_LOGD(TAG, "P-Lite: CSW read incomplete (status=%d, expected if re-enumerating)",
                  xfer_in->status);
+    } else {
+        ESP_LOGI(TAG, "P-Lite: CSW status=%d got=%d",
+                 xfer_in->status, xfer_in->actual_num_bytes);
     }
 
     ESP_LOGI(TAG, "P-Lite: unstick magic sent; awaiting re-enumeration");

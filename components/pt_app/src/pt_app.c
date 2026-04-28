@@ -694,6 +694,9 @@ static esp_err_t http_up(uint16_t port)
     /* Wildcard matching enables the OPTIONS catch-all below; specific
      * routes still match exactly. */
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
+    /* Default is 8; we register 9 (status, info, print, cut, feed,
+     * scan, setup, index, OPTIONS catch-all) and want headroom. */
+    cfg.max_uri_handlers = 16;
 
     if (httpd_start(&s_http, &cfg) != ESP_OK) return ESP_FAIL;
 
@@ -900,6 +903,7 @@ static esp_err_t http_ap_up(void)
     cfg.server_port      = 80;
     cfg.lru_purge_enable = true;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
+    cfg.max_uri_handlers = 16;
 
     if (httpd_start(&s_http, &cfg) != ESP_OK) return ESP_FAIL;
 
