@@ -35,18 +35,18 @@ static const char *USAGE =
     "Usage: pt_send [options] <input.pbm>\n"
     "\n"
     "Options:\n"
-    "  --no-cut             disable auto-cut at end of job\n"
-    "  --chain              chain printing — skip the trailing feed+cut so the\n"
-    "                       NEXT job continues directly on this tape (saves the\n"
-    "                       ~25 mm leader the printer normally wastes between\n"
-    "                       jobs). Use this for series of related labels; the\n"
-    "                       last one in the series should NOT pass --chain so\n"
-    "                       the printer cuts and releases the strip.\n"
+    "  --no-cut             disable auto-cut at end of job (use for tiny\n"
+    "                       labels that might otherwise jam in the cutter)\n"
+    "  --chain              chain printing — skip the trailing feed+cut so\n"
+    "                       the NEXT job continues directly on this tape\n"
+    "                       (saves the ~25 mm leader the printer normally\n"
+    "                       wastes between cuts). The last job in a series\n"
+    "                       should NOT pass --chain so the strip is released.\n"
     "  --mirror             mirror-print (for transparent tape backside)\n"
     "  --no-compression     send raster rows raw (no PackBits)\n"
-    "  --special-tape       disable cutter (fabric / iron-on tapes)\n"
     "  --margin=DOTS        leading margin in dots (default 14 ≈ 2 mm)\n"
     "  --width=MM           require this tape width (default: trust loaded tape)\n"
+    "  -v, --verbose        log every status message the printer emits\n"
     "  -h, --help           show this help\n";
 
 /* ----------------------------------------------------------- PBM reader */
@@ -149,6 +149,33 @@ static uint8_t *render_to_raster_rows(const pbm_t *src, size_t *out_rows)
     return out;
 }
 
+/* ----------------------------------------------------------- verbose log */
+
+static const char *status_type_name(pt_status_type_t t)
+{
+    switch (t) {
+    case PT_STATUS_REPLY:          return "reply";
+    case PT_STATUS_PRINTING_DONE:  return "printing-done";
+    case PT_STATUS_ERROR_OCCURRED: return "error";
+    case PT_STATUS_TURNED_OFF:     return "turned-off";
+    case PT_STATUS_NOTIFICATION:   return "notification";
+    case PT_STATUS_PHASE_CHANGE:   return "phase-change";
+    }
+    return "?";
+}
+
+static void log_status(const pt_status_t *s, void *unused)
+{
+    (void)unused;
+    fprintf(stderr,
+        "  status: type=%-13s phase=%s phase_num=%u "
+        "err1=0x%02x err2=0x%02x notif=%u media=%u/0x%02x\n",
+        status_type_name(s->status_type),
+        s->phase_type == PT_PHASE_PRINTING ? "printing" : "editing",
+        s->phase_number, s->error1, s->error2, s->notification,
+        s->media_width_mm, s->media_type);
+}
+
 /* ----------------------------------------------------------- error map */
 
 static const char *err_str(pt_err_t e)
@@ -187,22 +214,22 @@ int main(int argc, char **argv)
         { "chain",          no_argument,       0, 'N' },
         { "mirror",         no_argument,       0, 'M' },
         { "no-compression", no_argument,       0, 'R' },
-        { "special-tape",   no_argument,       0, 'S' },
         { "margin",         required_argument, 0, 'D' },
         { "width",          required_argument, 0, 'W' },
+        { "verbose",        no_argument,       0, 'v' },
         { "help",           no_argument,       0, 'h' },
         { 0, 0, 0, 0 },
     };
     int c;
-    while ((c = getopt_long(argc, argv, "h", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "vh", longopts, NULL)) != -1) {
         switch (c) {
         case 'C': opts.auto_cut = false; break;
         case 'N': opts.no_chain_print = false; break;
         case 'M': opts.mirror_print = true; break;
         case 'R': opts.compression = PT_COMPRESSION_NONE; break;
-        case 'S': opts.special_tape = true; break;
         case 'D': opts.margin_dots = (uint16_t)atoi(optarg); break;
         case 'W': width_override = atoi(optarg); break;
+        case 'v': opts.on_status = log_status; break;
         case 'h': fputs(USAGE, stdout); return 0;
         default:  fputs(USAGE, stderr); return 2;
         }

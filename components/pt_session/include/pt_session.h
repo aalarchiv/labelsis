@@ -25,6 +25,12 @@
 extern "C" {
 #endif
 
+/* Observer callback fired for every decoded status message — both the
+ * one returned by pt_session_query_status and every message read inside
+ * pt_session_print_raster's wait-for-completion loop. Use it for
+ * verbose logging or to push live status to a UI. NULL = no observer. */
+typedef void (*pt_status_observer_fn)(const pt_status_t *s, void *user);
+
 typedef struct {
     pt_compression_t compression;        /* default TIFF (PackBits)      */
     bool             auto_cut;           /* default true                 */
@@ -34,7 +40,9 @@ typedef struct {
     uint16_t         margin_dots;        /* default 14 dots ≈ 2 mm @180  */
     bool             recover_always_on;  /* default true                 */
     uint32_t         status_timeout_ms;  /* per status-read, default 5000 */
-    uint32_t         print_timeout_ms;   /* total job, default 60000     */
+    uint32_t         print_timeout_ms;   /* total job, default 120000    */
+    pt_status_observer_fn on_status;     /* default NULL                 */
+    void                 *on_status_user;
 } pt_session_options_t;
 
 /* Populate `out` with the documented defaults above. */

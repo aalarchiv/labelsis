@@ -20,6 +20,8 @@ void pt_session_options_default(pt_session_options_t *o)
     o->recover_always_on = true;
     o->status_timeout_ms = 5000;
     o->print_timeout_ms  = 120000;  /* 2 min — tolerates a 1 m label + cooling */
+    o->on_status         = NULL;
+    o->on_status_user    = NULL;
 }
 
 /* Send the full buffer or fail. */
@@ -30,15 +32,27 @@ static pt_err_t send_all(pt_transport_t *t, const uint8_t *buf, size_t len)
     return PT_OK;
 }
 
-/* Read exactly 32 bytes of status into `out` within timeout_ms. */
+/* Read exactly 32 bytes of status into `out` within ~timeout_ms total.
+ * Accumulates across multiple recv() calls so that a libusb short-read
+ * (rare in practice — 32-byte status fits in one bulk packet — but
+ * defensible) doesn't lose the partial bytes already pulled. */
 static pt_err_t recv_status(pt_transport_t *t, pt_status_t *out,
                             uint32_t timeout_ms)
 {
-    uint8_t resp[32];
-    size_t  got = 0;
-    int     rc  = pt_transport_recv(t, resp, sizeof resp, &got, timeout_ms);
-    if (rc < 0) return PT_ERR_TRANSPORT;
-    if (got != 32) return PT_ERR_TIMEOUT;
+    uint8_t  resp[32];
+    size_t   total = 0;
+    uint32_t budget = timeout_ms;
+    while (total < 32) {
+        size_t got = 0;
+        uint32_t step = (budget > 1000) ? 1000 : budget;
+        int rc = pt_transport_recv(t, resp + total, 32 - total, &got, step);
+        if (rc < 0) return PT_ERR_TRANSPORT;
+        total += got;
+        if (got == 0) {
+            if (budget <= step) return PT_ERR_TIMEOUT;
+            budget -= step;
+        }
+    }
     return pt_status_decode(resp, 32, out);
 }
 
@@ -102,6 +116,7 @@ static pt_err_t wait_print_done(pt_transport_t *t,
         }
         if (err != PT_OK) return err;
         messages++;
+        if (opts->on_status) opts->on_status(&s, opts->on_status_user);
 
         if (s.status_type == PT_STATUS_ERROR_OCCURRED) {
             pt_err_t e = map_errors(&s);
@@ -134,7 +149,9 @@ pt_err_t pt_session_query_status(pt_transport_t *t,
     int n = pt_encode_status_request(cmd, sizeof cmd);
     pt_err_t err = send_all(t, cmd, (size_t)n);
     if (err != PT_OK) return err;
-    return recv_status(t, out, opts->status_timeout_ms);
+    pt_err_t r = recv_status(t, out, opts->status_timeout_ms);
+    if (r == PT_OK && opts->on_status) opts->on_status(out, opts->on_status_user);
+    return r;
 }
 
 pt_err_t pt_session_print_raster(pt_transport_t *t,
