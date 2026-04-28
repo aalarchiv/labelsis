@@ -41,8 +41,11 @@ static const char *USAGE =
     "  --chain              chain printing — skip the trailing feed+cut so\n"
     "                       the NEXT job continues directly on this tape\n"
     "                       (saves the ~25 mm leader the printer normally\n"
-    "                       wastes between cuts). The last job in a series\n"
-    "                       should NOT pass --chain so the strip is released.\n"
+    "                       wastes between cuts). Implies --no-cut: on\n"
+    "                       PT-P700 the auto-cut bit fires the cutter even\n"
+    "                       in chain mode unless explicitly disabled. The\n"
+    "                       last job in a series should NOT pass --chain so\n"
+    "                       the strip is released.\n"
     "  --mirror             mirror-print (for transparent tape backside)\n"
     "  --no-compression     send raster rows raw (no PackBits)\n"
     "  --margin=DOTS        leading margin in dots (default 14 ≈ 2 mm)\n"
@@ -234,7 +237,7 @@ int main(int argc, char **argv)
     while ((c = getopt_long(argc, argv, "vh", longopts, NULL)) != -1) {
         switch (c) {
         case 'C': opts.auto_cut = false; break;
-        case 'N': opts.no_chain_print = false; break;
+        case 'N': opts.no_chain_print = false; opts.auto_cut = false; break;
         case 'M': opts.mirror_print = true; break;
         case 'R': opts.compression = PT_COMPRESSION_NONE; break;
         case 'D': opts.margin_dots = (uint16_t)atoi(optarg); break;
