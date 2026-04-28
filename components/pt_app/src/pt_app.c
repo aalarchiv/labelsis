@@ -289,6 +289,24 @@ static void transport_up(const pt_app_config_t *cfg)
 
 /* ----------------------------------------------------------- HTTP API --- */
 
+/* Serializes whole pt_session operations across HTTP worker threads.
+ * pt_transport already mutexes individual send/recv pairs, but a print
+ * is many recvs in a row (wait_print_done loops on status messages
+ * looking for phase=printing) — without a higher-level lock, a /api/
+ * status poll fired by the SPA's 3 s timer can slot between two of
+ * those recvs and consume the printer's lone phase=printing message,
+ * making the print's wait loop time out even though the print is fine.
+ *
+ * Take this mutex around any pt_session call. Polls and prints
+ * serialize cleanly; the SPA briefly stops refreshing during a print,
+ * which is exactly what we want anyway. */
+static SemaphoreHandle_t s_session_mutex;
+
+#define SESSION_LOCK(timeout_ms) \
+    (xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+#define SESSION_UNLOCK() \
+    xSemaphoreGive(s_session_mutex)
+
 static const char *err_kind(pt_err_t e)
 {
     switch (e) {
@@ -309,8 +327,18 @@ static const char *err_kind(pt_err_t e)
 
 static esp_err_t api_status(httpd_req_t *req)
 {
+    /* Short wait — a status poll that races with a long print should
+     * fail fast as "busy" rather than holding the connection while the
+     * print finishes. */
+    if (!SESSION_LOCK(500)) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"transport\":\"busy\",\"error\":\"busy\"}");
+    }
     pt_status_t st;
     pt_err_t err = pt_session_query_status(&s_transport, &st, NULL);
+    SESSION_UNLOCK();
 
     char body[384];
     int  n;
@@ -360,8 +388,15 @@ static void hdr_bool(httpd_req_t *req, const char *name, bool *dst)
 /* GET /api/info — geometry + identity + non-printable margins. */
 static esp_err_t api_info(httpd_req_t *req)
 {
+    if (!SESSION_LOCK(500)) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"transport\":\"busy\",\"error\":\"busy\"}");
+    }
     pt_status_t st;
     pt_err_t err = pt_session_query_status(&s_transport, &st, NULL);
+    SESSION_UNLOCK();
     if (err != PT_OK) {
         char body[128];
         int n = snprintf(body, sizeof body,
@@ -418,6 +453,15 @@ static esp_err_t api_info(httpd_req_t *req)
  * normal feed/cut path runs. */
 static esp_err_t feed_or_cut(httpd_req_t *req, bool do_cut, uint16_t dots)
 {
+    /* Wait the full session-lock window — feed/cut still go through
+     * pt_session_print_raster (with a one-row zero job), so they need
+     * exclusive printer access for the duration. */
+    if (!SESSION_LOCK(150000)) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"busy\"}");
+    }
+
     pt_session_options_t opts;
     pt_session_options_default(&opts);
     opts.compression  = PT_COMPRESSION_NONE;  /* avoid PackBits round-trip */
@@ -430,6 +474,7 @@ static esp_err_t feed_or_cut(httpd_req_t *req, bool do_cut, uint16_t dots)
     static const uint8_t zero_row[16] = {0};
     pt_err_t err = pt_session_print_raster(&s_transport, zero_row, 1,
                                            0 /* trust loaded width */, &opts);
+    SESSION_UNLOCK();
 
     char body[96];
     int  n;
@@ -539,8 +584,19 @@ static esp_err_t api_print(httpd_req_t *req)
     }
 
     size_t   n_rows = (size_t)total / 16;
+
+    /* Hold the lock across the entire job (encode + raster send +
+     * wait_print_done). Long enough for a 1 m label at PT-P700's
+     * ~30 mm/s — print_timeout_ms (default 120 s) plus margin. */
+    if (!SESSION_LOCK(150000)) {
+        free(buf);
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"busy\"}");
+    }
     pt_err_t err = pt_session_print_raster(&s_transport, buf,
                                            n_rows, width, &opts);
+    SESSION_UNLOCK();
     free(buf);
 
     char rbody[128];
@@ -830,6 +886,9 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
+
+    s_session_mutex = xSemaphoreCreateMutex();
+    if (!s_session_mutex) return ESP_ERR_NO_MEM;
 
     /* Start the reset-button watcher first so a stuck button can rescue
      * a board that would otherwise wedge in a connect/AP loop. */
