@@ -185,15 +185,25 @@ static int find_msc_endpoints(usb_device_handle_t dev,
 
 static void plite_xfer_cb(usb_transfer_t *t)
 {
+    /* Use the FromISR variant: esp-idf v5.5's usb_host invokes
+     * transfer callbacks while holding a port-mux spinlock; the
+     * regular xSemaphoreGive re-enters that critical section and
+     * trips the spinlock_acquire assert. The FromISR path skips
+     * vPortEnterCritical and is safe from any context. */
     SemaphoreHandle_t sem = (SemaphoreHandle_t)t->context;
-    if (sem) xSemaphoreGive(sem);
+    if (sem) {
+        BaseType_t hpw = pdFALSE;
+        xSemaphoreGiveFromISR(sem, &hpw);
+        /* Not actually in ISR, so nothing meaningful to yield to. */
+        (void)hpw;
+    }
 }
 
-/* One-shot transfer wrapper used during the unstick sequence. The
- * device is brand new (we haven't touched its bulk endpoints before)
- * so we don't bother with halt/flush/clear on timeout — the next
- * transfer is the last we care about, and we close the device
- * unconditionally afterwards. */
+/* One-shot transfer wrapper used during the unstick sequence. On
+ * semaphore timeout, halt + flush + clear cancels the still-pending
+ * transfer; without that the cleanup path frees a transfer the
+ * stack still owns, and the eventual callback writes through a
+ * dangling sem pointer. Same pattern usb_recv uses below. */
 static esp_err_t plite_xfer(usb_transfer_t *xfer,
                             usb_device_handle_t dev,
                             uint8_t ep_addr,
@@ -208,7 +218,16 @@ static esp_err_t plite_xfer(usb_transfer_t *xfer,
     xfer->callback         = plite_xfer_cb;
     xfer->context          = sem;
     if (usb_host_transfer_submit(xfer) != ESP_OK) return ESP_FAIL;
-    if (xSemaphoreTake(sem, pdMS_TO_TICKS(2000)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    if (xSemaphoreTake(sem, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        usb_host_endpoint_halt(dev, ep_addr);
+        usb_host_endpoint_flush(dev, ep_addr);
+        /* Wait for the (now-cancelled) callback so it's safe to
+         * free the transfer afterwards. Bound it so a wedged
+         * stack can't deadlock us forever. */
+        xSemaphoreTake(sem, pdMS_TO_TICKS(2000));
+        usb_host_endpoint_clear(dev, ep_addr);
+        return ESP_ERR_TIMEOUT;
+    }
     return xfer->status == USB_TRANSFER_STATUS_COMPLETED ? ESP_OK : ESP_FAIL;
 }
 
