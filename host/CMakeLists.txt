@@ -17,5 +17,11 @@ add_library(pt_transport STATIC ${PT_TRANSPORT_SRCS})
 target_include_directories(pt_transport PUBLIC ${PT_TRANSPORT_INCLUDE_DIRS})
 target_link_libraries(pt_transport PUBLIC pt_protocol)
 
+# Test-only support library: oracle fixture loader.
+add_library(fixture STATIC lib/fixture.c)
+target_include_directories(fixture PUBLIC lib)
+target_compile_definitions(fixture PRIVATE
+    PT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../test/fixtures")
+
 enable_testing()
 add_subdirectory(tests)

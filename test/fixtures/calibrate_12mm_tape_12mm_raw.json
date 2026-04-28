@@ -1,0 +1,7 @@
+{
+  "source_tool": "ptouch-770-capture",
+  "source_pbm": "refs/ptouch-770/calibrate_12mm_tape.pbm",
+  "media_width_mm": 12,
+  "compression": false,
+  "output_bytes": 1978
+}

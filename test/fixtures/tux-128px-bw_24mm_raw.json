@@ -1,0 +1,7 @@
+{
+  "source_tool": "ptouch-770-capture",
+  "source_pbm": "refs/ptouch-770/tux-128px-bw.pbm",
+  "media_width_mm": 24,
+  "compression": false,
+  "output_bytes": 2206
+}
