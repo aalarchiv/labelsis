@@ -97,52 +97,48 @@ static pt_err_t send_row(pt_transport_t *t,
     return send_all(t, buf, (size_t)n);
 }
 
-/* PT-P700 completion semantics, observed empirically over libusb on a
- * real device (Apr 2026):
+/* PT-P700 completion semantics, observed empirically over libusb (Apr 2026):
  *
  *   - After Ctrl-Z the printer pushes ONE status message
- *     (status_type=phase-change, phase=printing) and then goes
- *     completely silent for the rest of the job — it does NOT push the
- *     "printing-done" or trailing "phase-change → editing" that SDM §5.1
- *     shows in its diagram.
- *   - It also does NOT respond to ESC i S sent after Ctrl-Z. We tested
- *     up to 24 polls over 2 minutes; zero replies. So the polling
- *     strategy ptouch-770 uses (which kernel-blocks on read with no
- *     timeout) doesn't translate to libusb either: there's nothing to
- *     read.
+ *     (status_type=phase-change, phase=printing) and then goes silent
+ *     for the rest of the job — does NOT push the "printing-done" or
+ *     trailing "phase-change → editing" that SDM §5.1 diagrams.
+ *   - Does NOT respond to ESC i S sent after Ctrl-Z (verified: 24 polls
+ *     over 2 min, zero replies).
  *   - Errors the printer DOES surface (cover-open / overheat / cutter-
  *     jam mid-print) come as unsolicited STATUS_ERROR_OCCURRED messages
- *     during the wait window — those we still want to catch.
- *   - The "no tape inside cartridge" case the user wants to detect is
- *     hardware-invisible: PT-P700's sensor reports cartridge-presence,
- *     not tape-remaining, so error1 stays 0x00 even with an empty
- *     cartridge. The print just silently doesn't appear.
+ *     within the print window — we still want to catch them.
+ *   - "No tape inside cartridge" is hardware-invisible — the cartridge-
+ *     presence sensor doesn't detect tape-remaining. Print silently
+ *     fails; user sees that visually.
  *
- * Strategy: trust phase=printing as the completion signal. After
- * receiving it, wait one short window for any unsolicited error
- * message; if none arrives, succeed. The next job's invalidate + ESC @
- * (per SDM, "also used to cancel printing") resets any wedged state if
- * the printer got stuck mid-print. */
+ * Strategy: estimate the physical print duration from the raster row
+ * count, wait that long while draining any error messages the printer
+ * might push, then return success. Without this wait pt_send would exit
+ * after milliseconds (USB transfer time only), and a quick second
+ * pt_send invocation would cancel the still-in-progress first print
+ * via the SDM-documented ESC @ cancel-and-init. */
 static pt_err_t wait_print_done(pt_transport_t *t,
+                                size_t n_rows,
                                 const pt_session_options_t *opts)
 {
-    const uint32_t step     = opts->status_timeout_ms;
-    uint32_t       budget   = opts->print_timeout_ms;
-    size_t         messages = 0;
-    bool           seen_printing = false;
+    /* PT-P700: ~30 mm/s tape speed = ~213 dots/s at 180 dpi, plus
+     * head warm-up + feed-to-cutter + cut. Pad generously. */
+    uint32_t est_ms = 1500u                        /* warm-up      */
+                    + (uint32_t)(n_rows * 5u)      /* per-row time */
+                    + 2000u;                       /* feed + cut   */
+    if (est_ms > opts->print_timeout_ms) est_ms = opts->print_timeout_ms;
+
+    uint32_t budget = est_ms;
+    size_t   messages = 0;
+    bool     seen_printing = false;
 
     while (budget > 0 && messages < 64) {
+        uint32_t step = (budget > opts->status_timeout_ms)
+                            ? opts->status_timeout_ms : budget;
         pt_status_t s;
         pt_err_t err = recv_status(t, &s, step);
         if (err == PT_ERR_TIMEOUT) {
-            if (seen_printing) {
-                if (opts->on_event)
-                    opts->on_event("phase=printing confirmed; assuming "
-                                   "completion (PT-P700 does not push "
-                                   "completion messages)",
-                                   opts->on_event_user);
-                return PT_OK;
-            }
             budget = (budget > step) ? budget - step : 0;
             continue;
         }
@@ -154,8 +150,8 @@ static pt_err_t wait_print_done(pt_transport_t *t,
             pt_err_t e = map_errors(&s);
             return e ? e : PT_ERR_TRANSPORT;
         }
-        /* Unlikely on PT-P700 but if a future firmware does push these,
-         * accept them. */
+        /* Future-firmware-friendly: if the printer ever does push these,
+         * we'll exit early. PT-P700 currently doesn't. */
         if (s.status_type == PT_STATUS_PRINTING_DONE) return PT_OK;
         if (s.phase_type == PT_PHASE_EDITING
             && (s.status_type == PT_STATUS_PHASE_CHANGE
@@ -164,7 +160,11 @@ static pt_err_t wait_print_done(pt_transport_t *t,
         if (s.status_type == PT_STATUS_PHASE_CHANGE
             && s.phase_type == PT_PHASE_PRINTING) seen_printing = true;
     }
-    return PT_ERR_TIMEOUT;
+    if (opts->on_event)
+        opts->on_event("estimated print time elapsed", opts->on_event_user);
+    /* Saw phase=printing → printer accepted the job; declare success.
+     * Never saw phase=printing → something's wrong upstream. */
+    return seen_printing ? PT_OK : PT_ERR_TIMEOUT;
 }
 
 /* =============================================================== API == */
@@ -262,5 +262,5 @@ pt_err_t pt_session_print_raster(pt_transport_t *t,
     if ((err = send_all(t, buf, (size_t)n)) != PT_OK) return err;
 
     /* 9. Wait for printing-completed. */
-    return wait_print_done(t, opts);
+    return wait_print_done(t, n_rows, opts);
 }
