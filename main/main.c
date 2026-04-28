@@ -28,13 +28,7 @@ void app_main(void)
         .use_usb_host           = true,   /* try the real printer first;
                                              falls back to mock after the
                                              usb_connect_timeout below */
-        /* Generous timeout: a printer in P-Lite mode at cold boot
-         * triggers our MSC unstick + re-enumeration cycle, which has
-         * been observed to take ~25 s before the printer comes back
-         * as PID 0x2061. The wait short-circuits as soon as a real
-         * printer pairs, so the only cost of a long cap is the
-         * fall-through-to-mock path when no printer is attached. */
-        .usb_connect_timeout_ms = 30000,
+        .usb_connect_timeout_ms = 5000,
         .reset_gpio_num         = 0,      /* BOOT button on most devkits;
                                              5 s hold wipes Wi-Fi creds */
     };
