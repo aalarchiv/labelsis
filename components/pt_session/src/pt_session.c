@@ -123,25 +123,27 @@ static pt_err_t wait_print_done(pt_transport_t *t,
     uint32_t       budget   = opts->print_timeout_ms;
     size_t         messages = 0;
     bool           seen_printing = false;
-    bool           awaiting_poll = false;  /* we just sent ESC i S */
 
     while (budget > 0 && messages < 64) {
         pt_status_t s;
         pt_err_t err = recv_status(t, &s, step);
         if (err == PT_ERR_TIMEOUT) {
-            if (seen_printing && !awaiting_poll) {
-                /* Print started, printer went silent. Poke it. */
+            /* On every timeout once the print has started, poke the
+             * printer with ESC i S. The printer may queue the request
+             * until it finishes the actual print and only then reply,
+             * which is why we MUST keep waiting (down to budget) for
+             * the response rather than bailing on the next timeout.
+             * ptouch-770 + printer-driver-ptouch poll the same way and
+             * the printer tolerates it (despite SDM §4 ESC i S note).
+             *
+             * Re-polling on each timeout (not just the first) covers
+             * the case where the printer drops the request entirely
+             * during heavy print rather than queueing it. */
+            if (seen_printing) {
                 uint8_t cmd[8];
                 int n = pt_encode_status_request(cmd, sizeof cmd);
                 pt_err_t se = send_all(t, cmd, (size_t)n);
                 if (se != PT_OK) return se;
-                awaiting_poll = true;
-                continue;  /* re-loop to read the reply without burning budget */
-            }
-            if (awaiting_poll) {
-                /* We sent ESC i S but heard nothing back — printer is
-                 * truly stuck. Stop. */
-                return PT_ERR_TIMEOUT;
             }
             budget = (budget > step) ? budget - step : 0;
             continue;
@@ -155,19 +157,14 @@ static pt_err_t wait_print_done(pt_transport_t *t,
             return e ? e : PT_ERR_TRANSPORT;
         }
         if (s.status_type == PT_STATUS_PRINTING_DONE) return PT_OK;
-        if (s.status_type == PT_STATUS_PHASE_CHANGE
-            && s.phase_type == PT_PHASE_EDITING) return PT_OK;
-        if (awaiting_poll
-            && s.status_type == PT_STATUS_REPLY
-            && s.phase_type == PT_PHASE_EDITING) return PT_OK;
+        /* Any phase=editing signal — whether unsolicited PHASE_CHANGE
+         * or a REPLY to one of our polls — means the print is done. */
+        if (s.phase_type == PT_PHASE_EDITING
+            && (s.status_type == PT_STATUS_PHASE_CHANGE
+             || s.status_type == PT_STATUS_REPLY)) return PT_OK;
 
         if (s.status_type == PT_STATUS_PHASE_CHANGE
             && s.phase_type == PT_PHASE_PRINTING) seen_printing = true;
-
-        /* If our explicit poll returned phase=printing, the print is
-         * still running — clear awaiting_poll so the next timeout polls
-         * again. */
-        awaiting_poll = false;
     }
     return PT_ERR_TIMEOUT;
 }
