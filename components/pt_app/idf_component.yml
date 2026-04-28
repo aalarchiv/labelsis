@@ -1,0 +1,5 @@
+## Managed-component dependencies for pt_app.
+## Pulled by `idf.py reconfigure` (or just `idf.py build`).
+
+dependencies:
+  espressif/mdns: "^1.8.0"

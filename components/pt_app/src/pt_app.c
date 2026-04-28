@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "mdns.h"
 #include "nvs_flash.h"
 
 #include "pt_protocol.h"
@@ -182,6 +183,107 @@ static void hdr_bool(httpd_req_t *req, const char *name, bool *dst)
     else if (strcasecmp(v, "false") == 0 || strcmp(v, "0") == 0) *dst = false;
 }
 
+/* GET /api/info — geometry + identity + non-printable margins. */
+static esp_err_t api_info(httpd_req_t *req)
+{
+    pt_status_t st;
+    pt_err_t err = pt_session_query_status(&s_transport, &st, NULL);
+    if (err != PT_OK) {
+        char body[96];
+        int n = snprintf(body, sizeof body,
+                         "{\"ok\":false,\"error\":\"%s\"}", err_kind(err));
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_send(req, body, n);
+    }
+
+    pt_tape_geometry_t g = {0};
+    bool have_geom = (pt_tape_geometry_tze(st.media_width_mm, &g) == PT_OK);
+    /* Per-side non-printable margin in 180-dpi dots: half the
+     * difference between physical tape width and the print area. */
+    unsigned offside = have_geom
+        ? (unsigned)((g.tape_width_dots - g.print_pins) / 2u) : 0;
+
+    char body[384];
+    int  n = snprintf(body, sizeof body,
+        "{\"ok\":true,"
+        "\"model\":%u,"
+        "\"media_width_mm\":%u,"
+        "\"media_type\":%u,"
+        "\"tape_color_id\":%u,"
+        "\"text_color_id\":%u,"
+        "\"geometry\":{"
+            "\"head_pins\":%u,"
+            "\"print_pins\":%u,"
+            "\"tape_width_dots\":%u,"
+            "\"left_margin_pins\":%u,"
+            "\"right_margin_pins\":%u,"
+            "\"non_printable_dots_per_side\":%u}}",
+        (unsigned)st.model,
+        (unsigned)st.media_width_mm,
+        (unsigned)st.media_type,
+        (unsigned)st.tape_color_id,
+        (unsigned)st.text_color_id,
+        (unsigned)(have_geom ? g.total_pins : 0),
+        (unsigned)(have_geom ? g.print_pins : 0),
+        (unsigned)(have_geom ? g.tape_width_dots : 0),
+        (unsigned)(have_geom ? g.left_margin_pins : 0),
+        (unsigned)(have_geom ? g.right_margin_pins : 0),
+        offside);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, n);
+}
+
+/* POST /api/feed — advance the tape by `dots` (default 100) without
+ * printing. POST /api/cut — issue a single cut at the current head
+ * position. Both build a tiny one-page print job containing a single
+ * zero raster row, with the relevant flags set, so the printer's
+ * normal feed/cut path runs. */
+static esp_err_t feed_or_cut(httpd_req_t *req, bool do_cut, uint16_t dots)
+{
+    pt_session_options_t opts;
+    pt_session_options_default(&opts);
+    opts.compression  = PT_COMPRESSION_NONE;  /* avoid PackBits round-trip */
+    opts.auto_cut     = do_cut;
+    opts.no_chain_print = true;
+    opts.margin_dots  = do_cut ? 14 : dots;   /* feed = use margin to advance */
+
+    /* Single zero raster row = printable nothing; printer still feeds the
+     * configured margin and (optionally) cuts. */
+    static const uint8_t zero_row[16] = {0};
+    pt_err_t err = pt_session_print_raster(&s_transport, zero_row, 1,
+                                           0 /* trust loaded width */, &opts);
+
+    char body[96];
+    int  n;
+    if (err == PT_OK) {
+        n = snprintf(body, sizeof body, "{\"ok\":true}");
+    } else {
+        n = snprintf(body, sizeof body,
+                     "{\"ok\":false,\"error\":\"%s\"}", err_kind(err));
+        httpd_resp_set_status(req, "500 Internal Server Error");
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, n);
+}
+
+static esp_err_t api_cut(httpd_req_t *req)  { return feed_or_cut(req, true, 0); }
+
+static esp_err_t api_feed(httpd_req_t *req)
+{
+    /* Optional ?dots=N query parameter; default 100 (~14 mm @ 180 dpi). */
+    uint16_t dots = 100;
+    char query[32];
+    if (httpd_req_get_url_query_str(req, query, sizeof query) == ESP_OK) {
+        char val[16];
+        if (httpd_query_key_value(query, "dots", val, sizeof val) == ESP_OK) {
+            int v = atoi(val);
+            if (v > 0 && v < 2048) dots = (uint16_t)v;
+        }
+    }
+    return feed_or_cut(req, false, dots);
+}
+
 /* POST /api/print
  * Body  : raw 1-bit raster, n_rows × 16 bytes (the layout
  *         pt_bitmap_to_raster produces).
@@ -324,17 +426,45 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/status", .method = HTTP_GET,
         .handler = api_status, .user_ctx = NULL,
     };
+    static const httpd_uri_t info_route = {
+        .uri = "/api/info", .method = HTTP_GET,
+        .handler = api_info, .user_ctx = NULL,
+    };
     static const httpd_uri_t print_route = {
         .uri = "/api/print", .method = HTTP_POST,
         .handler = api_print, .user_ctx = NULL,
+    };
+    static const httpd_uri_t cut_route = {
+        .uri = "/api/cut", .method = HTTP_POST,
+        .handler = api_cut, .user_ctx = NULL,
+    };
+    static const httpd_uri_t feed_route = {
+        .uri = "/api/feed", .method = HTTP_POST,
+        .handler = api_feed, .user_ctx = NULL,
     };
     static const httpd_uri_t index_route = {
         .uri = "/", .method = HTTP_GET,
         .handler = api_index, .user_ctx = NULL,
     };
     httpd_register_uri_handler(s_http, &status_route);
+    httpd_register_uri_handler(s_http, &info_route);
     httpd_register_uri_handler(s_http, &print_route);
+    httpd_register_uri_handler(s_http, &cut_route);
+    httpd_register_uri_handler(s_http, &feed_route);
     httpd_register_uri_handler(s_http, &index_route);
+    return ESP_OK;
+}
+
+/* ------------------------------------------------------------- mDNS --- */
+
+static esp_err_t mdns_up(void)
+{
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) return err;
+    mdns_hostname_set("pt700");
+    mdns_instance_name_set("pt700 print server");
+    /* Advertise the HTTP service on the configured port. */
+    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
     return ESP_OK;
 }
 
@@ -357,6 +487,12 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
     }
 
     transport_up(cfg);
+
+    if (mdns_up() == ESP_OK) {
+        ESP_LOGI(TAG, "mdns: pt700.local up");
+    } else {
+        ESP_LOGW(TAG, "mdns: init failed (use the IP address instead)");
+    }
 
     if (http_up(cfg->http_port) != ESP_OK) {
         ESP_LOGE(TAG, "http: failed");

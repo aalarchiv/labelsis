@@ -10,5 +10,6 @@ idf_component_register(
         esp_netif
         esp_http_server
         nvs_flash
+        mdns
     EMBED_TXTFILES "spa/index.html"
 )
