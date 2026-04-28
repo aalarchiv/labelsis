@@ -1,22 +1,15 @@
-# Target board: ESP32-S3-DevKitC-1, 8 MB flash, native USB OTG.
-CONFIG_IDF_TARGET="esp32s3"
+# Target-agnostic defaults. Per-SoC settings live in
+# sdkconfig.defaults.esp32s3 and sdkconfig.defaults.esp32s2 — esp-idf
+# auto-merges the matching one based on the current target.
+#
+# To switch targets:    idf.py set-target esp32s3   (or esp32s2)
+# Then rebuild:         idf.py build
 
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 
-# Custom partition table — see partitions.csv at repo root.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# Bluetooth controller + NimBLE host are compiled in but unused for now.
-# Phase 4 (BLE bridge) flips these on at the application layer without
-# needing a kernel reshuffle.
-CONFIG_BT_ENABLED=y
-CONFIG_BT_NIMBLE_ENABLED=y
-
-# Default log level: INFO. Per-tag overrides via ESP_LOG_LEVEL_set at runtime.
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
-
-# Optimize for size; we have plenty of room but smaller binaries flash faster
-# during dev iteration.
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y

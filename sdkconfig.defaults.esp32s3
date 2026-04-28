@@ -1,0 +1,6 @@
+# ESP32-S3 specific overlay.
+# Bluetooth controller + NimBLE host compiled in but unused — leaves the
+# door open for the future BLE bridge source without a kernel reshuffle.
+# (The S2 variant has no BT radio so this section doesn't apply there.)
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
