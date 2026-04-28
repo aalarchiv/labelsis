@@ -72,7 +72,7 @@ static esp_err_t creds_save(const char *ssid, const char *password)
     return err;
 }
 
-__attribute__((unused))
+__attribute__((unused))  /* used by the GPIO reset path (follow-up). */
 static esp_err_t creds_clear(void)
 {
     nvs_handle_t h;
@@ -99,7 +99,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
 {
     (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        /* APSTA onboarding mode brings up the radio without an STA
+         * SSID configured — skip auto-connect when there's nothing
+         * to connect to. */
+        wifi_config_t cur;
+        if (esp_wifi_get_config(WIFI_IF_STA, &cur) == ESP_OK
+            && cur.sta.ssid[0] != 0) {
+            esp_wifi_connect();
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         if (s_retry_count < WIFI_MAX_RETRIES) {
             esp_wifi_connect();
@@ -113,17 +120,29 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         ESP_LOGI(TAG, "got IP: " IPSTR, IP2STR(&e->ip_info.ip));
         s_retry_count = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
+        ESP_LOGI(TAG, "ap: client joined");
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
+        ESP_LOGI(TAG, "ap: client left");
     }
 }
 
-static esp_err_t wifi_sta_up(const char *ssid, const char *password)
+/* One-shot Wi-Fi stack init: netif, event loop, default STA+AP netifs,
+ * wifi_init, our shared event handler. Both wifi_sta_up and wifi_ap_up
+ * call this; subsequent calls no-op so APSTA mode (used by the AP-mode
+ * setup page's network scanner) doesn't double-init anything. */
+static esp_err_t wifi_init_once(void)
 {
+    static bool inited = false;
+    if (inited) return ESP_OK;
+
     s_wifi_event_group = xEventGroupCreate();
     if (!s_wifi_event_group) return ESP_ERR_NO_MEM;
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
@@ -132,6 +151,14 @@ static esp_err_t wifi_sta_up(const char *ssid, const char *password)
         WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
+
+    inited = true;
+    return ESP_OK;
+}
+
+static esp_err_t wifi_sta_up(const char *ssid, const char *password)
+{
+    if (wifi_init_once() != ESP_OK) return ESP_FAIL;
 
     wifi_config_t sta = {
         .sta = {
@@ -149,6 +176,33 @@ static esp_err_t wifi_sta_up(const char *ssid, const char *password)
         s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
         pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
     return (bits & WIFI_CONNECTED_BIT) ? ESP_OK : ESP_FAIL;
+}
+
+/* Bring up an open SoftAP for first-boot onboarding on 192.168.4.1
+ * (esp-netif default). APSTA mode lets the setup page scan nearby
+ * networks without tearing the AP down. */
+static esp_err_t wifi_ap_up(const char *ssid)
+{
+    if (wifi_init_once() != ESP_OK) return ESP_FAIL;
+
+    /* If wifi_sta_up was called and failed, the radio is already
+     * started in STA mode — stop before switching modes. */
+    esp_wifi_stop();
+
+    wifi_config_t ap = {
+        .ap = {
+            .ssid_len       = (uint8_t)strlen(ssid),
+            .channel        = 6,
+            .max_connection = 4,
+            .authmode       = WIFI_AUTH_OPEN,
+        },
+    };
+    strncpy((char *)ap.ap.ssid, ssid, sizeof ap.ap.ssid);
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    return ESP_OK;
 }
 
 /* --------------------------------------------------------- transport --- */
@@ -511,6 +565,181 @@ static esp_err_t http_up(uint16_t port)
     return ESP_OK;
 }
 
+/* ------------------------------------------------------ AP onboarding -- */
+
+#define AP_SETUP_SSID "pt700-setup"
+
+extern const char setup_html_start[] asm("_binary_setup_html_start");
+extern const char setup_html_end[]   asm("_binary_setup_html_end");
+
+/* Catch-all GET handler — serves the setup page for /, captive-portal
+ * detection URLs (Apple/Android/Microsoft probes), and any unknown
+ * path. With no DNS hijack the popup behaviour is best-effort: probes
+ * see non-success HTML and most phones surface a "sign in" notice. */
+static esp_err_t ap_setup_page(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html");
+    return httpd_resp_send(req, setup_html_start,
+                           setup_html_end - setup_html_start);
+}
+
+/* Append `s` (`n` bytes) to the response stream as a JSON string
+ * literal — RFC 8259 escaping for ", \, and any byte < 0x20 or >=
+ * 0x7f. SSIDs are arbitrary bytes; non-printables become \uXXXX. */
+static void send_json_string(httpd_req_t *req, const uint8_t *s, size_t n)
+{
+    httpd_resp_send_chunk(req, "\"", 1);
+    char buf[16];
+    for (size_t i = 0; i < n && s[i]; i++) {
+        uint8_t c = s[i];
+        int  blen;
+        if      (c == '"' || c == '\\') { buf[0] = '\\'; buf[1] = (char)c; blen = 2; }
+        else if (c >= 0x20 && c < 0x7f) { buf[0] = (char)c;                blen = 1; }
+        else                            { blen = snprintf(buf, sizeof buf, "\\u%04x", c); }
+        httpd_resp_send_chunk(req, buf, blen);
+    }
+    httpd_resp_send_chunk(req, "\"", 1);
+}
+
+/* GET /api/scan — blocking scan on the STA interface (APSTA mode is
+ * up). Returns up to 30 best-RSSI APs; the page dedupes by SSID. */
+static esp_err_t api_scan(httpd_req_t *req)
+{
+    wifi_scan_config_t sc = {0};
+    if (esp_wifi_scan_start(&sc, true) != ESP_OK) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"scan_failed\"}");
+    }
+
+    uint16_t n = 0;
+    esp_wifi_scan_get_ap_num(&n);
+    if (n > 30) n = 30;
+    wifi_ap_record_t *recs = n ? calloc(n, sizeof *recs) : NULL;
+    if (n && !recs) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
+    }
+    if (n) esp_wifi_scan_get_ap_records(&n, recs);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send_chunk(req, "{\"ok\":true,\"networks\":[", 23);
+    for (uint16_t i = 0; i < n; i++) {
+        if (i) httpd_resp_send_chunk(req, ",", 1);
+        httpd_resp_send_chunk(req, "{\"ssid\":", 8);
+        send_json_string(req, recs[i].ssid,
+            strnlen((const char *)recs[i].ssid, sizeof recs[i].ssid));
+        char tail[64];
+        int  len = snprintf(tail, sizeof tail,
+                            ",\"rssi\":%d,\"auth\":%u}",
+                            recs[i].rssi, (unsigned)recs[i].authmode);
+        httpd_resp_send_chunk(req, tail, len);
+    }
+    httpd_resp_send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, NULL, 0);
+    free(recs);
+    return ESP_OK;
+}
+
+/* Hand-parse "key":"value" out of body. Honours \" and \\ escapes
+ * inside the value; everything else is taken byte-for-byte. The
+ * setup body is small (< 256 bytes) and known-shape, so pulling in
+ * cJSON for two strings isn't worth its .text. */
+static bool extract_str(const char *body, const char *key,
+                        char *out, size_t cap)
+{
+    char pat[64];
+    int  patlen = snprintf(pat, sizeof pat, "\"%s\"", key);
+    const char *p = strstr(body, pat);
+    if (!p) return false;
+    p += patlen;
+    while (*p == ' ' || *p == '\t' || *p == ':') p++;
+    if (*p != '"') return false;
+    p++;
+    size_t i = 0;
+    while (*p && *p != '"' && i + 1 < cap) {
+        if (*p == '\\' && p[1]) { out[i++] = p[1]; p += 2; }
+        else                    { out[i++] = *p++; }
+    }
+    if (*p != '"') return false;  /* unterminated or truncated */
+    out[i] = '\0';
+    return true;
+}
+
+/* POST /api/setup body: {"ssid":"...","password":"..."}. Persists creds
+ * to NVS, replies, then reboots so the next boot enters STA mode. */
+static esp_err_t api_setup(httpd_req_t *req)
+{
+    char body[300];
+    int  total = req->content_len;
+    if (total <= 0 || total >= (int)sizeof body) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"bad_body\"}");
+    }
+    int rcvd = 0;
+    while (rcvd < total) {
+        int n = httpd_req_recv(req, body + rcvd, total - rcvd);
+        if (n <= 0) return ESP_FAIL;
+        rcvd += n;
+    }
+    body[rcvd] = '\0';
+
+    char ssid[33] = {0}, password[65] = {0};
+    bool got_ssid = extract_str(body, "ssid",     ssid,     sizeof ssid);
+    extract_str(body, "password", password, sizeof password);  /* may be empty for open APs */
+    if (!got_ssid || ssid[0] == '\0') {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing_ssid\"}");
+    }
+
+    if (creds_save(ssid, password) != ESP_OK) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"nvs_save\"}");
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+
+    ESP_LOGI(TAG, "wifi: creds saved (ssid=%s) — rebooting", ssid);
+    /* Let the response FIN onto the wire before we drop the AP. */
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+static esp_err_t http_ap_up(void)
+{
+    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    cfg.server_port      = 80;
+    cfg.lru_purge_enable = true;
+    cfg.uri_match_fn     = httpd_uri_match_wildcard;
+
+    if (httpd_start(&s_http, &cfg) != ESP_OK) return ESP_FAIL;
+
+    static const httpd_uri_t scan_route = {
+        .uri = "/api/scan", .method = HTTP_GET,
+        .handler = api_scan, .user_ctx = NULL,
+    };
+    static const httpd_uri_t setup_route = {
+        .uri = "/api/setup", .method = HTTP_POST,
+        .handler = api_setup, .user_ctx = NULL,
+    };
+    /* Catch-all serves the setup page for any GET (incl. captive-
+     * portal probe URLs). Registered last; specific routes win. */
+    static const httpd_uri_t catch_all = {
+        .uri = "/*", .method = HTTP_GET,
+        .handler = ap_setup_page, .user_ctx = NULL,
+    };
+    httpd_register_uri_handler(s_http, &scan_route);
+    httpd_register_uri_handler(s_http, &setup_route);
+    httpd_register_uri_handler(s_http, &catch_all);
+    return ESP_OK;
+}
+
 /* ------------------------------------------------------------- mDNS --- */
 
 static esp_err_t mdns_up(void)
@@ -547,23 +776,38 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
     const char *ssid     = have_stored ? stored.ssid     : have_cfg ? cfg->wifi_ssid     : NULL;
     const char *password = have_stored ? stored.password : have_cfg ? cfg->wifi_password : NULL;
 
-    if (!ssid) {
-        ESP_LOGE(TAG, "wifi: no creds (NVS empty, no compiled-in fallback)");
-        return ESP_ERR_INVALID_STATE;
+    bool ap_mode = (ssid == NULL);
+    if (ssid) {
+        ESP_LOGI(TAG, "wifi: connecting to %s (%s)",
+                 ssid, have_stored ? "from NVS" : "from cfg");
+        if (wifi_sta_up(ssid, password) != ESP_OK) {
+            ESP_LOGW(TAG, "wifi: STA failed — entering AP onboarding");
+            ap_mode = true;
+        } else if (!have_stored) {
+            if (creds_save(ssid, password) == ESP_OK) {
+                ESP_LOGI(TAG, "wifi: persisted creds to NVS");
+            } else {
+                ESP_LOGW(TAG, "wifi: failed to persist creds to NVS");
+            }
+        }
+    } else {
+        ESP_LOGW(TAG, "wifi: no creds — entering AP onboarding");
     }
 
-    ESP_LOGI(TAG, "wifi: connecting to %s (%s)",
-             ssid, have_stored ? "from NVS" : "from cfg");
-    if (wifi_sta_up(ssid, password) != ESP_OK) {
-        ESP_LOGE(TAG, "wifi: failed");
-        return ESP_FAIL;
-    }
-    if (!have_stored) {
-        if (creds_save(ssid, password) == ESP_OK) {
-            ESP_LOGI(TAG, "wifi: persisted creds to NVS");
-        } else {
-            ESP_LOGW(TAG, "wifi: failed to persist creds to NVS");
+    if (ap_mode) {
+        if (wifi_ap_up(AP_SETUP_SSID) != ESP_OK) {
+            ESP_LOGE(TAG, "wifi: AP up failed");
+            return ESP_FAIL;
         }
+        if (http_ap_up() != ESP_OK) {
+            ESP_LOGE(TAG, "http: AP server failed");
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "ap: %s up — connect and visit http://192.168.4.1/",
+                 AP_SETUP_SSID);
+        /* HTTP server runs forever on its own task; api_setup reboots
+         * after it persists the user's chosen creds to NVS. */
+        return ESP_OK;
     }
 
     transport_up(cfg);

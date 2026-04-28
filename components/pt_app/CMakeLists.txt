@@ -11,5 +11,5 @@ idf_component_register(
         esp_http_server
         nvs_flash
         mdns
-    EMBED_TXTFILES "spa/index.html"
+    EMBED_TXTFILES "spa/index.html" "spa/setup.html"
 )
