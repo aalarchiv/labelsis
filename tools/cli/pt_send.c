@@ -50,6 +50,11 @@ static const char *USAGE =
     "  --no-compression     send raster rows raw (no PackBits)\n"
     "  --margin=DOTS        leading margin in dots (default 14 ≈ 2 mm)\n"
     "  --width=MM           require this tape width (default: trust loaded tape)\n"
+    "  --fit                scale the PBM (nearest-neighbour, preserving\n"
+    "                       aspect ratio) so its height matches the loaded\n"
+    "                       tape's print pins exactly. Otherwise PBMs that\n"
+    "                       are taller than print_pins get clipped to the\n"
+    "                       margins.\n"
     "  -v, --verbose        log every status message the printer emits\n"
     "      --info           probe the connected printer + tape and exit\n"
     "  -h, --help           show this help\n";
@@ -154,6 +159,35 @@ static uint8_t *render_to_raster_rows(const pbm_t *src, size_t *out_rows)
     return out;
 }
 
+/* ----------------------------------------------------------- scale */
+
+/* Nearest-neighbour scale of a 1-bit PBM. Cheap and good enough at
+ * typical label scales — bilinear/dither would be nicer but needs
+ * a grayscale intermediate and a redither pass; not worth the code
+ * for the common case ("scale 200-px logo down to 70-px tape"). */
+static int pbm_scale(const pbm_t *src, int new_w, int new_h, pbm_t *out)
+{
+    if (new_w < 1 || new_h < 1) return -1;
+    int dst_row_bytes = (new_w + 7) / 8;
+    int src_row_bytes = (src->width + 7) / 8;
+    uint8_t *buf = calloc((size_t)dst_row_bytes * new_h, 1);
+    if (!buf) return -1;
+    for (int dy = 0; dy < new_h; dy++) {
+        int sy = dy * src->height / new_h;
+        const uint8_t *srow = src->bytes + sy * src_row_bytes;
+        uint8_t *drow       = buf       + dy * dst_row_bytes;
+        for (int dx = 0; dx < new_w; dx++) {
+            int sx = dx * src->width / new_w;
+            if (srow[sx / 8] & (uint8_t)(0x80 >> (sx % 8)))
+                drow[dx / 8] |= (uint8_t)(0x80 >> (dx % 8));
+        }
+    }
+    out->width  = new_w;
+    out->height = new_h;
+    out->bytes  = buf;
+    return 0;
+}
+
 /* ----------------------------------------------------------- verbose log */
 
 static const char *status_type_name(pt_status_type_t t)
@@ -219,6 +253,7 @@ int main(int argc, char **argv)
     pt_session_options_default(&opts);
 
     int  width_override = 0;  /* 0 = auto */
+    bool fit_to_tape    = false;
 
     bool info_only = false;
     static const struct option longopts[] = {
@@ -228,6 +263,7 @@ int main(int argc, char **argv)
         { "no-compression", no_argument,       0, 'R' },
         { "margin",         required_argument, 0, 'D' },
         { "width",          required_argument, 0, 'W' },
+        { "fit",            no_argument,       0, 'F' },
         { "verbose",        no_argument,       0, 'v' },
         { "info",           no_argument,       0, 'I' },
         { "help",           no_argument,       0, 'h' },
@@ -242,6 +278,7 @@ int main(int argc, char **argv)
         case 'R': opts.compression = PT_COMPRESSION_NONE; break;
         case 'D': opts.margin_dots = (uint16_t)atoi(optarg); break;
         case 'W': width_override = atoi(optarg); break;
+        case 'F': fit_to_tape = true; break;
         case 'v': opts.on_status = log_status; opts.on_event = log_event; break;
         case 'I': info_only = true; break;
         case 'h': fputs(USAGE, stdout); return 0;
@@ -298,34 +335,48 @@ int main(int argc, char **argv)
     pbm_t pbm;
     if (pbm_load(pbm_path, &pbm) != 0) return 1;
 
-    size_t   n_rows = 0;
-    uint8_t *rows   = render_to_raster_rows(&pbm, &n_rows);
-    free(pbm.bytes);
-    if (!rows) {
-        fprintf(stderr, "pt_send: out of memory rendering %s\n", pbm_path);
-        return 1;
-    }
-
     pt_transport_libusb_t *u = pt_transport_libusb_open();
     if (!u) {
         fprintf(stderr, "pt_send: no PT-* found on USB. "
                         "Is it powered on and connected?\n");
-        free(rows);
+        free(pbm.bytes);
         return 1;
     }
     pt_transport_t t = pt_transport_libusb_transport(u);
 
-    /* Tape-fit + short-label warnings. */
+    /* Status query gives us the loaded tape's print_pins, which
+     * --fit needs to know before render. Cheap so we do it before
+     * the print regardless. */
     pt_status_t st;
     pt_err_t qerr = pt_session_query_status(&t, &st, NULL);
     if (qerr == PT_OK) {
         pt_tape_geometry_t g;
-        if (pt_tape_geometry_tze(st.media_width_mm, &g) == PT_OK
-            && pbm.height > g.print_pins) {
+        bool have_geom = (pt_tape_geometry_tze(st.media_width_mm, &g) == PT_OK);
+
+        if (fit_to_tape && have_geom && pbm.height != g.print_pins) {
+            int new_h = g.print_pins;
+            int new_w = (int)((long long)pbm.width * new_h / pbm.height);
+            if (new_w < 1) new_w = 1;
+            pbm_t scaled;
+            if (pbm_scale(&pbm, new_w, new_h, &scaled) != 0) {
+                fprintf(stderr, "pt_send: scale failed (out of memory?)\n");
+                pt_transport_libusb_close(u);
+                free(pbm.bytes);
+                return 1;
+            }
+            fprintf(stderr,
+                    "pt_send: --fit: scaling %d×%d → %d×%d for %u mm tape "
+                    "(%u print pins)\n",
+                    pbm.width, pbm.height, scaled.width, scaled.height,
+                    st.media_width_mm, g.print_pins);
+            free(pbm.bytes);
+            pbm = scaled;
+        } else if (have_geom && pbm.height > g.print_pins) {
             fprintf(stderr,
                     "pt_send: WARNING: PBM is %d px tall but loaded %u mm tape "
                     "has only %u print pins; top/bottom rows will be clipped to "
-                    "the margins. Use a %u-px-tall PBM for full coverage.\n",
+                    "the margins. Pass --fit to auto-scale, or use a %u-px-tall "
+                    "PBM for full coverage.\n",
                     pbm.height, st.media_width_mm, g.print_pins, g.print_pins);
         }
         /* The cutter struggles with very short labels — they can be
@@ -342,8 +393,18 @@ int main(int argc, char **argv)
         }
     }
 
+    size_t   n_rows = 0;
+    uint8_t *rows   = render_to_raster_rows(&pbm, &n_rows);
+    if (!rows) {
+        fprintf(stderr, "pt_send: out of memory rendering %s\n", pbm_path);
+        free(pbm.bytes);
+        pt_transport_libusb_close(u);
+        return 1;
+    }
+
     fprintf(stderr, "pt_send: rendering %d × %d PBM as %zu raster rows\n",
             pbm.width, pbm.height, n_rows);
+    free(pbm.bytes);
 
     pt_err_t err = pt_session_print_raster(&t, rows, n_rows,
                                            (uint8_t)width_override, &opts);
