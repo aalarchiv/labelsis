@@ -83,11 +83,27 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
         <input  id="image-file"  type="file" accept="image/*" hidden>
         <button id="add-qr"      class="secondary" type="button">+ QR</button>
         <button id="add-barcode" class="secondary" type="button">+ barcode</button>
-        <button id="el-delete"   class="secondary" type="button" disabled>delete</button>
+        <button id="el-dup"      class="secondary" type="button" disabled title="Ctrl+D">duplicate</button>
+        <button id="el-delete"   class="secondary" type="button" disabled title="Del">delete</button>
         <span style="flex:1"></span>
+        <button id="undo"        class="secondary" type="button" disabled title="Ctrl+Z">undo</button>
+        <button id="redo"        class="secondary" type="button" disabled title="Ctrl+Y">redo</button>
+      </div>
+      <div class="row" style="margin-top:.5rem">
+        <label>label</label>
+        <select id="lib-select" style="max-width:160px;">
+          <option value="">— load saved label —</option>
+        </select>
+        <button id="lib-save"   class="secondary" type="button">save as…</button>
+        <button id="lib-update" class="secondary" type="button" disabled>update</button>
+        <button id="lib-delete" class="secondary" type="button" disabled>delete</button>
+        <button id="lib-clear"  class="secondary" type="button">new</button>
+      </div>
+      <div class="row" style="margin-top:.5rem">
         <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
         <label><input id="mirror"   type="checkbox"> mirror</label>
         <label><input id="chain"    type="checkbox"> chain</label>
+        <span style="flex:1"></span>
         <button id="print">Print</button>
         <button id="print-all" class="secondary" hidden>Print all rows</button>
       </div>
@@ -1073,6 +1089,180 @@ async function doPrintAll() {
   }
 }
 
+/* --- serialisation: strip runtime caches --------------------------
+ *
+ * Underscore-prefixed fields are runtime caches (Image objects, QR
+ * matrices, ImageData, dithered canvases, measured _w/_h). They get
+ * regenerated from the persistent fields (text, src, ecc, ...) so
+ * we exclude them from JSON snapshots. */
+function stripCached(el) {
+  const out = {};
+  for (const k of Object.keys(el)) if (!k.startsWith("_")) out[k] = el[k];
+  return out;
+}
+
+function snapshot() {
+  return JSON.stringify(elements.map(stripCached));
+}
+
+/* Replace the live elements[] with a fresh deserialised set. Re-
+ * creates the Image object for image elements from the stored data
+ * URL; QR / barcode caches are regenerated lazily on first draw. */
+function restoreFromJSON(json) {
+  const arr = JSON.parse(json);
+  elements = [];
+  for (const data of arr) {
+    const el = { ...data };
+    nextId = Math.max(nextId, el.id + 1);
+    if (el.type === "image" && el.src) {
+      const img = new Image();
+      img.onload = () => { el._dithered = null; redraw(); };
+      img.src = el.src;
+      el._img = img;
+    }
+    elements.push(el);
+  }
+  selectedId = elements.length ? elements[0].id : null;
+  syncPropsPanel();
+  renderLayerList();
+  redraw();
+}
+
+/* --- undo / redo --------------------------------------------------
+ *
+ * Stacks of JSON snapshots. pushUndo() captures the current state
+ * BEFORE a change; redo stack is cleared on every fresh edit. We
+ * cap the stack at 100 entries — typical labels are <10 KB stripped,
+ * so worst case ~1 MB sits in memory. */
+const UNDO_CAP = 100;
+let undoStack = [];
+let redoStack = [];
+
+function pushUndo() {
+  undoStack.push(snapshot());
+  if (undoStack.length > UNDO_CAP) undoStack.shift();
+  redoStack = [];
+  refreshUndoButtons();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(snapshot());
+  restoreFromJSON(undoStack.pop());
+  refreshUndoButtons();
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(snapshot());
+  restoreFromJSON(redoStack.pop());
+  refreshUndoButtons();
+}
+
+function refreshUndoButtons() {
+  document.getElementById("undo").disabled = !undoStack.length;
+  document.getElementById("redo").disabled = !redoStack.length;
+}
+
+/* --- label library: localStorage-backed save/load -----------------
+ *
+ * One entry per name under localStorage["pt700:labels"]. Image data
+ * URLs survive serialisation (small logos round-trip cleanly within
+ * the ~5-10 MB localStorage budget). */
+const LIB_KEY = "pt700:labels";
+let currentLabelName = "";
+
+function libRead() {
+  try { return JSON.parse(localStorage.getItem(LIB_KEY) || "{}"); }
+  catch { return {}; }
+}
+
+function libWrite(lib) {
+  try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); return true; }
+  catch (e) { log(`save failed: ${e.message}`, false); return false; }
+}
+
+function libRefresh() {
+  const lib = libRead();
+  const sel = document.getElementById("lib-select");
+  const wasValue = sel.value;
+  sel.innerHTML = '<option value="">— load saved label —</option>';
+  for (const name of Object.keys(lib).sort()) {
+    const opt = document.createElement("option");
+    opt.value = opt.textContent = name;
+    if (name === currentLabelName) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  if (!sel.value && wasValue) sel.value = wasValue;
+  document.getElementById("lib-update").disabled = !currentLabelName;
+  document.getElementById("lib-delete").disabled = !currentLabelName;
+}
+
+function libSaveAs(name) {
+  if (!name) return;
+  const lib = libRead();
+  lib[name] = {
+    saved: new Date().toISOString(),
+    elements: elements.map(stripCached),
+  };
+  if (libWrite(lib)) {
+    currentLabelName = name;
+    libRefresh();
+    log(`saved "${name}"`, true);
+  }
+}
+
+function libLoad(name) {
+  const lib = libRead();
+  if (!lib[name]) return;
+  pushUndo();
+  restoreFromJSON(JSON.stringify(lib[name].elements));
+  currentLabelName = name;
+  libRefresh();
+  log(`loaded "${name}"`, true);
+}
+
+function libDelete(name) {
+  if (!name) return;
+  if (!confirm(`Delete saved label "${name}"?`)) return;
+  const lib = libRead();
+  delete lib[name];
+  libWrite(lib);
+  if (currentLabelName === name) currentLabelName = "";
+  libRefresh();
+  log(`deleted "${name}"`);
+}
+
+function libClear() {
+  pushUndo();
+  elements = [];
+  currentLabelName = "";
+  selectedId = null;
+  syncPropsPanel();
+  renderLayerList();
+  libRefresh();
+  redraw();
+}
+
+/* --- duplicate selected ------------------------------------------- */
+function duplicateSelected() {
+  const el = elementById(selectedId);
+  if (!el) return;
+  pushUndo();
+  const copy = JSON.parse(JSON.stringify(stripCached(el)));
+  copy.id = nextId++;
+  copy.x += 8;
+  copy.y = Math.min(HEAD_PX - 1, copy.y + 8);
+  if (copy.type === "image" && copy.src) {
+    const img = new Image();
+    img.onload = () => { copy._dithered = null; redraw(); };
+    img.src = copy.src;
+    copy._img = img;
+  }
+  elements.push(copy);
+  selectElement(copy.id);
+}
+
 /* Property panel ↔ selected element. Inputs read/write the
  * currently-selected element; if nothing's selected they're
  * inert (the props-empty hint shows instead of the form). */
@@ -1081,6 +1271,7 @@ function selectElement(id) {
   syncPropsPanel();
   renderLayerList();
   document.getElementById("el-delete").disabled = (id == null);
+  document.getElementById("el-dup").disabled    = (id == null);
   redraw();
 }
 
@@ -1140,6 +1331,7 @@ function renderLayerList() {
       const fromIdx = elements.findIndex(x => x.id === draggedId);
       let toIdx    = elements.findIndex(x => x.id === el.id);
       if (fromIdx < 0 || toIdx < 0) return;
+      pushUndo();
       const [moved] = elements.splice(fromIdx, 1);
       if (fromIdx < toIdx) toIdx--;       /* compensate for splice */
       elements.splice(toIdx + (above ? 0 : 1), 0, moved);
@@ -1195,6 +1387,9 @@ function bindPropInput(id, key, parseFn) {
   document.getElementById(id).addEventListener("input", e => {
     const el = elementById(selectedId);
     if (!el) return;
+    /* First input after a fresh focus = beginning of an edit unit;
+     * snapshot before el[key] is overwritten. */
+    if (isFreshPropFocus) { pushUndo(); isFreshPropFocus = false; }
     el[key] = parseFn ? parseFn(e.target.value) : e.target.value;
     if (id === "size")          document.getElementById("size-val").textContent = el.size + "px";
     if (id === "img-threshold") document.getElementById("img-threshold-val").textContent = el.threshold;
@@ -1243,6 +1438,7 @@ bindPropInput("el-rotation",  "rotation",   v => {
 function rotateBy(delta) {
   const el = elementById(selectedId);
   if (!el) return;
+  pushUndo();
   let r = (el.rotation || 0) + delta;
   while (r >  180) r -= 360;
   while (r <= -180) r += 360;
@@ -1263,6 +1459,7 @@ function rightmostX() {
 }
 
 document.getElementById("add-text").addEventListener("click", () => {
+  pushUndo();
   const el = defaultText();
   el.x = rightmostX();
   elements.push(el);
@@ -1274,6 +1471,7 @@ document.getElementById("add-image").addEventListener("click", () => {
 });
 
 document.getElementById("add-barcode").addEventListener("click", () => {
+  pushUndo();
   const el = {
     id: nextId++, type: "barcode",
     x: rightmostX(), y: 24, rotation: 0, composite: "and",
@@ -1286,6 +1484,7 @@ document.getElementById("add-barcode").addEventListener("click", () => {
 });
 
 document.getElementById("add-qr").addEventListener("click", () => {
+  pushUndo();
   const el = {
     id: nextId++, type: "qr",
     x: rightmostX(), y: 0, rotation: 0, composite: "and",
@@ -1300,30 +1499,60 @@ document.getElementById("add-qr").addEventListener("click", () => {
 document.getElementById("image-file").addEventListener("change", async e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
-  const url = URL.createObjectURL(f);
-  const img = new Image();
-  img.onload = () => {
-    const el = {
-      id: nextId++, type: "image",
-      x: rightmostX(), y: 0, rotation: 0, composite: "and",
-      h: HEAD_PX,
-      algorithm: "atkinson",
-      threshold: 128,
-      _img: img,
+  /* Read as a data URL rather than createObjectURL so the source
+   * survives serialisation to localStorage / JSON export. The cost
+   * is ~33% size overhead from base64; for typical small logos it's
+   * still well under localStorage's 5-10 MB quota. */
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataURL = reader.result;
+    const img = new Image();
+    img.onload = () => {
+      const el = {
+        id: nextId++, type: "image",
+        x: rightmostX(), y: 0, rotation: 0, composite: "and",
+        h: HEAD_PX,
+        algorithm: "atkinson",
+        threshold: 128,
+        src: dataURL,
+        _img: img,
+      };
+      imageRebake(el);
+      pushUndo();
+      elements.push(el);
+      selectElement(el.id);
     };
-    imageRebake(el);
-    elements.push(el);
-    selectElement(el.id);
+    img.onerror = () => log("image load failed", false);
+    img.src = dataURL;
   };
-  img.onerror = () => log("image load failed", false);
-  img.src = url;
+  reader.readAsDataURL(f);
   e.target.value = "";  /* allow re-importing the same file */
 });
 
 document.getElementById("el-delete").addEventListener("click", () => {
   if (selectedId == null) return;
+  pushUndo();
   elements = elements.filter(e => e.id !== selectedId);
   selectElement(null);
+});
+
+document.getElementById("el-dup").addEventListener("click", duplicateSelected);
+document.getElementById("undo").addEventListener("click", undo);
+document.getElementById("redo").addEventListener("click", redo);
+
+document.getElementById("lib-save").addEventListener("click", () => {
+  const name = prompt("Save label as:", currentLabelName || "Label 1");
+  if (name && name.trim()) libSaveAs(name.trim());
+});
+document.getElementById("lib-update").addEventListener("click", () => {
+  if (currentLabelName) libSaveAs(currentLabelName);
+});
+document.getElementById("lib-delete").addEventListener("click", () => {
+  if (currentLabelName) libDelete(currentLabelName);
+});
+document.getElementById("lib-clear").addEventListener("click", libClear);
+document.getElementById("lib-select").addEventListener("change", e => {
+  if (e.target.value) libLoad(e.target.value);
 });
 
 /* Pointer-event drag on the canvas. Convert client coords to canvas
@@ -1342,6 +1571,8 @@ canvas.addEventListener("pointerdown", ev => {
   const hit = hitTest(p.x, p.y);
   selectElement(hit ? hit.id : null);
   if (hit) {
+    /* Snapshot before drag so undo restores the pre-drag position. */
+    pushUndo();
     /* Track offset from the element's centre — that's the rotation
      * pivot, so the cursor stays pinned to the same visual point on
      * the element regardless of rotation. */
@@ -1372,11 +1603,41 @@ canvas.addEventListener("pointermove", ev => {
 canvas.addEventListener("pointerup",   () => drag = null);
 canvas.addEventListener("pointercancel", () => drag = null);
 
-/* Delete key removes the selected element (when not typing in an input). */
+/* Keyboard shortcuts: Del/Backspace removes selection, Ctrl+D
+ * duplicates, Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. We
+ * suppress these when an INPUT/TEXTAREA has focus so the user's
+ * actual typing isn't hijacked. */
 document.addEventListener("keydown", ev => {
-  if (ev.key !== "Delete" && ev.key !== "Backspace") return;
-  if (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA") return;
-  if (selectedId != null) { ev.preventDefault(); document.getElementById("el-delete").click(); }
+  const inField = ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA";
+  const ctrl = ev.ctrlKey || ev.metaKey;
+  if (!inField && (ev.key === "Delete" || ev.key === "Backspace")) {
+    if (selectedId != null) { ev.preventDefault(); document.getElementById("el-delete").click(); }
+    return;
+  }
+  if (ctrl && (ev.key === "z" || ev.key === "Z")) {
+    if (ev.shiftKey) { ev.preventDefault(); redo(); }
+    else             { ev.preventDefault(); undo(); }
+    return;
+  }
+  if (ctrl && (ev.key === "y" || ev.key === "Y")) {
+    ev.preventDefault(); redo(); return;
+  }
+  if (!inField && ctrl && (ev.key === "d" || ev.key === "D")) {
+    ev.preventDefault(); duplicateSelected(); return;
+  }
+});
+
+/* Track "fresh focus" so the first input event after a focus into
+ * a property field pushes an undo entry — but tabbing through
+ * fields without editing doesn't pollute the stack. */
+let isFreshPropFocus = false;
+document.getElementById("props-panel").addEventListener("focusin", ev => {
+  if (ev.target.matches("input, select, textarea") && selectedId != null) {
+    isFreshPropFocus = true;
+  }
+});
+document.getElementById("props-panel").addEventListener("focusout", () => {
+  isFreshPropFocus = false;
 });
 document.getElementById("print").addEventListener("click", doPrint);
 document.getElementById("print-all").addEventListener("click", doPrintAll);
@@ -1566,6 +1827,8 @@ function wifiInit() {
 /* Seed one text element + select it so the page isn't empty. */
 elements.push(defaultText());
 selectElement(elements[0].id);
+libRefresh();
+refreshUndoButtons();
 
 refreshStatus();
 /* Poll every 3 s. Status changes (cover open, tape change, error
