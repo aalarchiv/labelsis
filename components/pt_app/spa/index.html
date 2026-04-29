@@ -59,6 +59,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #el-list .type { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; min-width:48px; }
 #el-list .label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dim  { opacity:.6; }
+.phone-only { display:none; }
 @media (max-width: 600px) {
   .burger { display:block; }
   nav { display:none; position:absolute; top:100%; left:0; right:0; flex-direction:column; background:var(--panel); border-bottom:1px solid var(--line); padding:.5rem; z-index:10; gap:0; }
@@ -71,6 +72,14 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   input[type=text], input[type=number], input[type=password], select { padding:.7rem; min-height:44px; }
   #el-list li { padding:.7rem .5rem; }
   #el-list .grip { padding:.5rem .35rem; font-size:1.2rem; }
+  /* Phone toolbar collapse: hide the secondary edit cluster + the
+   * label library row by default, expose them via the ⋯ button.
+   * Reduces the print panel from 4 rows to 1 row on phone width. */
+  .phone-only { display:inline-flex; }
+  .more-actions { display:none; }
+  .more-row { display:none; }
+  body.show-more .more-actions { display:contents; }
+  body.show-more .more-row     { display:flex; }
 }
 </style>
 </head>
@@ -101,13 +110,17 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <input  id="image-file"  type="file" accept="image/*" hidden>
         <button id="add-qr"      class="secondary" type="button">+ QR</button>
         <button id="add-barcode" class="secondary" type="button">+ barcode</button>
-        <button id="el-dup"      class="secondary" type="button" disabled title="Ctrl+D">duplicate</button>
-        <button id="el-delete"   class="secondary" type="button" disabled title="Del">delete</button>
+        <span class="more-actions">
+          <button id="el-dup"      class="secondary" type="button" disabled title="Ctrl+D">duplicate</button>
+          <button id="el-delete"   class="secondary" type="button" disabled title="Del">delete</button>
+          <span style="flex:1"></span>
+          <button id="undo"        class="secondary" type="button" disabled title="Ctrl+Z">undo</button>
+          <button id="redo"        class="secondary" type="button" disabled title="Ctrl+Y">redo</button>
+        </span>
         <span style="flex:1"></span>
-        <button id="undo"        class="secondary" type="button" disabled title="Ctrl+Z">undo</button>
-        <button id="redo"        class="secondary" type="button" disabled title="Ctrl+Y">redo</button>
+        <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows">⋯</button>
       </div>
-      <div class="row" style="margin-top:.5rem">
+      <div class="row more-row" style="margin-top:.5rem">
         <label>label</label>
         <select id="lib-select" style="max-width:160px;">
           <option value="">— load saved label —</option>
@@ -1864,6 +1877,16 @@ document.getElementById("title").addEventListener("click", () => {
   const p = document.getElementById("status-panel");
   p.hidden = !p.hidden;
   document.getElementById("title").classList.toggle("expanded", !p.hidden);
+});
+
+/* Phone-only "⋯" toggle that reveals the secondary toolbar
+ * actions (duplicate/delete/undo/redo) and the label library row.
+ * No-op on desktop where the CSS .phone-only rule keeps the button
+ * hidden and the rows always visible. */
+document.getElementById("phone-more").addEventListener("click", () => {
+  const body = document.body;
+  const open = body.classList.toggle("show-more");
+  document.getElementById("phone-more").setAttribute("aria-expanded", open ? "true" : "false");
 });
 
 /* ----- Wi-Fi tab (scan + save credentials) ---------------------- */
