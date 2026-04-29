@@ -37,6 +37,15 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
 .kv-err { color:var(--err); }
 .muted { color:var(--muted); font-size:.85rem; }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
+#el-list li { display:flex; align-items:center; gap:.5rem; padding:.4rem .5rem; border:1px solid var(--line); border-radius:4px; margin-bottom:.25rem; cursor:pointer; user-select:none; background:#0d1117; }
+#el-list li:hover { border-color:var(--accent); }
+#el-list li.selected { border-color:var(--accent); background:rgba(88,166,255,.08); }
+#el-list li.dragging { opacity:.4; }
+#el-list li.drop-above { box-shadow:inset 0 2px 0 0 var(--accent); }
+#el-list li.drop-below { box-shadow:inset 0 -2px 0 0 var(--accent); }
+#el-list .grip { color:var(--muted); cursor:grab; padding:0 .25rem; font-size:1rem; line-height:1; }
+#el-list .type { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; min-width:48px; }
+#el-list .label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dim  { opacity:.6; }
 @media (max-width: 600px) {
   .burger { display:block; }
@@ -83,6 +92,11 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
         <button id="print-all" class="secondary" hidden>Print all rows</button>
       </div>
       <div id="log"></div>
+    </div>
+
+    <div class="panel" id="layers-panel" hidden>
+      <h2>Layers <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;">— bottom of canvas first; drag to reorder</span></h2>
+      <ul id="el-list" style="list-style:none; padding:0; margin:0;"></ul>
     </div>
 
     <div class="panel" id="props-panel">
@@ -1065,8 +1079,76 @@ async function doPrintAll() {
 function selectElement(id) {
   selectedId = id;
   syncPropsPanel();
+  renderLayerList();
   document.getElementById("el-delete").disabled = (id == null);
   redraw();
+}
+
+/* Layer list lives below the canvas/print controls. Rows show in
+ * the same order as `elements[]` — first row = bottom layer. Drag
+ * a row above/below another to reorder; click selects. */
+function summarise(el) {
+  if (el.type === "text")    return el.text || "(empty)";
+  if (el.type === "image") {
+    const w = (el._dithered && el._dithered.width)  || "?";
+    const h = (el._dithered && el._dithered.height) || el.h || "?";
+    return `${w}×${h}`;
+  }
+  if (el.type === "barcode") return el.text;
+  if (el.type === "qr")      return el.text;
+  return "";
+}
+
+function renderLayerList() {
+  const ul = document.getElementById("el-list");
+  ul.innerHTML = "";
+  for (const el of elements) {
+    const li = document.createElement("li");
+    li.draggable = true;
+    li.dataset.id = el.id;
+    if (el.id === selectedId) li.classList.add("selected");
+    li.innerHTML = `<span class="grip">⋮⋮</span><span class="type">${el.type}</span><span class="label"></span>`;
+    li.querySelector(".label").textContent = summarise(el);
+    li.addEventListener("click", () => selectElement(el.id));
+
+    li.addEventListener("dragstart", e => {
+      e.dataTransfer.setData("text/plain", String(el.id));
+      e.dataTransfer.effectAllowed = "move";
+      li.classList.add("dragging");
+    });
+    li.addEventListener("dragend", () => {
+      li.classList.remove("dragging");
+      ul.querySelectorAll(".drop-above,.drop-below")
+        .forEach(n => n.classList.remove("drop-above", "drop-below"));
+    });
+    li.addEventListener("dragover", e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const rect = li.getBoundingClientRect();
+      const above = (e.clientY - rect.top) < rect.height / 2;
+      li.classList.toggle("drop-above", above);
+      li.classList.toggle("drop-below", !above);
+    });
+    li.addEventListener("dragleave", () =>
+      li.classList.remove("drop-above", "drop-below"));
+    li.addEventListener("drop", e => {
+      e.preventDefault();
+      const rect = li.getBoundingClientRect();
+      const above = (e.clientY - rect.top) < rect.height / 2;
+      const draggedId = +e.dataTransfer.getData("text/plain");
+      if (draggedId === el.id) return;
+      const fromIdx = elements.findIndex(x => x.id === draggedId);
+      let toIdx    = elements.findIndex(x => x.id === el.id);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = elements.splice(fromIdx, 1);
+      if (fromIdx < toIdx) toIdx--;       /* compensate for splice */
+      elements.splice(toIdx + (above ? 0 : 1), 0, moved);
+      renderLayerList();
+      redraw();
+    });
+    ul.appendChild(li);
+  }
+  document.getElementById("layers-panel").hidden = elements.length === 0;
 }
 
 function syncPropsPanel() {
@@ -1123,6 +1205,10 @@ function bindPropInput(id, key, parseFn) {
     /* Same for the QR matrix when text or ECC changes. */
     if (el.type === "qr" && (id === "qr-text" || id === "qr-ecc"))
       el._qr = el._qrError = null;
+    /* If the change can affect the layer list's summary text
+     * (text content / symbology / type), refresh it. */
+    if (id === "text" || id === "bc-text" || id === "qr-text"
+     || id === "bc-sym") renderLayerList();
     redraw();
   });
 }
