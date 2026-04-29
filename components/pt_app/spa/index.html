@@ -37,8 +37,10 @@ input[type=range] { flex:1; }
 button { background:var(--accent); color:#fff; border:0; border-radius:4px; padding:.6rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
 button:disabled { background:var(--muted); cursor:not-allowed; }
 button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
-canvas { display:block; max-width:100%; image-rendering:pixelated; background:#fff; border:1px solid var(--line); border-radius:4px; touch-action:none; }
+.canvas-viewport { position:relative; overflow:hidden; max-width:100%; touch-action:none; border:1px solid var(--line); border-radius:4px; background:#fff; }
+canvas { display:block; image-rendering:pixelated; background:#fff; }
 #el-list .grip { touch-action:none; }
+#zoom-reset { position:absolute; right:.5rem; bottom:.5rem; z-index:5; }
 .status-grid { display:grid; grid-template-columns:auto 1fr; gap:.25rem .75rem; font-size:.85rem; }
 .status-grid .k { color:var(--muted); }
 .kv-ok  { color:var(--ok); }
@@ -106,7 +108,10 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   <section id="view-print">
     <div class="panel">
       <h2>Label</h2>
-      <canvas id="preview" width="600" height="128"></canvas>
+      <div class="canvas-viewport">
+        <canvas id="preview" width="600" height="128"></canvas>
+        <button id="zoom-reset" class="secondary" type="button" hidden title="reset zoom">fit</button>
+      </div>
       <div class="row" style="margin-top:.75rem">
         <button id="add-text"    class="secondary" type="button">+ text</button>
         <button id="add-image"   class="secondary" type="button">+ image</button>
@@ -1712,6 +1717,23 @@ document.getElementById("lib-select").addEventListener("change", e => {
  * coords (CSS scaling) so it works on retina + zoomed pages. */
 const canvas = document.getElementById("preview");
 let drag = null;
+
+/* Zoom + pan state. Applied to the canvas via CSS transform; the
+ * canvas's own pixel buffer never changes resolution, so output
+ * stays pixel-perfect (image-rendering:pixelated keeps edges crisp
+ * at any zoom). evtToCanvas works unchanged because
+ * getBoundingClientRect already returns the post-transform rect. */
+let zoom = 1, panX = 0, panY = 0;
+const activePointers = new Map();
+let pinchInitial = null;
+
+function applyTransform() {
+  canvas.style.transformOrigin = "0 0";
+  canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  document.getElementById("zoom-reset").hidden =
+    (zoom === 1 && panX === 0 && panY === 0);
+}
+
 function evtToCanvas(ev) {
   const r = canvas.getBoundingClientRect();
   return {
@@ -1727,11 +1749,28 @@ let longPressStart = null;
 
 canvas.addEventListener("pointerdown", ev => {
   hideContextMenu();
+  activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+
+  /* Two-finger pinch start: cancel any in-progress drag/longpress
+   * and snapshot the gesture's reference distance + midpoint +
+   * current zoom/pan. */
+  if (activePointers.size >= 2) {
+    drag = null;
+    clearTimeout(longPressTimer); longPressTimer = null;
+    const pts = Array.from(activePointers.values());
+    pinchInitial = {
+      d:  Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+      mx: (pts[0].x + pts[1].x) / 2,
+      my: (pts[0].y + pts[1].y) / 2,
+      zoom, panX, panY,
+    };
+    return;
+  }
+
   const p = evtToCanvas(ev);
   const hit = hitTest(p.x, p.y);
   selectElement(hit ? hit.id : null);
   if (hit) {
-    /* Snapshot before drag so undo restores the pre-drag position. */
     pushUndo();
     const w = hit._w || 0, h = hit._h || 0;
     drag = {
@@ -1740,7 +1779,6 @@ canvas.addEventListener("pointerdown", ev => {
       dyFromCenter: p.y - (hit.y + h / 2),
     };
     canvas.setPointerCapture(ev.pointerId);
-    /* Arm long-press; cancelled by movement or pointerup. */
     longPressStart = { x: ev.clientX, y: ev.clientY };
     longPressTimer = setTimeout(() => {
       longPressTimer = null;
@@ -1749,11 +1787,29 @@ canvas.addEventListener("pointerdown", ev => {
     }, 500);
   }
 });
+
 canvas.addEventListener("pointermove", ev => {
+  if (activePointers.has(ev.pointerId)) {
+    activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  }
+
+  /* Pinch update: scale by distance ratio, pan by midpoint delta. */
+  if (pinchInitial && activePointers.size >= 2) {
+    const pts = Array.from(activePointers.values());
+    const d   = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+    const mx  = (pts[0].x + pts[1].x) / 2;
+    const my  = (pts[0].y + pts[1].y) / 2;
+    zoom = Math.max(0.5, Math.min(8, pinchInitial.zoom * d / pinchInitial.d));
+    panX = pinchInitial.panX + (mx - pinchInitial.mx);
+    panY = pinchInitial.panY + (my - pinchInitial.my);
+    applyTransform();
+    return;
+  }
+
   if (longPressStart) {
     const dx = ev.clientX - longPressStart.x;
     const dy = ev.clientY - longPressStart.y;
-    if (dx*dx + dy*dy > 25) {  /* 5 px threshold */
+    if (dx*dx + dy*dy > 25) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
@@ -1770,12 +1826,36 @@ canvas.addEventListener("pointermove", ev => {
   syncPropsPanel();
   redraw();
 });
-function endPointer() {
+function endPointer(ev) {
+  if (ev) activePointers.delete(ev.pointerId);
+  if (activePointers.size < 2) pinchInitial = null;
   clearTimeout(longPressTimer); longPressTimer = null; longPressStart = null;
   drag = null;
 }
-canvas.addEventListener("pointerup",   endPointer);
+canvas.addEventListener("pointerup",     endPointer);
 canvas.addEventListener("pointercancel", endPointer);
+
+/* Desktop: Ctrl+wheel zooms toward the cursor (matching browser
+ * page-zoom convention). preventDefault stops the browser's own
+ * Ctrl+wheel page zoom from kicking in. */
+canvas.addEventListener("wheel", ev => {
+  if (!ev.ctrlKey && !ev.metaKey) return;
+  ev.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const cx = ev.clientX - r.left;
+  const cy = ev.clientY - r.top;
+  const newZoom = Math.max(0.5, Math.min(8, zoom * (1 - ev.deltaY * 0.002)));
+  /* Keep the cursor's canvas point fixed across the zoom. */
+  panX = cx - (cx - panX) * (newZoom / zoom);
+  panY = cy - (cy - panY) * (newZoom / zoom);
+  zoom = newZoom;
+  applyTransform();
+}, { passive: false });
+
+document.getElementById("zoom-reset").addEventListener("click", () => {
+  zoom = 1; panX = 0; panY = 0;
+  applyTransform();
+});
 
 /* Right-click also opens the context menu — no long-press wait. */
 canvas.addEventListener("contextmenu", ev => {
