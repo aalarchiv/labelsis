@@ -6,11 +6,14 @@
 <title>pt700</title>
 <style>
 :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --err:#f85149; --panel:#161b22; --line:#30363d; }
+@media (prefers-color-scheme: light) {
+  :root { --bg:#ffffff; --fg:#1f2328; --muted:#57606a; --accent:#0969da; --ok:#1a7f37; --err:#cf222e; --panel:#f6f8fa; --line:#d1d9e0; }
+}
 * { box-sizing: border-box; }
 body { margin:0; font:14px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
 header { position:relative; padding:.75rem 1rem; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:.75rem; }
 h1 { margin:0; font-size:1rem; font-weight:600; cursor:pointer; user-select:none; padding:.25rem .5rem; border-radius:4px; transition:background .1s; }
-h1:hover { background:rgba(255,255,255,.04); }
+h1:hover { background:var(--panel); }
 h1::after  { content:" ▾"; color:var(--muted); font-size:.75em; transition:transform .15s; display:inline-block; }
 h1.expanded::after { transform:rotate(180deg); }
 h1.online::before  { content:"● "; color:var(--ok); }
@@ -29,7 +32,7 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
 label { font-size:.85rem; color:var(--muted); }
-input[type=text], input[type=number], input[type=password], select { background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:inherit; flex:1; min-width:160px; }
+input[type=text], input[type=number], input[type=password], select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:inherit; flex:1; min-width:160px; }
 input[type=range] { flex:1; }
 button { background:var(--accent); color:#fff; border:0; border-radius:4px; padding:.6rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
 button:disabled { background:var(--muted); cursor:not-allowed; }
@@ -46,7 +49,7 @@ dialog::backdrop { background:rgba(0,0,0,.5); }
 dialog h3 { margin:0 0 .75rem; font-size:.95rem; font-weight:600; }
 dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; margin:1rem 0 0; }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
-#el-list li { display:flex; align-items:center; gap:.5rem; padding:.4rem .5rem; border:1px solid var(--line); border-radius:4px; margin-bottom:.25rem; cursor:pointer; user-select:none; background:#0d1117; }
+#el-list li { display:flex; align-items:center; gap:.5rem; padding:.4rem .5rem; border:1px solid var(--line); border-radius:4px; margin-bottom:.25rem; cursor:pointer; user-select:none; background:var(--bg); }
 #el-list li:hover { border-color:var(--accent); }
 #el-list li.selected { border-color:var(--accent); background:rgba(88,166,255,.08); }
 #el-list li.dragging { opacity:.4; }
@@ -255,7 +258,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <code>{$dt|YYYY-MM-DD}</code>, <code>{$time|HH:mm}</code>,
       <code>{$now}</code> (ISO) — work without CSV too.</p>
       <textarea id="csv" rows="6" placeholder="name,$copies&#10;Alice,2&#10;Bob,1"
-                style="width:100%; background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical;"></textarea>
+                style="width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical;"></textarea>
       <div class="row" style="margin-top:.5rem;">
         <span class="muted" id="tpl-cols">no data</span>
       </div>
