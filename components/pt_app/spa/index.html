@@ -30,12 +30,17 @@ input[type=range] { flex:1; }
 button { background:var(--accent); color:#fff; border:0; border-radius:4px; padding:.6rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
 button:disabled { background:var(--muted); cursor:not-allowed; }
 button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
-canvas { display:block; max-width:100%; image-rendering:pixelated; background:#fff; border:1px solid var(--line); border-radius:4px; }
+canvas { display:block; max-width:100%; image-rendering:pixelated; background:#fff; border:1px solid var(--line); border-radius:4px; touch-action:none; }
+#el-list .grip { touch-action:none; }
 .status-grid { display:grid; grid-template-columns:auto 1fr; gap:.25rem .75rem; font-size:.85rem; }
 .status-grid .k { color:var(--muted); }
 .kv-ok  { color:var(--ok); }
 .kv-err { color:var(--err); }
 .muted { color:var(--muted); font-size:.85rem; }
+dialog { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:1.25rem 1.5rem; min-width:300px; box-shadow:0 8px 32px rgba(0,0,0,.4); }
+dialog::backdrop { background:rgba(0,0,0,.5); }
+dialog h3 { margin:0 0 .75rem; font-size:.95rem; font-weight:600; }
+dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; margin:1rem 0 0; }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
 #el-list li { display:flex; align-items:center; gap:.5rem; padding:.4rem .5rem; border:1px solid var(--line); border-radius:4px; margin-bottom:.25rem; cursor:pointer; user-select:none; background:#0d1117; }
 #el-list li:hover { border-color:var(--accent); }
@@ -51,8 +56,14 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
   .burger { display:block; }
   nav { display:none; position:absolute; top:100%; left:0; right:0; flex-direction:column; background:var(--panel); border-bottom:1px solid var(--line); padding:.5rem; z-index:10; gap:0; }
   nav.open { display:flex; }
-  nav a { padding:.6rem .75rem; }
-  #conn { margin-left:0; }
+  nav a { padding:.7rem .75rem; }
+  /* WCAG 2.5.5 / Apple HIG / Material recommend ≥44 px touch targets;
+   * bump button + input padding here so phone users can hit them.
+   * Desktop keeps the tighter sizes for visual density. */
+  button { padding:.75rem 1rem; min-height:44px; }
+  input[type=text], input[type=number], input[type=password], select { padding:.7rem; min-height:44px; }
+  #el-list li { padding:.7rem .5rem; }
+  #el-list .grip { padding:.5rem .35rem; font-size:1.2rem; }
 }
 </style>
 </head>
@@ -287,6 +298,17 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
       <div id="wifi-log"></div>
     </div>
   </section>
+
+  <dialog id="lib-save-dialog">
+    <form method="dialog" id="lib-save-form">
+      <h3>Save label as</h3>
+      <input id="lib-save-name" type="text" placeholder="label name" required style="width:100%">
+      <menu>
+        <button class="secondary" type="button" id="lib-save-cancel">cancel</button>
+        <button id="lib-save-confirm">save</button>
+      </menu>
+    </form>
+  </dialog>
 
   <section id="view-settings" hidden>
     <div class="panel">
@@ -1339,52 +1361,85 @@ function renderLayerList() {
   ul.innerHTML = "";
   for (const el of elements) {
     const li = document.createElement("li");
-    li.draggable = true;
     li.dataset.id = el.id;
     if (el.id === selectedId) li.classList.add("selected");
-    li.innerHTML = `<span class="grip">⋮⋮</span><span class="type">${el.type}</span><span class="label"></span>`;
+    li.innerHTML = `<span class="grip" title="drag to reorder">⋮⋮</span><span class="type">${el.type}</span><span class="label"></span>`;
     li.querySelector(".label").textContent = summarise(el);
-    li.addEventListener("click", () => selectElement(el.id));
-
-    li.addEventListener("dragstart", e => {
-      e.dataTransfer.setData("text/plain", String(el.id));
-      e.dataTransfer.effectAllowed = "move";
-      li.classList.add("dragging");
+    li.addEventListener("click", ev => {
+      /* Suppress the click that fires at the end of a drag-drop. */
+      if (li._suppressClick) { li._suppressClick = false; return; }
+      selectElement(el.id);
     });
-    li.addEventListener("dragend", () => {
-      li.classList.remove("dragging");
-      ul.querySelectorAll(".drop-above,.drop-below")
-        .forEach(n => n.classList.remove("drop-above", "drop-below"));
-    });
-    li.addEventListener("dragover", e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      const rect = li.getBoundingClientRect();
-      const above = (e.clientY - rect.top) < rect.height / 2;
-      li.classList.toggle("drop-above", above);
-      li.classList.toggle("drop-below", !above);
-    });
-    li.addEventListener("dragleave", () =>
-      li.classList.remove("drop-above", "drop-below"));
-    li.addEventListener("drop", e => {
-      e.preventDefault();
-      const rect = li.getBoundingClientRect();
-      const above = (e.clientY - rect.top) < rect.height / 2;
-      const draggedId = +e.dataTransfer.getData("text/plain");
-      if (draggedId === el.id) return;
-      const fromIdx = elements.findIndex(x => x.id === draggedId);
-      let toIdx    = elements.findIndex(x => x.id === el.id);
-      if (fromIdx < 0 || toIdx < 0) return;
-      pushUndo();
-      const [moved] = elements.splice(fromIdx, 1);
-      if (fromIdx < toIdx) toIdx--;       /* compensate for splice */
-      elements.splice(toIdx + (above ? 0 : 1), 0, moved);
-      renderLayerList();
-      redraw();
-    });
+    attachLayerDrag(li, el.id);
     ul.appendChild(li);
   }
   document.getElementById("layers-panel").hidden = elements.length === 0;
+}
+
+/* Pointer-event-based reorder: works on mouse, pen, and touch
+ * uniformly (HTML5 dragstart doesn't fire on touch in iOS Safari /
+ * most Android browsers, which made the previous implementation a
+ * desktop-only feature).
+ *
+ * Drag begins on pointerdown that lands on the .grip handle. We
+ * capture the pointer, listen for pointermove anywhere on document,
+ * and elementFromPoint() each frame to find which row we're hovering;
+ * the row gets a .drop-above/.drop-below class for the insertion
+ * indicator. pointerup commits the splice. */
+function attachLayerDrag(li, id) {
+  const grip = li.querySelector(".grip");
+  let active = null;
+
+  grip.addEventListener("pointerdown", ev => {
+    ev.preventDefault();
+    grip.setPointerCapture(ev.pointerId);
+    li.classList.add("dragging");
+    active = { pid: ev.pointerId };
+  });
+
+  grip.addEventListener("pointermove", ev => {
+    if (!active || ev.pointerId !== active.pid) return;
+    const target = document.elementFromPoint(ev.clientX, ev.clientY);
+    const targetLi = target && target.closest("#el-list li");
+    document.querySelectorAll("#el-list .drop-above, #el-list .drop-below")
+      .forEach(n => n.classList.remove("drop-above", "drop-below"));
+    if (targetLi && targetLi !== li) {
+      const rect = targetLi.getBoundingClientRect();
+      const above = (ev.clientY - rect.top) < rect.height / 2;
+      targetLi.classList.add(above ? "drop-above" : "drop-below");
+      active.target = targetLi;
+      active.above  = above;
+    } else {
+      active.target = null;
+    }
+  });
+
+  const finish = ev => {
+    if (!active || ev.pointerId !== active.pid) return;
+    li.classList.remove("dragging");
+    document.querySelectorAll("#el-list .drop-above, #el-list .drop-below")
+      .forEach(n => n.classList.remove("drop-above", "drop-below"));
+    if (active.target) {
+      const targetId = +active.target.dataset.id;
+      const fromIdx  = elements.findIndex(x => x.id === id);
+      let   toIdx    = elements.findIndex(x => x.id === targetId);
+      if (fromIdx >= 0 && toIdx >= 0) {
+        pushUndo();
+        const [moved] = elements.splice(fromIdx, 1);
+        if (fromIdx < toIdx) toIdx--;
+        elements.splice(toIdx + (active.above ? 0 : 1), 0, moved);
+        renderLayerList();
+        redraw();
+      }
+      /* The click that follows pointerup would re-select the source
+       * row; suppress it. */
+      li._suppressClick = true;
+      setTimeout(() => { li._suppressClick = false; }, 0);
+    }
+    active = null;
+  };
+  grip.addEventListener("pointerup",     finish);
+  grip.addEventListener("pointercancel", finish);
 }
 
 function syncPropsPanel() {
@@ -1596,8 +1651,21 @@ document.getElementById("undo").addEventListener("click", undo);
 document.getElementById("redo").addEventListener("click", redo);
 
 document.getElementById("lib-save").addEventListener("click", () => {
-  const name = prompt("Save label as:", currentLabelName || "Label 1");
-  if (name && name.trim()) libSaveAs(name.trim());
+  const dialog = document.getElementById("lib-save-dialog");
+  const input  = document.getElementById("lib-save-name");
+  input.value  = currentLabelName || "Label 1";
+  dialog.showModal();
+  input.focus();
+  input.select();
+});
+document.getElementById("lib-save-cancel").addEventListener("click", () => {
+  document.getElementById("lib-save-dialog").close("cancel");
+});
+document.getElementById("lib-save-form").addEventListener("submit", ev => {
+  if (ev.submitter && ev.submitter.id === "lib-save-cancel") return;
+  const name = document.getElementById("lib-save-name").value.trim();
+  if (name) libSaveAs(name);
+  /* form's method="dialog" closes the dialog automatically. */
 });
 document.getElementById("lib-update").addEventListener("click", () => {
   if (currentLabelName) libSaveAs(currentLabelName);
