@@ -174,6 +174,9 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
           </select>
           <label>height</label>
           <input id="bc-h" type="number" min="16" max="128" style="max-width:90px">
+          <label>module</label>
+          <input id="bc-size" type="number" min="1" max="6" style="max-width:90px">
+          <span class="muted">(px/bar)</span>
         </div>
         <div class="row">
           <label>x</label>
@@ -633,19 +636,44 @@ function ean13(data) {
   return { text: data, bits };
 }
 
+/* Pre-bake the barcode bit pattern to a 1-bit (black-on-white)
+ * scratch canvas so drawElement can drawImage it with image-
+ * smoothing off — guarantees crisp pixel-perfect output, no
+ * anti-aliasing artefacts even when overlapping or rotated. The
+ * cache is invalidated when text/symbology/h/size change. */
+function bakeBarcode(el) {
+  if (el._barcodeError || !el._barcodeBits) return;
+  const sz = Math.max(1, Math.min(6, el.size | 0));
+  const w  = el._barcodeBits.length * sz;
+  const h  = Math.max(1, el.h | 0);
+  const c  = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const cctx = c.getContext("2d");
+  cctx.fillStyle = "#fff";
+  cctx.fillRect(0, 0, w, h);
+  cctx.fillStyle = "#000";
+  for (let i = 0; i < el._barcodeBits.length; i++) {
+    if (el._barcodeBits[i] === "1") cctx.fillRect(i * sz, 0, sz, h);
+  }
+  el._barcodeCanvas = c;
+}
+
 function measureBarcode(_ctx, el) {
   try {
     const bits = el.symbology === "ean13" ? ean13(el.text).bits : code128b(el.text);
     el._barcodeBits  = bits;
     el._barcodeError = null;
-    el._w = bits.length;
+    const sz = Math.max(1, Math.min(6, el.size | 0));
+    el._w = bits.length * sz;
     el._h = el.h | 0;
   } catch (e) {
     el._barcodeBits  = null;
     el._barcodeError = e.message;
+    el._barcodeCanvas = null;
     el._w = 80;
     el._h = el.h | 0;
   }
+  if (!el._barcodeError && !el._barcodeCanvas) bakeBarcode(el);
 }
 
 function drawBarcode(ctx, el) {
@@ -658,11 +686,7 @@ function drawBarcode(ctx, el) {
     ctx.fillText(el._barcodeError.slice(0, 18), 2, 2);
     return;
   }
-  ctx.fillStyle = "#000";
-  const bits = el._barcodeBits;
-  for (let i = 0; i < bits.length; i++) {
-    if (bits[i] === "1") ctx.fillRect(i, 0, 1, el.h);
-  }
+  if (el._barcodeCanvas) ctx.drawImage(el._barcodeCanvas, 0, 0);
 }
 
 /* --- QR code element ---------------------------------------------
@@ -695,12 +719,34 @@ function qrRebake(el) {
   }
 }
 
+/* Pre-bake the QR matrix onto a 1-bit scratch canvas — same trick
+ * as the barcode path. Cache invalidates when text/ecc/size change. */
+function bakeQR(el) {
+  if (!el._qr) return;
+  const n  = el._qr.getModuleCount();
+  const sz = Math.max(1, Math.min(6, el.size | 0));
+  const px = n * sz;
+  const c  = document.createElement("canvas");
+  c.width = px; c.height = px;
+  const cctx = c.getContext("2d");
+  cctx.fillStyle = "#fff";
+  cctx.fillRect(0, 0, px, px);
+  cctx.fillStyle = "#000";
+  for (let r = 0; r < n; r++) {
+    for (let col = 0; col < n; col++) {
+      if (el._qr.isDark(r, col)) cctx.fillRect(col * sz, r * sz, sz, sz);
+    }
+  }
+  el._qrCanvas = c;
+}
+
 function measureQR(_ctx, el) {
   if (!el._qr && !el._qrError) qrRebake(el);
   if (el._qrError) { el._w = 80; el._h = 30; return; }
   if (!el._qr)     { el._w = 0;  el._h = 0;  return; }
   const sz = Math.max(1, Math.min(6, el.size | 0));
   el._w = el._h = el._qr.getModuleCount() * sz;
+  if (!el._qrCanvas) bakeQR(el);
 }
 
 function drawQR(ctx, el) {
@@ -713,16 +759,7 @@ function drawQR(ctx, el) {
     ctx.fillText("QR: " + el._qrError.slice(0, 16), 2, 2);
     return;
   }
-  if (!el._qr) return;
-  const qr = el._qr;
-  const n  = qr.getModuleCount();
-  const sz = Math.max(1, Math.min(6, el.size | 0));
-  ctx.fillStyle = "#000";
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      if (qr.isDark(r, c)) ctx.fillRect(c * sz, r * sz, sz, sz);
-    }
-  }
+  if (el._qrCanvas) ctx.drawImage(el._qrCanvas, 0, 0);
 }
 
 /* Measure first (writes _w/_h), then translate to the element's
@@ -764,6 +801,13 @@ const COMPOSITE_MAP = {
 function drawElement(ctx, el) {
   measureElement(ctx, el);
   ctx.save();
+  /* Pixel-perfect output: never let the browser interpolate
+   * pre-baked bitmaps (image / QR / barcode caches). With smoothing
+   * off, drawImage at integer translate is an exact pixel copy and
+   * 90°/180°/270° rotations are lossless; arbitrary angles are
+   * stair-stepped but still 1-bit, no gradient artefacts that the
+   * print threshold would render as inconsistent dithering. */
+  ctx.imageSmoothingEnabled = false;
   const w = el._w || 0, h = el._h || 0;
   ctx.translate(el.x + w / 2, el.y + h / 2);
   const rot = (el.rotation || 0) * Math.PI / 180;
@@ -1372,6 +1416,7 @@ function syncPropsPanel() {
     document.getElementById("bc-text").value = el.text;
     document.getElementById("bc-sym").value  = el.symbology;
     document.getElementById("bc-h").value    = el.h;
+    document.getElementById("bc-size").value = el.size || 1;
     document.getElementById("bc-x").value    = Math.round(el.x);
     document.getElementById("bc-y").value    = Math.round(el.y);
   } else if (el && el.type === "qr") {
@@ -1397,9 +1442,16 @@ function bindPropInput(id, key, parseFn) {
      * cached dither so the next redraw rebakes. */
     if (el.type === "image" && (id === "img-algo" || id === "img-threshold" || id === "img-h"))
       el._dithered = null;
-    /* Same for the QR matrix when text or ECC changes. */
+    /* QR: text/ECC change → re-encode the matrix. size change →
+     * just re-bake the canvas at the new module width. */
     if (el.type === "qr" && (id === "qr-text" || id === "qr-ecc"))
       el._qr = el._qrError = null;
+    if (el.type === "qr" && (id === "qr-text" || id === "qr-ecc" || id === "qr-size"))
+      el._qrCanvas = null;
+    /* Barcode cache invalidates on text/symbology/height/module-width. */
+    if (el.type === "barcode" && (id === "bc-text" || id === "bc-sym"
+                               || id === "bc-h"    || id === "bc-size"))
+      el._barcodeCanvas = null;
     /* If the change can affect the layer list's summary text
      * (text content / symbology / type), refresh it. */
     if (id === "text" || id === "bc-text" || id === "qr-text"
@@ -1419,6 +1471,7 @@ bindPropInput("img-y",         "y",         v => Math.max(0, Math.min(127, parse
 bindPropInput("bc-text",       "text");
 bindPropInput("bc-sym",        "symbology");
 bindPropInput("bc-h",          "h",         v => Math.max(16, Math.min(128, parseInt(v, 10) || 16)));
+bindPropInput("bc-size",       "size",      v => Math.max(1, Math.min(6, parseInt(v, 10) || 1)));
 bindPropInput("bc-x",          "x",         v => parseInt(v, 10) || 0);
 bindPropInput("bc-y",          "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
 bindPropInput("qr-text",       "text");
@@ -1478,6 +1531,8 @@ document.getElementById("add-barcode").addEventListener("click", () => {
     h: 60,
     symbology: "code128b",
     text: "ABC123",
+    size: 2,   /* default 2 px/module — readable on most scanners,
+                * scales up to 6 for shelf-distance scanning */
   };
   elements.push(el);
   selectElement(el.id);
