@@ -50,7 +50,8 @@ dialog { background:var(--panel); color:var(--fg); border:1px solid var(--line);
 dialog::backdrop { background:rgba(0,0,0,.5); }
 dialog h3 { margin:0 0 .75rem; font-size:.95rem; font-weight:600; }
 dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; margin:1rem 0 0; }
-#ctx-menu { position:fixed; z-index:1000; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:.25rem; box-shadow:0 4px 16px rgba(0,0,0,.3); display:flex; flex-direction:column; min-width:160px; }
+#ctx-menu { position:fixed; z-index:1000; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:.25rem; box-shadow:0 4px 16px rgba(0,0,0,.3); flex-direction:column; min-width:160px; }
+#ctx-menu:not([hidden]) { display:flex; }
 #ctx-menu button { display:block; width:100%; text-align:left; background:transparent; color:var(--fg); padding:.5rem .75rem; border-radius:3px; font-weight:normal; }
 #ctx-menu button:hover { background:rgba(88,166,255,.12); }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
