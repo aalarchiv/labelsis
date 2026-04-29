@@ -177,6 +177,16 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
           <input id="img-y" type="number" min="0" max="127" style="max-width:90px">
         </div>
       </div>
+
+      <div id="props-transform" hidden style="margin-top:.75rem; padding-top:.75rem; border-top:1px solid var(--line);">
+        <div class="row">
+          <label>rotation</label>
+          <input id="el-rotation" type="number" step="1" style="max-width:90px">
+          <span class="muted">°</span>
+          <button id="rot-cw"  class="secondary" type="button">+90°</button>
+          <button id="rot-ccw" class="secondary" type="button">-90°</button>
+        </div>
+      </div>
     </div>
 
     <details class="panel" id="tpl-panel">
@@ -341,7 +351,7 @@ let selectedId = null;
 let nextId    = 1;
 
 function defaultText() {
-  return { id: nextId++, type: "text", x: 14, y: 0, text: "hello", size: 80 };
+  return { id: nextId++, type: "text", x: 14, y: 0, rotation: 0, text: "hello", size: 80 };
 }
 
 function elementById(id) {
@@ -351,13 +361,17 @@ function elementById(id) {
 /* Render text into the canvas context and populate _w/_h on the
  * element for hit-testing later. The text value is run through
  * substitute() so {col} / {$dt} / etc. work in the live preview. */
+/* All drawElement helpers render in the element's *local* space —
+ * origin at (0, 0). drawElement() applies the translate + rotate
+ * once before dispatching, so each helper just paints from the
+ * origin and writes its w×h into _w/_h for hit-testing. */
 function drawText(ctx, el) {
   const value = substitute(el.text, csvData.data[csvCurrentRow] || {});
   ctx.font = `${el.size}px sans-serif`;
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   ctx.fillStyle = "#000";
-  ctx.fillText(value, el.x, el.y);
+  ctx.fillText(value, 0, 0);
   /* approximate height: most fonts the descent + ascent ~ size; we
    * pad a bit so hit-test feels generous. */
   el._w = Math.ceil(ctx.measureText(value).width);
@@ -436,7 +450,10 @@ function ditherImage(srcImageData, algorithm, threshold) {
 }
 
 /* Re-rasterise the source <img> at the current target height and run
- * dither(). Call after src / algorithm / threshold / h changes. */
+ * dither(). Cached as a *canvas* (not ImageData) so drawElement's
+ * translate/rotate transforms apply — putImageData would ignore the
+ * transform and render at absolute pixels. Call after src /
+ * algorithm / threshold / h changes. */
 function imageRebake(el) {
   if (!el._img || !el._img.complete) return;
   const ratio = el._img.naturalWidth / el._img.naturalHeight;
@@ -449,20 +466,24 @@ function imageRebake(el) {
   tctx.fillRect(0, 0, w, h);
   tctx.drawImage(el._img, 0, 0, w, h);
   const src = tctx.getImageData(0, 0, w, h);
-  el._dithered = ditherImage(src, el.algorithm, el.threshold);
+  const dithered = ditherImage(src, el.algorithm, el.threshold);
+  const out = document.createElement("canvas");
+  out.width = w; out.height = h;
+  out.getContext("2d").putImageData(dithered, 0, 0);
+  el._dithered = out;
 }
 
 function drawImage(ctx, el) {
   if (!el._dithered) imageRebake(el);
   if (el._dithered) {
-    ctx.putImageData(el._dithered, el.x, el.y);
+    ctx.drawImage(el._dithered, 0, 0);
     el._w = el._dithered.width;
     el._h = el._dithered.height;
   } else {
     /* Source not loaded yet: draw a placeholder rectangle. */
     el._w = 60; el._h = el.h | 0;
     ctx.fillStyle = "#ddd";
-    ctx.fillRect(el.x, el.y, el._w, el._h);
+    ctx.fillRect(0, 0, el._w, el._h);
   }
 }
 
@@ -577,16 +598,16 @@ function drawBarcode(ctx, el) {
      * of an invisible element when their input is invalid. */
     el._w = 80; el._h = el.h | 0;
     ctx.fillStyle = "#fdd";
-    ctx.fillRect(el.x, el.y, el._w, el._h);
+    ctx.fillRect(0, 0, el._w, el._h);
     ctx.fillStyle = "#900";
     ctx.font = "10px sans-serif";
     ctx.textBaseline = "top";
-    ctx.fillText(e.message.slice(0, 18), el.x + 2, el.y + 2);
+    ctx.fillText(e.message.slice(0, 18), 2, 2);
     return;
   }
   ctx.fillStyle = "#000";
   for (let i = 0; i < bits.length; i++) {
-    if (bits[i] === "1") ctx.fillRect(el.x + i, el.y, 1, el.h);
+    if (bits[i] === "1") ctx.fillRect(i, 0, 1, el.h);
   }
   el._w = bits.length;
   el._h = el.h | 0;
@@ -627,11 +648,11 @@ function drawQR(ctx, el) {
   if (el._qrError) {
     el._w = 80; el._h = 30;
     ctx.fillStyle = "#fdd";
-    ctx.fillRect(el.x, el.y, el._w, el._h);
+    ctx.fillRect(0, 0, el._w, el._h);
     ctx.fillStyle = "#900";
     ctx.font = "10px sans-serif";
     ctx.textBaseline = "top";
-    ctx.fillText("QR: " + el._qrError.slice(0, 16), el.x + 2, el.y + 2);
+    ctx.fillText("QR: " + el._qrError.slice(0, 16), 2, 2);
     return;
   }
   const qr = el._qr;
@@ -640,29 +661,62 @@ function drawQR(ctx, el) {
   ctx.fillStyle = "#000";
   for (let r = 0; r < n; r++) {
     for (let c = 0; c < n; c++) {
-      if (qr.isDark(r, c)) ctx.fillRect(el.x + c * sz, el.y + r * sz, sz, sz);
+      if (qr.isDark(r, c)) ctx.fillRect(c * sz, r * sz, sz, sz);
     }
   }
   el._w = n * sz;
   el._h = n * sz;
 }
 
+/* Apply per-element transform (translate + rotate around top-left)
+ * once, then dispatch to the type-specific drawer. Each drawer
+ * paints from local origin (0, 0); writes _w/_h in local space. */
 function drawElement(ctx, el) {
+  ctx.save();
+  ctx.translate(el.x, el.y);
+  const rot = (el.rotation || 0) * Math.PI / 180;
+  if (rot) ctx.rotate(rot);
   if (el.type === "text")    drawText(ctx, el);
   if (el.type === "image")   drawImage(ctx, el);
   if (el.type === "barcode") drawBarcode(ctx, el);
   if (el.type === "qr")      drawQR(ctx, el);
+  ctx.restore();
 }
 
+/* Axis-aligned bounding box on canvas. For rotated elements we
+ * project the four local-space corners through the transform and
+ * take the AABB — used for canvas auto-sizing in redraw() and the
+ * dashed selection ring. */
 function elementBounds(el) {
-  return { x: el.x, y: el.y, w: el._w || 0, h: el._h || 0 };
+  const w = el._w || 0, h = el._h || 0;
+  const rot = (el.rotation || 0) * Math.PI / 180;
+  if (!rot) return { x: el.x, y: el.y, w, h };
+  const cos = Math.cos(rot), sin = Math.sin(rot);
+  const corners = [[0,0],[w,0],[w,h],[0,h]].map(([cx, cy]) => [
+    el.x + cx * cos - cy * sin,
+    el.y + cx * sin + cy * cos,
+  ]);
+  const xs = corners.map(c => c[0]);
+  const ys = corners.map(c => c[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-/* Walk back-to-front so the topmost (last-drawn) element wins ties. */
+/* Walk back-to-front so the topmost (last-drawn) element wins ties.
+ * Hit-test happens in element-local space — invert translate+rotate
+ * on the click coords, then test against the unrotated rect. */
 function hitTest(x, y) {
   for (let i = elements.length - 1; i >= 0; i--) {
-    const b = elementBounds(elements[i]);
-    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return elements[i];
+    const el = elements[i];
+    const w = el._w || 0, h = el._h || 0;
+    const rot = (el.rotation || 0) * Math.PI / 180;
+    let lx = x - el.x, ly = y - el.y;
+    if (rot) {
+      const cos = Math.cos(-rot), sin = Math.sin(-rot);
+      [lx, ly] = [lx * cos - ly * sin, lx * sin + ly * cos];
+    }
+    if (lx >= 0 && lx <= w && ly >= 0 && ly <= h) return el;
   }
   return null;
 }
@@ -922,11 +976,13 @@ function selectElement(id) {
 
 function syncPropsPanel() {
   const el = elementById(selectedId);
-  document.getElementById("props-empty").hidden   = !!el;
-  document.getElementById("props-text").hidden    = !el || el.type !== "text";
-  document.getElementById("props-image").hidden   = !el || el.type !== "image";
-  document.getElementById("props-barcode").hidden = !el || el.type !== "barcode";
-  document.getElementById("props-qr").hidden      = !el || el.type !== "qr";
+  document.getElementById("props-empty").hidden     = !!el;
+  document.getElementById("props-text").hidden      = !el || el.type !== "text";
+  document.getElementById("props-image").hidden     = !el || el.type !== "image";
+  document.getElementById("props-barcode").hidden   = !el || el.type !== "barcode";
+  document.getElementById("props-qr").hidden        = !el || el.type !== "qr";
+  document.getElementById("props-transform").hidden = !el;
+  if (el) document.getElementById("el-rotation").value = el.rotation || 0;
   if (el && el.type === "text") {
     document.getElementById("text").value = el.text;
     document.getElementById("size").value = el.size;
@@ -991,6 +1047,26 @@ bindPropInput("qr-ecc",        "ecc");
 bindPropInput("qr-size",       "size",      v => Math.max(1, Math.min(6, parseInt(v, 10) || 1)));
 bindPropInput("qr-x",          "x",         v => parseInt(v, 10) || 0);
 bindPropInput("qr-y",          "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+bindPropInput("el-rotation",   "rotation",  v => {
+  /* Normalise to (-180, 180] so the input doesn't drift. */
+  let r = parseInt(v, 10) || 0;
+  while (r >  180) r -= 360;
+  while (r <= -180) r += 360;
+  return r;
+});
+
+function rotateBy(delta) {
+  const el = elementById(selectedId);
+  if (!el) return;
+  let r = (el.rotation || 0) + delta;
+  while (r >  180) r -= 360;
+  while (r <= -180) r += 360;
+  el.rotation = r;
+  syncPropsPanel();
+  redraw();
+}
+document.getElementById("rot-cw").addEventListener("click",  () => rotateBy(+90));
+document.getElementById("rot-ccw").addEventListener("click", () => rotateBy(-90));
 
 function rightmostX() {
   let r = 14;
@@ -1015,7 +1091,7 @@ document.getElementById("add-image").addEventListener("click", () => {
 document.getElementById("add-barcode").addEventListener("click", () => {
   const el = {
     id: nextId++, type: "barcode",
-    x: rightmostX(), y: 24,
+    x: rightmostX(), y: 24, rotation: 0,
     h: 60,
     symbology: "code128b",
     text: "ABC123",
@@ -1027,7 +1103,7 @@ document.getElementById("add-barcode").addEventListener("click", () => {
 document.getElementById("add-qr").addEventListener("click", () => {
   const el = {
     id: nextId++, type: "qr",
-    x: rightmostX(), y: 0,
+    x: rightmostX(), y: 0, rotation: 0,
     text: "https://pt700.local/",
     ecc: "M",
     size: 3,
@@ -1044,7 +1120,7 @@ document.getElementById("image-file").addEventListener("change", async e => {
   img.onload = () => {
     const el = {
       id: nextId++, type: "image",
-      x: rightmostX(), y: 0,
+      x: rightmostX(), y: 0, rotation: 0,
       h: HEAD_PX,
       algorithm: "atkinson",
       threshold: 128,
