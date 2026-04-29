@@ -179,12 +179,22 @@ canvas { display:block; max-width:100%; image-rendering:pixelated; background:#f
       </div>
 
       <div id="props-transform" hidden style="margin-top:.75rem; padding-top:.75rem; border-top:1px solid var(--line);">
-        <div class="row">
+        <div class="row" style="margin-bottom:.5rem">
           <label>rotation</label>
           <input id="el-rotation" type="number" step="1" style="max-width:90px">
           <span class="muted">°</span>
           <button id="rot-cw"  class="secondary" type="button">+90°</button>
           <button id="rot-ccw" class="secondary" type="button">-90°</button>
+        </div>
+        <div class="row">
+          <label>blend</label>
+          <select id="el-composite">
+            <option value="and">AND (over, default)</option>
+            <option value="or">OR (lighten)</option>
+            <option value="xor">XOR (toggle)</option>
+            <option value="not">NOT (invert)</option>
+          </select>
+          <span class="muted">how this element overlays the layers below it</span>
         </div>
       </div>
     </div>
@@ -351,7 +361,7 @@ let selectedId = null;
 let nextId    = 1;
 
 function defaultText() {
-  return { id: nextId++, type: "text", x: 14, y: 0, rotation: 0, text: "hello", size: 80 };
+  return { id: nextId++, type: "text", x: 14, y: 0, rotation: 0, composite: "and", text: "hello", size: 80 };
 }
 
 function elementById(id) {
@@ -697,6 +707,30 @@ function measureElement(ctx, el) {
   if (el.type === "qr")      measureQR(ctx, el);
 }
 
+/* Composite mode — how this element's pixels combine with the
+ * already-drawn layers below it. Mappings to canvas blend modes
+ * for our 1-bit black-on-white world:
+ *
+ *   AND (default) — multiply: black wherever the new element is
+ *                   black; white pixels of the element preserve
+ *                   what's underneath. The natural "stack on top"
+ *                   for label work, including images-with-white-bg.
+ *   OR  — lighter: additive — both layers' pixels combine. For
+ *                  pure 1-bit B/W this looks similar to AND because
+ *                  black saturates either way; visible when one
+ *                  layer is partially transparent.
+ *   XOR — xor: pixels appear only where exactly one layer is opaque.
+ *              Useful for cutting holes where elements overlap.
+ *   NOT — invert: this element renders inverted (black ↔ white)
+ *                 before the AND stack — flips the element's own
+ *                 ink rather than touching what's underneath. */
+const COMPOSITE_MAP = {
+  and: "multiply",
+  or:  "lighter",
+  xor: "xor",
+  not: "multiply",  /* element drawn into a scratch buffer, inverted, then multiplied */
+};
+
 function drawElement(ctx, el) {
   measureElement(ctx, el);
   ctx.save();
@@ -705,10 +739,37 @@ function drawElement(ctx, el) {
   const rot = (el.rotation || 0) * Math.PI / 180;
   if (rot) ctx.rotate(rot);
   ctx.translate(-w / 2, -h / 2);
-  if (el.type === "text")    drawText(ctx, el);
-  if (el.type === "image")   drawImage(ctx, el);
-  if (el.type === "barcode") drawBarcode(ctx, el);
-  if (el.type === "qr")      drawQR(ctx, el);
+
+  const op = el.composite || "and";
+  ctx.globalCompositeOperation = COMPOSITE_MAP[op] || "multiply";
+
+  if (op === "not" && w > 0 && h > 0) {
+    /* Render the element into a scratch canvas with white ground,
+     * invert luminance, then drawImage the result onto the main
+     * context (still under the centre-pivot transform). */
+    const scratch = document.createElement("canvas");
+    scratch.width = w; scratch.height = h;
+    const sctx = scratch.getContext("2d");
+    sctx.fillStyle = "#fff";
+    sctx.fillRect(0, 0, w, h);
+    if (el.type === "text")    drawText(sctx, el);
+    if (el.type === "image")   drawImage(sctx, el);
+    if (el.type === "barcode") drawBarcode(sctx, el);
+    if (el.type === "qr")      drawQR(sctx, el);
+    const data = sctx.getImageData(0, 0, w, h);
+    for (let i = 0; i < data.data.length; i += 4) {
+      data.data[i]     = 255 - data.data[i];
+      data.data[i + 1] = 255 - data.data[i + 1];
+      data.data[i + 2] = 255 - data.data[i + 2];
+    }
+    sctx.putImageData(data, 0, 0);
+    ctx.drawImage(scratch, 0, 0);
+  } else {
+    if (el.type === "text")    drawText(ctx, el);
+    if (el.type === "image")   drawImage(ctx, el);
+    if (el.type === "barcode") drawBarcode(ctx, el);
+    if (el.type === "qr")      drawQR(ctx, el);
+  }
   ctx.restore();
 }
 
@@ -1016,7 +1077,10 @@ function syncPropsPanel() {
   document.getElementById("props-barcode").hidden   = !el || el.type !== "barcode";
   document.getElementById("props-qr").hidden        = !el || el.type !== "qr";
   document.getElementById("props-transform").hidden = !el;
-  if (el) document.getElementById("el-rotation").value = el.rotation || 0;
+  if (el) {
+    document.getElementById("el-rotation").value  = el.rotation  || 0;
+    document.getElementById("el-composite").value = el.composite || "and";
+  }
   if (el && el.type === "text") {
     document.getElementById("text").value = el.text;
     document.getElementById("size").value = el.size;
@@ -1081,7 +1145,8 @@ bindPropInput("qr-ecc",        "ecc");
 bindPropInput("qr-size",       "size",      v => Math.max(1, Math.min(6, parseInt(v, 10) || 1)));
 bindPropInput("qr-x",          "x",         v => parseInt(v, 10) || 0);
 bindPropInput("qr-y",          "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
-bindPropInput("el-rotation",   "rotation",  v => {
+bindPropInput("el-composite", "composite");
+bindPropInput("el-rotation",  "rotation",   v => {
   /* Normalise to (-180, 180] so the input doesn't drift. */
   let r = parseInt(v, 10) || 0;
   while (r >  180) r -= 360;
@@ -1125,7 +1190,7 @@ document.getElementById("add-image").addEventListener("click", () => {
 document.getElementById("add-barcode").addEventListener("click", () => {
   const el = {
     id: nextId++, type: "barcode",
-    x: rightmostX(), y: 24, rotation: 0,
+    x: rightmostX(), y: 24, rotation: 0, composite: "and",
     h: 60,
     symbology: "code128b",
     text: "ABC123",
@@ -1137,7 +1202,7 @@ document.getElementById("add-barcode").addEventListener("click", () => {
 document.getElementById("add-qr").addEventListener("click", () => {
   const el = {
     id: nextId++, type: "qr",
-    x: rightmostX(), y: 0, rotation: 0,
+    x: rightmostX(), y: 0, rotation: 0, composite: "and",
     text: "https://pt700.local/",
     ecc: "M",
     size: 3,
@@ -1154,7 +1219,7 @@ document.getElementById("image-file").addEventListener("change", async e => {
   img.onload = () => {
     const el = {
       id: nextId++, type: "image",
-      x: rightmostX(), y: 0, rotation: 0,
+      x: rightmostX(), y: 0, rotation: 0, composite: "and",
       h: HEAD_PX,
       algorithm: "atkinson",
       threshold: 128,
