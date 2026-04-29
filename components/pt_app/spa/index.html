@@ -48,6 +48,9 @@ dialog { background:var(--panel); color:var(--fg); border:1px solid var(--line);
 dialog::backdrop { background:rgba(0,0,0,.5); }
 dialog h3 { margin:0 0 .75rem; font-size:.95rem; font-weight:600; }
 dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; margin:1rem 0 0; }
+#ctx-menu { position:fixed; z-index:1000; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:.25rem; box-shadow:0 4px 16px rgba(0,0,0,.3); display:flex; flex-direction:column; min-width:160px; }
+#ctx-menu button { display:block; width:100%; text-align:left; background:transparent; color:var(--fg); padding:.5rem .75rem; border-radius:3px; font-weight:normal; }
+#ctx-menu button:hover { background:rgba(88,166,255,.12); }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
 #el-list li { display:flex; align-items:center; gap:.5rem; padding:.4rem .5rem; border:1px solid var(--line); border-radius:4px; margin-bottom:.25rem; cursor:pointer; user-select:none; background:var(--bg); }
 #el-list li:hover { border-color:var(--accent); }
@@ -318,6 +321,13 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <div id="wifi-log"></div>
     </div>
   </section>
+
+  <div id="ctx-menu" hidden>
+    <button data-action="dup">Duplicate</button>
+    <button data-action="front">Bring to front</button>
+    <button data-action="back">Send to back</button>
+    <button data-action="del">Delete</button>
+  </div>
 
   <dialog id="lib-save-dialog">
     <form method="dialog" id="lib-save-form">
@@ -1709,16 +1719,20 @@ function evtToCanvas(ev) {
     y: (ev.clientY - r.top)  * (canvas.height / r.height),
   };
 }
+/* Long-press detection runs alongside drag start. If the pointer
+ * moves > 5 px before the 500 ms timer fires, drag wins and the
+ * timer is cancelled. Right-click opens the same menu directly. */
+let longPressTimer = null;
+let longPressStart = null;
+
 canvas.addEventListener("pointerdown", ev => {
+  hideContextMenu();
   const p = evtToCanvas(ev);
   const hit = hitTest(p.x, p.y);
   selectElement(hit ? hit.id : null);
   if (hit) {
     /* Snapshot before drag so undo restores the pre-drag position. */
     pushUndo();
-    /* Track offset from the element's centre — that's the rotation
-     * pivot, so the cursor stays pinned to the same visual point on
-     * the element regardless of rotation. */
     const w = hit._w || 0, h = hit._h || 0;
     drag = {
       id: hit.id,
@@ -1726,16 +1740,29 @@ canvas.addEventListener("pointerdown", ev => {
       dyFromCenter: p.y - (hit.y + h / 2),
     };
     canvas.setPointerCapture(ev.pointerId);
+    /* Arm long-press; cancelled by movement or pointerup. */
+    longPressStart = { x: ev.clientX, y: ev.clientY };
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      drag = null;
+      showContextMenu(longPressStart.x, longPressStart.y);
+    }, 500);
   }
 });
 canvas.addEventListener("pointermove", ev => {
+  if (longPressStart) {
+    const dx = ev.clientX - longPressStart.x;
+    const dy = ev.clientY - longPressStart.y;
+    if (dx*dx + dy*dy > 25) {  /* 5 px threshold */
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }
   if (!drag) return;
   const p = evtToCanvas(ev);
   const el = elementById(drag.id);
   if (!el) return;
   const w = el._w || 0, h = el._h || 0;
-  /* Place the centre such that the cursor stays at its original
-   * offset from centre. Convert back to top-left for storage. */
   const newCenterX = p.x - drag.dxFromCenter;
   const newCenterY = p.y - drag.dyFromCenter;
   el.x = Math.max(0, newCenterX - w / 2);
@@ -1743,8 +1770,59 @@ canvas.addEventListener("pointermove", ev => {
   syncPropsPanel();
   redraw();
 });
-canvas.addEventListener("pointerup",   () => drag = null);
-canvas.addEventListener("pointercancel", () => drag = null);
+function endPointer() {
+  clearTimeout(longPressTimer); longPressTimer = null; longPressStart = null;
+  drag = null;
+}
+canvas.addEventListener("pointerup",   endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+
+/* Right-click also opens the context menu — no long-press wait. */
+canvas.addEventListener("contextmenu", ev => {
+  const p = evtToCanvas(ev);
+  const hit = hitTest(p.x, p.y);
+  if (!hit) return;   /* let browser show its menu on empty canvas */
+  ev.preventDefault();
+  selectElement(hit.id);
+  showContextMenu(ev.clientX, ev.clientY);
+});
+
+function showContextMenu(clientX, clientY) {
+  if (selectedId == null) return;
+  const m = document.getElementById("ctx-menu");
+  m.hidden = false;
+  /* Position; clamp to viewport so the menu doesn't slide off-screen. */
+  const r = m.getBoundingClientRect();
+  const w = r.width  || 180;
+  const h = r.height || 160;
+  m.style.left = Math.min(window.innerWidth  - w - 8, clientX) + "px";
+  m.style.top  = Math.min(window.innerHeight - h - 8, clientY) + "px";
+}
+function hideContextMenu() {
+  document.getElementById("ctx-menu").hidden = true;
+}
+document.addEventListener("click", ev => {
+  if (!ev.target.closest("#ctx-menu")) hideContextMenu();
+});
+document.getElementById("ctx-menu").addEventListener("click", ev => {
+  const action = ev.target.dataset && ev.target.dataset.action;
+  if (!action) return;
+  hideContextMenu();
+  const el = elementById(selectedId);
+  if (!el) return;
+  if (action === "dup") { duplicateSelected(); return; }
+  if (action === "del") { document.getElementById("el-delete").click(); return; }
+  if (action === "front" || action === "back") {
+    pushUndo();
+    const idx = elements.findIndex(x => x.id === el.id);
+    if (idx < 0) return;
+    elements.splice(idx, 1);
+    if (action === "front") elements.push(el);          /* last drawn = top */
+    else                    elements.unshift(el);       /* first drawn = bottom */
+    renderLayerList();
+    redraw();
+  }
+});
 
 /* Keyboard shortcuts: Del/Backspace removes selection, Ctrl+D
  * duplicates, Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. We
