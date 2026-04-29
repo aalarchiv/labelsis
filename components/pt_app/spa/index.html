@@ -362,20 +362,28 @@ function elementById(id) {
  * element for hit-testing later. The text value is run through
  * substitute() so {col} / {$dt} / etc. work in the live preview. */
 /* All drawElement helpers render in the element's *local* space —
- * origin at (0, 0). drawElement() applies the translate + rotate
- * once before dispatching, so each helper just paints from the
- * origin and writes its w×h into _w/_h for hit-testing. */
-function drawText(ctx, el) {
+ * origin at (0, 0). drawElement() applies the centre-pivot
+ * translate + rotate once before dispatching, so each helper just
+ * paints from the origin. _w/_h are written by measure*() helpers
+ * BEFORE the transform — drawElement needs them to compute the
+ * pivot, so they can't be set during the paint step. */
+
+function measureText(ctx, el) {
   const value = substitute(el.text, csvData.data[csvCurrentRow] || {});
+  ctx.font = `${el.size}px sans-serif`;
+  el._renderedText = value;
+  el._w = Math.ceil(ctx.measureText(value).width);
+  /* approximate height: descent + ascent ~ size; pad a bit so
+   * hit-test feels generous. */
+  el._h = Math.ceil(el.size * 1.1);
+}
+
+function drawText(ctx, el) {
   ctx.font = `${el.size}px sans-serif`;
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   ctx.fillStyle = "#000";
-  ctx.fillText(value, 0, 0);
-  /* approximate height: most fonts the descent + ascent ~ size; we
-   * pad a bit so hit-test feels generous. */
-  el._w = Math.ceil(ctx.measureText(value).width);
-  el._h = Math.ceil(el.size * 1.1);
+  ctx.fillText(el._renderedText ?? el.text, 0, 0);
 }
 
 /* --- image element + dithering -----------------------------------
@@ -473,15 +481,16 @@ function imageRebake(el) {
   el._dithered = out;
 }
 
-function drawImage(ctx, el) {
+function measureImage(_ctx, el) {
   if (!el._dithered) imageRebake(el);
+  if (el._dithered) { el._w = el._dithered.width; el._h = el._dithered.height; }
+  else              { el._w = 60;                  el._h = el.h | 0; }
+}
+
+function drawImage(ctx, el) {
   if (el._dithered) {
     ctx.drawImage(el._dithered, 0, 0);
-    el._w = el._dithered.width;
-    el._h = el._dithered.height;
   } else {
-    /* Source not loaded yet: draw a placeholder rectangle. */
-    el._w = 60; el._h = el.h | 0;
     ctx.fillStyle = "#ddd";
     ctx.fillRect(0, 0, el._w, el._h);
   }
@@ -584,33 +593,36 @@ function ean13(data) {
   return { text: data, bits };
 }
 
-/* Render the bit pattern as 1-module-wide vertical bars. */
-function drawBarcode(ctx, el) {
-  let bits, label;
+function measureBarcode(_ctx, el) {
   try {
-    if (el.symbology === "ean13") {
-      const r = ean13(el.text); bits = r.bits; label = r.text;
-    } else {
-      bits = code128b(el.text); label = el.text;
-    }
+    const bits = el.symbology === "ean13" ? ean13(el.text).bits : code128b(el.text);
+    el._barcodeBits  = bits;
+    el._barcodeError = null;
+    el._w = bits.length;
+    el._h = el.h | 0;
   } catch (e) {
-    /* Render an error placeholder so the user sees something instead
-     * of an invisible element when their input is invalid. */
-    el._w = 80; el._h = el.h | 0;
+    el._barcodeBits  = null;
+    el._barcodeError = e.message;
+    el._w = 80;
+    el._h = el.h | 0;
+  }
+}
+
+function drawBarcode(ctx, el) {
+  if (el._barcodeError) {
     ctx.fillStyle = "#fdd";
     ctx.fillRect(0, 0, el._w, el._h);
     ctx.fillStyle = "#900";
     ctx.font = "10px sans-serif";
     ctx.textBaseline = "top";
-    ctx.fillText(e.message.slice(0, 18), 2, 2);
+    ctx.fillText(el._barcodeError.slice(0, 18), 2, 2);
     return;
   }
   ctx.fillStyle = "#000";
+  const bits = el._barcodeBits;
   for (let i = 0; i < bits.length; i++) {
     if (bits[i] === "1") ctx.fillRect(i, 0, 1, el.h);
   }
-  el._w = bits.length;
-  el._h = el.h | 0;
 }
 
 /* --- QR code element ---------------------------------------------
@@ -643,10 +655,16 @@ function qrRebake(el) {
   }
 }
 
-function drawQR(ctx, el) {
+function measureQR(_ctx, el) {
   if (!el._qr && !el._qrError) qrRebake(el);
+  if (el._qrError) { el._w = 80; el._h = 30; return; }
+  if (!el._qr)     { el._w = 0;  el._h = 0;  return; }
+  const sz = Math.max(1, Math.min(6, el.size | 0));
+  el._w = el._h = el._qr.getModuleCount() * sz;
+}
+
+function drawQR(ctx, el) {
   if (el._qrError) {
-    el._w = 80; el._h = 30;
     ctx.fillStyle = "#fdd";
     ctx.fillRect(0, 0, el._w, el._h);
     ctx.fillStyle = "#900";
@@ -655,6 +673,7 @@ function drawQR(ctx, el) {
     ctx.fillText("QR: " + el._qrError.slice(0, 16), 2, 2);
     return;
   }
+  if (!el._qr) return;
   const qr = el._qr;
   const n  = qr.getModuleCount();
   const sz = Math.max(1, Math.min(6, el.size | 0));
@@ -664,18 +683,28 @@ function drawQR(ctx, el) {
       if (qr.isDark(r, c)) ctx.fillRect(c * sz, r * sz, sz, sz);
     }
   }
-  el._w = n * sz;
-  el._h = n * sz;
 }
 
-/* Apply per-element transform (translate + rotate around top-left)
- * once, then dispatch to the type-specific drawer. Each drawer
- * paints from local origin (0, 0); writes _w/_h in local space. */
+/* Measure first (writes _w/_h), then translate to the element's
+ * centre, rotate, translate back to origin, paint. Centre-pivot is
+ * the natural "rotate in place" UX — and crucially it makes
+ * rotation reversible: bumping rotation back to 0 returns the
+ * element to exactly where it started, no drift. */
+function measureElement(ctx, el) {
+  if (el.type === "text")    measureText(ctx, el);
+  if (el.type === "image")   measureImage(ctx, el);
+  if (el.type === "barcode") measureBarcode(ctx, el);
+  if (el.type === "qr")      measureQR(ctx, el);
+}
+
 function drawElement(ctx, el) {
+  measureElement(ctx, el);
   ctx.save();
-  ctx.translate(el.x, el.y);
+  const w = el._w || 0, h = el._h || 0;
+  ctx.translate(el.x + w / 2, el.y + h / 2);
   const rot = (el.rotation || 0) * Math.PI / 180;
   if (rot) ctx.rotate(rot);
+  ctx.translate(-w / 2, -h / 2);
   if (el.type === "text")    drawText(ctx, el);
   if (el.type === "image")   drawImage(ctx, el);
   if (el.type === "barcode") drawBarcode(ctx, el);
@@ -684,39 +713,44 @@ function drawElement(ctx, el) {
 }
 
 /* Axis-aligned bounding box on canvas. For rotated elements we
- * project the four local-space corners through the transform and
- * take the AABB — used for canvas auto-sizing in redraw() and the
- * dashed selection ring. */
+ * project the four local-space corners through the centre-pivot
+ * transform and take the AABB. Used for canvas auto-sizing in
+ * redraw() and the dashed selection ring. */
 function elementBounds(el) {
   const w = el._w || 0, h = el._h || 0;
   const rot = (el.rotation || 0) * Math.PI / 180;
   if (!rot) return { x: el.x, y: el.y, w, h };
   const cos = Math.cos(rot), sin = Math.sin(rot);
-  const corners = [[0,0],[w,0],[w,h],[0,h]].map(([cx, cy]) => [
-    el.x + cx * cos - cy * sin,
-    el.y + cx * sin + cy * cos,
+  const cx = el.x + w / 2, cy = el.y + h / 2;
+  /* Local-space corners are around the centre: (-w/2, -h/2) etc. */
+  const corners = [[-w/2,-h/2],[w/2,-h/2],[w/2,h/2],[-w/2,h/2]].map(([lx, ly]) => [
+    cx + lx * cos - ly * sin,
+    cy + lx * sin + ly * cos,
   ]);
   const xs = corners.map(c => c[0]);
   const ys = corners.map(c => c[1]);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  return {
+    x: Math.min(...xs), y: Math.min(...ys),
+    w: Math.max(...xs) - Math.min(...xs),
+    h: Math.max(...ys) - Math.min(...ys),
+  };
 }
 
 /* Walk back-to-front so the topmost (last-drawn) element wins ties.
- * Hit-test happens in element-local space — invert translate+rotate
- * on the click coords, then test against the unrotated rect. */
+ * Hit-test happens in element-local space — translate the click to
+ * the element's centre, inverse-rotate, then test against the
+ * centred rect (-w/2..w/2, -h/2..h/2). */
 function hitTest(x, y) {
   for (let i = elements.length - 1; i >= 0; i--) {
     const el = elements[i];
     const w = el._w || 0, h = el._h || 0;
     const rot = (el.rotation || 0) * Math.PI / 180;
-    let lx = x - el.x, ly = y - el.y;
+    let dx = x - (el.x + w / 2), dy = y - (el.y + h / 2);
     if (rot) {
       const cos = Math.cos(-rot), sin = Math.sin(-rot);
-      [lx, ly] = [lx * cos - ly * sin, lx * sin + ly * cos];
+      [dx, dy] = [dx * cos - dy * sin, dx * sin + dy * cos];
     }
-    if (lx >= 0 && lx <= w && ly >= 0 && ly <= h) return el;
+    if (dx >= -w/2 && dx <= w/2 && dy >= -h/2 && dy <= h/2) return el;
   }
   return null;
 }
@@ -1157,7 +1191,15 @@ canvas.addEventListener("pointerdown", ev => {
   const hit = hitTest(p.x, p.y);
   selectElement(hit ? hit.id : null);
   if (hit) {
-    drag = { id: hit.id, dx: p.x - hit.x, dy: p.y - hit.y };
+    /* Track offset from the element's centre — that's the rotation
+     * pivot, so the cursor stays pinned to the same visual point on
+     * the element regardless of rotation. */
+    const w = hit._w || 0, h = hit._h || 0;
+    drag = {
+      id: hit.id,
+      dxFromCenter: p.x - (hit.x + w / 2),
+      dyFromCenter: p.y - (hit.y + h / 2),
+    };
     canvas.setPointerCapture(ev.pointerId);
   }
 });
@@ -1166,8 +1208,13 @@ canvas.addEventListener("pointermove", ev => {
   const p = evtToCanvas(ev);
   const el = elementById(drag.id);
   if (!el) return;
-  el.x = Math.max(0, p.x - drag.dx);
-  el.y = Math.max(0, Math.min(HEAD_PX - 1, p.y - drag.dy));
+  const w = el._w || 0, h = el._h || 0;
+  /* Place the centre such that the cursor stays at its original
+   * offset from centre. Convert back to top-left for storage. */
+  const newCenterX = p.x - drag.dxFromCenter;
+  const newCenterY = p.y - drag.dyFromCenter;
+  el.x = Math.max(0, newCenterX - w / 2);
+  el.y = Math.max(0, Math.min(HEAD_PX - 1, newCenterY - h / 2));
   syncPropsPanel();
   redraw();
 });
