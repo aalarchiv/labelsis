@@ -948,6 +948,59 @@ function hitTest(x, y) {
   return null;
 }
 
+/* Hit-test the selection chrome's handles. Returns one of "tl",
+ * "tr", "br", "bl", "rotate", or null. Tested in element-local space
+ * (same inverse-rotate as hitTest). Hit radius is bigger than the
+ * visual handle so they're easy to grab on touch. */
+const HANDLE_HIT = 10;
+function hitHandle(el, x, y) {
+  if (!el) return null;
+  const w = el._w || 0, h = el._h || 0;
+  const rot = (el.rotation || 0) * Math.PI / 180;
+  let dx = x - (el.x + w / 2), dy = y - (el.y + h / 2);
+  if (rot) {
+    const cos = Math.cos(-rot), sin = Math.sin(-rot);
+    [dx, dy] = [dx * cos - dy * sin, dx * sin + dy * cos];
+  }
+  const candidates = [
+    ["tl",     -w/2, -h/2],
+    ["tr",      w/2, -h/2],
+    ["br",      w/2,  h/2],
+    ["bl",     -w/2,  h/2],
+    ["rotate",  0,   -h/2 - ROTATE_OFF],
+  ];
+  for (const [name, hx, hy] of candidates) {
+    if (Math.abs(dx - hx) <= HANDLE_HIT && Math.abs(dy - hy) <= HANDLE_HIT)
+      return name;
+  }
+  return null;
+}
+
+/* Resize: drag a corner away from / toward the element centre to
+ * scale. Each type has its own "scale driver" — the property whose
+ * value the corner-handle distance is mapped to. */
+function getScaleProp(el) {
+  if (el.type === "text")    return el.size;
+  if (el.type === "image")   return el.h;
+  if (el.type === "barcode") return el.h;
+  if (el.type === "qr")      return el.size;
+  return 1;
+}
+function setScaleProp(el, value) {
+  if (el.type === "text") {
+    el.size = Math.max(8, Math.min(200, Math.round(value)));
+  } else if (el.type === "image") {
+    const v = Math.max(8, Math.min(128, Math.round(value)));
+    if (v !== el.h) { el.h = v; el._dithered = null; }
+  } else if (el.type === "barcode") {
+    const v = Math.max(16, Math.min(128, Math.round(value)));
+    if (v !== el.h) { el.h = v; el._barcodeCanvas = null; }
+  } else if (el.type === "qr") {
+    const v = Math.max(1, Math.min(6, Math.round(value)));
+    if (v !== el.size) { el.size = v; el._qrCanvas = null; }
+  }
+}
+
 /* forPrint=true skips the UI overlays (margin tint, selection ring)
  * so packRaster reads only the elements that should actually print.
  * The current overlay colors threshold-to-white anyway, but this
@@ -987,16 +1040,66 @@ function redraw(forPrint = false) {
     ctx.fillRect(0, marginPx + printPx, c.width, marginPx);
   }
 
-  /* Selection ring on top. */
+  /* Selection chrome: rotated bounding box + 4 corner resize handles
+   * + 1 top rotation handle, matching the convention in Figma /
+   * Photoshop / Inkscape. Drawn last so it sits above the
+   * elements. */
   const sel = elementById(selectedId);
-  if (sel) {
-    const b = elementBounds(sel);
-    ctx.strokeStyle = "#58a6ff";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    ctx.strokeRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
-    ctx.setLineDash([]);
+  if (sel) drawSelectionChrome(ctx, sel);
+}
+
+const HANDLE_VIS  = 6;   /* visual side of the corner squares       */
+const ROTATE_OFF  = 16;  /* rotate handle distance above top centre */
+
+/* Project an element-local (lx, ly) into canvas coords through the
+ * centre-pivot transform. */
+function projectLocal(el, lx, ly) {
+  const w = el._w || 0, h = el._h || 0;
+  const rot = (el.rotation || 0) * Math.PI / 180;
+  const cos = Math.cos(rot), sin = Math.sin(rot);
+  const cx = el.x + w / 2, cy = el.y + h / 2;
+  return [cx + lx * cos - ly * sin, cy + lx * sin + ly * cos];
+}
+
+function drawSelectionChrome(ctx, el) {
+  const w = el._w || 0, h = el._h || 0;
+  const corners = [
+    projectLocal(el, -w/2, -h/2),
+    projectLocal(el,  w/2, -h/2),
+    projectLocal(el,  w/2,  h/2),
+    projectLocal(el, -w/2,  h/2),
+  ];
+  const topMid = projectLocal(el, 0, -h/2);
+  const rotPos = projectLocal(el, 0, -h/2 - ROTATE_OFF);
+
+  ctx.save();
+  ctx.strokeStyle = "#58a6ff";
+  ctx.fillStyle   = "#fff";
+  ctx.lineWidth   = 1;
+
+  /* Solid bounding rectangle (rotates with element). */
+  ctx.beginPath();
+  ctx.moveTo(corners[0][0], corners[0][1]);
+  for (let i = 1; i < 4; i++) ctx.lineTo(corners[i][0], corners[i][1]);
+  ctx.closePath();
+  ctx.stroke();
+
+  /* Connector + rotate-handle circle above top-centre. */
+  ctx.beginPath();
+  ctx.moveTo(topMid[0], topMid[1]);
+  ctx.lineTo(rotPos[0], rotPos[1]);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(rotPos[0], rotPos[1], HANDLE_VIS / 2 + 1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  /* Corner squares (white fill + blue outline). */
+  for (const [x, y] of corners) {
+    ctx.fillRect(x - HANDLE_VIS/2, y - HANDLE_VIS/2, HANDLE_VIS, HANDLE_VIS);
+    ctx.strokeRect(x - HANDLE_VIS/2, y - HANDLE_VIS/2, HANDLE_VIS, HANDLE_VIS);
   }
+  ctx.restore();
 }
 
 /* Pack the current canvas to the 16-byte-per-raster-row layout
@@ -1717,7 +1820,9 @@ document.getElementById("lib-select").addEventListener("change", e => {
 /* Pointer-event drag on the canvas. Convert client coords to canvas
  * coords (CSS scaling) so it works on retina + zoomed pages. */
 const canvas = document.getElementById("preview");
-let drag = null;
+let drag   = null;   /* { id, dxFromCenter, dyFromCenter } — element drag */
+let resize = null;   /* { id, startDist, startVal }       — corner drag  */
+let rotor  = null;   /* { id, startAngle, startRot }      — rotate drag  */
 
 /* Zoom + pan state. Applied to the canvas via CSS transform; the
  * canvas's own pixel buffer never changes resolution, so output
@@ -1769,6 +1874,32 @@ canvas.addEventListener("pointerdown", ev => {
   }
 
   const p = evtToCanvas(ev);
+
+  /* If the current selection has a handle under the cursor, that
+   * wins over selecting a different element. */
+  const sel = elementById(selectedId);
+  const handle = hitHandle(sel, p.x, p.y);
+  if (handle) {
+    pushUndo();
+    const cx = sel.x + (sel._w || 0) / 2;
+    const cy = sel.y + (sel._h || 0) / 2;
+    if (handle === "rotate") {
+      rotor = {
+        id: sel.id,
+        startAngle:    Math.atan2(p.y - cy, p.x - cx),
+        startRotation: sel.rotation || 0,
+      };
+    } else {
+      resize = {
+        id: sel.id,
+        startDist: Math.hypot(p.x - cx, p.y - cy) || 1,
+        startVal:  getScaleProp(sel),
+      };
+    }
+    canvas.setPointerCapture(ev.pointerId);
+    return;
+  }
+
   const hit = hitTest(p.x, p.y);
   selectElement(hit ? hit.id : null);
   if (hit) {
@@ -1807,6 +1938,41 @@ canvas.addEventListener("pointermove", ev => {
     return;
   }
 
+  /* Corner handle drag: scale property by ratio of current to
+   * starting handle-distance from element centre. */
+  if (resize) {
+    const el = elementById(resize.id);
+    if (el) {
+      const p = evtToCanvas(ev);
+      const cx = el.x + (el._w || 0) / 2;
+      const cy = el.y + (el._h || 0) / 2;
+      const d  = Math.hypot(p.x - cx, p.y - cy) || 1;
+      setScaleProp(el, resize.startVal * (d / resize.startDist));
+      syncPropsPanel();
+      redraw();
+    }
+    return;
+  }
+
+  /* Rotate handle drag: angle delta from starting cursor angle adds
+   * to the starting rotation. */
+  if (rotor) {
+    const el = elementById(rotor.id);
+    if (el) {
+      const p = evtToCanvas(ev);
+      const cx = el.x + (el._w || 0) / 2;
+      const cy = el.y + (el._h || 0) / 2;
+      const a  = Math.atan2(p.y - cy, p.x - cx);
+      let deg = Math.round(rotor.startRotation + (a - rotor.startAngle) * 180 / Math.PI);
+      while (deg >  180) deg -= 360;
+      while (deg <= -180) deg += 360;
+      el.rotation = deg;
+      syncPropsPanel();
+      redraw();
+    }
+    return;
+  }
+
   if (longPressStart) {
     const dx = ev.clientX - longPressStart.x;
     const dy = ev.clientY - longPressStart.y;
@@ -1831,7 +1997,7 @@ function endPointer(ev) {
   if (ev) activePointers.delete(ev.pointerId);
   if (activePointers.size < 2) pinchInitial = null;
   clearTimeout(longPressTimer); longPressTimer = null; longPressStart = null;
-  drag = null;
+  drag = resize = rotor = null;
 }
 canvas.addEventListener("pointerup",     endPointer);
 canvas.addEventListener("pointercancel", endPointer);
