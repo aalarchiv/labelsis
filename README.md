@@ -108,9 +108,29 @@ packet capture from Brother's own tool to get right.
 
 ## Developing the SPA without flashing
 
-The firmware sends `Access-Control-Allow-Origin: *` on every API response,
-so you can iterate the SPA from a localhost dev server pointed at a real
-device on the LAN. No flash cycle per UI change.
+Two options, depending on whether you want to talk to a real device or
+not.
+
+**Option A — mock server (no hardware needed):**
+
+```sh
+python3 scripts/mock-server.py    # serves SPA + fake /api/* on :8080
+# open http://localhost:8080/ in a browser
+```
+
+A single-file Python stdlib HTTP server returns sensible fake values
+for every `/api/*` endpoint and serves the SPA from `components/pt_app/
+spa/`. Print requests are validated (raster body must be 16-byte
+aligned, etc.) and headers are logged so you can see exactly what the
+SPA emits. Edit `STATE` at the top of `scripts/mock-server.py` to
+simulate different printer conditions (different tape size, error1/2
+bits, transport=`mock`/`plite`, etc.).
+
+**Option B — point the SPA at a real device on the LAN:**
+
+The firmware sends `Access-Control-Allow-Origin: *` on every API
+response, so you can iterate the SPA from a localhost dev server
+pointed at the actual ESP. No flash cycle per UI change.
 
 ```sh
 cd components/pt_app/spa
