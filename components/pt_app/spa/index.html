@@ -22,11 +22,12 @@ header { position:relative; padding:.4rem 1rem; border-bottom:1px solid var(--li
 }
 h1 { margin:0; font-size:1rem; font-weight:600; cursor:pointer; user-select:none; padding:.25rem .5rem; border-radius:4px; transition:background .1s; }
 h1:hover { background:var(--panel); }
-h1::after  { content:" ▾"; color:var(--muted); font-size:.75em; transition:transform .15s; display:inline-block; }
-h1.expanded::after { transform:rotate(180deg); }
 h1.online::before  { content:"● "; color:var(--ok); }
 h1.offline::before { content:"● "; color:var(--err); }
 h1.busy::before    { content:"● "; color:var(--muted); }
+/* The Status view is reachable through the h1 itself on desktop;
+ * the nav link only appears in the burger menu on phone. */
+nav a.burger-only { display:none; }
 :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 button:focus, a:focus, input:focus, select:focus, textarea:focus { outline:none; }
 nav { display:flex; gap:.25rem; }
@@ -84,10 +85,12 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
  * so x/size/rotation/text/etc. all start at the same x position. */
 .row.pair { display:grid; grid-template-columns:80px minmax(0, 1fr) auto minmax(0, 1fr); gap:.5rem; align-items:center; }
 .row.pair > input { min-width:0; }
-/* Props-panel form: pin every row's leading label to a fixed
- * gutter so the labels read down the left edge as a tidy column
- * and the inputs / buttons flow uniformly to the right. */
-#props-panel .row > label:first-child {
+/* Form-aligned panels: pin every row's leading label to a fixed
+ * gutter so labels read down the left edge as a tidy column and
+ * inputs / buttons flow uniformly to the right. Applies to the
+ * props panel and to every panel inside the Settings view. */
+#props-panel    .row > label:first-child,
+#view-settings  .row > label:first-child {
   flex:0 0 80px;
   text-align:left;
   margin:0;
@@ -160,6 +163,10 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   nav { display:none; position:absolute; top:100%; left:0; right:0; flex-direction:column; background:var(--panel); border-bottom:1px solid var(--line); padding:.5rem; z-index:10; gap:0; }
   nav.open { display:flex; }
   nav a { padding:.7rem .75rem; }
+  /* burger-only links are hidden on desktop (the h1 itself takes
+   * users to the status view) but should appear in the burger
+   * dropdown on phone. */
+  nav.open a.burger-only { display:flex; }
   /* WCAG 2.5.5 / Apple HIG / Material recommend ≥44 px touch targets;
    * bump button + input padding here so phone users can hit them.
    * Desktop keeps the tighter sizes for visual density. */
@@ -190,9 +197,8 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 <header>
   <h1 id="title" title="click to toggle status">pt700</h1>
   <nav id="nav">
-    <a href="#status"   data-view="status"   data-i18n="tab.status">Printer</a>
+    <a href="#status"   data-view="status"   data-i18n="tab.status" class="burger-only">Status</a>
     <a href="#print"    data-view="print"    data-i18n="tab.label" class="active">Label</a>
-    <a href="#wifi"     data-view="wifi"     data-i18n="tab.wifi">Wi-Fi</a>
     <a href="#settings" data-view="settings" data-i18n="tab.settings">Settings</a>
   </nav>
   <button id="burger" class="burger" aria-label="menu" aria-expanded="false">
@@ -202,7 +208,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 <main>
   <section id="view-status" hidden>
     <div class="panel">
-      <h2 data-i18n="panel.printer">Printer</h2>
+      <h2 data-i18n="panel.status">Status</h2>
       <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
     </div>
   </section>
@@ -452,36 +458,6 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
    </div><!-- /col-right -->
   </section>
 
-  <section id="view-wifi" hidden>
-    <div class="panel">
-      <h2>Wi-Fi</h2>
-      <p class="muted">Pick a network and enter the password. Saving reboots
-      the device into the new network. If it can't connect, the next boot
-      brings up the <b>pt700-setup</b> AP for re-onboarding.</p>
-      <div class="row">
-        <label>network</label>
-        <select id="wifi-ssid-select"><option value="">(scanning…)</option></select>
-        <button id="wifi-rescan" class="secondary">rescan</button>
-      </div>
-      <div class="row">
-        <label>or type</label>
-        <input id="wifi-ssid-text" type="text" placeholder="SSID">
-      </div>
-      <div class="row">
-        <label>password</label>
-        <input id="wifi-password" type="password" placeholder="WPA2 passphrase">
-        <button id="wifi-reveal" class="secondary" type="button">show</button>
-      </div>
-      <div class="row" style="margin-bottom:.75rem">
-        <label>confirm</label>
-        <input id="wifi-password2" type="password" placeholder="re-enter">
-      </div>
-      <div class="row">
-        <button id="wifi-save">save &amp; reboot</button>
-      </div>
-      <div id="wifi-log"></div>
-    </div>
-  </section>
 
   <div id="ctx-menu" hidden>
     <button data-action="dup">Duplicate</button>
@@ -503,26 +479,57 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
   <section id="view-settings" hidden>
     <div class="panel">
-      <h2>Settings</h2>
-      <p class="muted">When the SPA is loaded outside the device (localhost dev server), set <b>API host</b> to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this. Some browsers block file://&nbsp;→&nbsp;http:// fetch — serve the spa/ directory with <code>python3 -m http.server</code> if so.</p>
-      <div class="row" style="margin-bottom:.5rem;">
-        <label>API host</label>
+      <h2 data-i18n="panel.wifi">Wi-Fi</h2>
+      <p class="muted" data-i18n="panel.wifi.help">Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the pt700-setup AP for re-onboarding.</p>
+      <div class="row">
+        <label data-i18n="field.wifi.network">network</label>
+        <select id="wifi-ssid-select"><option value="">(scanning…)</option></select>
+        <button id="wifi-rescan" class="secondary" data-i18n="btn.wifi.rescan">rescan</button>
+      </div>
+      <div class="row">
+        <label data-i18n="field.wifi.ssid">or type</label>
+        <input id="wifi-ssid-text" type="text" placeholder="SSID">
+      </div>
+      <div class="row">
+        <label data-i18n="field.wifi.password">password</label>
+        <input id="wifi-password" type="password" placeholder="WPA2 passphrase">
+        <button id="wifi-reveal" class="secondary" type="button" data-i18n="btn.wifi.show">show</button>
+      </div>
+      <div class="row">
+        <label data-i18n="field.wifi.confirm">confirm</label>
+        <input id="wifi-password2" type="password" placeholder="re-enter">
+      </div>
+      <div class="row">
+        <span class="spacer"></span>
+        <button id="wifi-save" data-i18n="btn.wifi.save">save &amp; reboot</button>
+      </div>
+      <div id="wifi-log"></div>
+    </div>
+
+    <div class="panel">
+      <h2 data-i18n="panel.api-host">API host</h2>
+      <p class="muted" data-i18n="panel.api-host.help">When the SPA is loaded outside the device (localhost dev server), set this to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this.</p>
+      <div class="row">
+        <label data-i18n="field.api-host">API host</label>
         <input id="api-host" type="text" placeholder="(empty = same origin, e.g. http://pt700.local)">
       </div>
       <div class="row">
-        <button id="api-host-save">save</button>
-        <button id="api-host-clear" class="secondary">clear</button>
+        <span class="spacer"></span>
+        <button id="api-host-save"  data-i18n="btn.save">save</button>
+        <button id="api-host-clear" class="secondary" data-i18n="btn.clear">clear</button>
       </div>
       <div id="settings-log" class="muted" style="margin-top:.5rem;"></div>
+    </div>
 
-      <h2 style="margin-top:1.25rem;">Language</h2>
+    <div class="panel">
+      <h2 data-i18n="panel.language">Language</h2>
       <div class="row">
-        <label for="lang-select">UI language</label>
+        <label for="lang-select" data-i18n="field.lang">UI language</label>
         <select id="lang-select">
           <option value="en">English</option>
         </select>
       </div>
-      <p class="muted" style="margin-top:.5rem;">Additional locales load on demand from <code>i18n/&lt;lang&gt;.json</code>. New translations get added to the dropdown by extending the <code>STRINGS</code> table at the top of <code>spa/index.html</code> or shipping a JSON file.</p>
+      <p class="muted" style="margin-top:.5rem;" data-i18n="panel.language.help">Additional locales load on demand from i18n/&lt;lang&gt;.json. New translations get added to the dropdown by extending the STRINGS table or shipping a JSON file.</p>
     </div>
   </section>
 </main>
@@ -550,12 +557,28 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 const I18N_DEFAULT_LANG = "en";
 const STRINGS = {
   en: {
-    "tab.status":              "Printer",
+    "tab.status":              "Status",
     "tab.label":               "Label",
-    "tab.wifi":                "Wi-Fi",
     "tab.settings":            "Settings",
     "panel.label":             "Label",
-    "panel.printer":           "Printer",
+    "panel.status":            "Status",
+    "panel.wifi":              "Wi-Fi",
+    "panel.wifi.help":         "Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the pt700-setup AP for re-onboarding.",
+    "panel.api-host":          "API host",
+    "panel.api-host.help":     "When the SPA is loaded outside the device (localhost dev server), set this to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this.",
+    "panel.language":          "Language",
+    "panel.language.help":     "Additional locales load on demand from i18n/<lang>.json. New translations get added to the dropdown by extending the STRINGS table or shipping a JSON file.",
+    "field.wifi.network":      "network",
+    "field.wifi.ssid":         "or type",
+    "field.wifi.password":     "password",
+    "field.wifi.confirm":      "confirm",
+    "field.api-host":          "API host",
+    "field.lang":              "UI language",
+    "btn.wifi.rescan":         "rescan",
+    "btn.wifi.show":           "show",
+    "btn.wifi.save":           "save & reboot",
+    "btn.save":                "save",
+    "btn.clear":               "clear",
     "panel.element":           "Element",
     "panel.layers":            "Layers",
     "panel.layers.hint":       "— bottom of canvas first; drag to reorder",
@@ -2277,20 +2300,27 @@ function syncPropsPanel() {
     document.getElementById("el-x").value = Math.round(el.x);
     document.getElementById("el-y").value = Math.round(el.y);
     /* Font picker + style toggles. The trigger AND each row in the
-     * popup mirror the element's current bold/italic so the user
-     * sees a real preview, not just the family default. */
+     * popup mirror the element's current bold / italic / underline /
+     * strikethrough so the user sees a real preview, not just the
+     * family default. */
     const family   = el.fontFamily || "sans-serif";
     const fWeight  = el.bold   ? "bold"   : "normal";
     const fStyle   = el.italic ? "italic" : "normal";
+    const decos    = [];
+    if (el.underline) decos.push("underline");
+    if (el.strike)    decos.push("line-through");
+    const fDeco    = decos.length ? decos.join(" ") : "none";
     const $trigger = document.getElementById("font-trigger");
-    $trigger.textContent       = family;
-    $trigger.style.fontFamily  = fontFamilyCSS(family);
-    $trigger.style.fontWeight  = fWeight;
-    $trigger.style.fontStyle   = fStyle;
+    $trigger.textContent           = family;
+    $trigger.style.fontFamily      = fontFamilyCSS(family);
+    $trigger.style.fontWeight      = fWeight;
+    $trigger.style.fontStyle       = fStyle;
+    $trigger.style.textDecoration  = fDeco;
     for (const r of document.querySelectorAll(".font-row")) {
       r.classList.toggle("selected", r.dataset.font === family);
-      r.style.fontWeight = fWeight;
-      r.style.fontStyle  = fStyle;
+      r.style.fontWeight     = fWeight;
+      r.style.fontStyle      = fStyle;
+      r.style.textDecoration = fDeco;
     }
     for (const [id, key] of [
       ["text-bold",      "bold"],
@@ -3159,7 +3189,9 @@ function showView(name) {
   document.getElementById("title").classList.toggle("expanded", name === "status");
   document.getElementById("nav").classList.remove("open");
   document.getElementById("burger").setAttribute("aria-expanded", "false");
-  if (name === "wifi" && !wifiInited) wifiInit();
+  /* Wi-Fi panel lives under Settings now; init it the first time
+   * Settings is shown so the network scan kicks off automatically. */
+  if (name === "settings" && !wifiInited) wifiInit();
 }
 document.querySelectorAll("nav a").forEach(a => {
   a.addEventListener("click", e => { e.preventDefault(); showView(a.dataset.view); });
