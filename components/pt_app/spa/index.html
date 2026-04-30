@@ -133,6 +133,7 @@ canvas { display:block; image-rendering:pixelated; background:#fff; }
 #zoom-reset { position:absolute; right:.5rem; bottom:.5rem; z-index:5; }
 .status-grid { display:grid; grid-template-columns:auto 1fr; gap:.25rem .75rem; font-size:.85rem; }
 .status-grid .k { color:var(--muted); }
+.color-chip   { display:inline-block; width:.85em; height:.85em; vertical-align:middle; border:1px solid var(--line); border-radius:2px; margin-right:.25em; }
 .kv-ok  { color:var(--ok); }
 .kv-err { color:var(--err); }
 .muted { color:var(--muted); font-size:.85rem; }
@@ -580,7 +581,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <option value="en">English</option>
         </select>
       </div>
-      <p class="muted" style="margin-top:.5rem;" data-i18n="panel.language.help">Additional locales load on demand from i18n/&lt;lang&gt;.json. New translations get added to the dropdown by extending the STRINGS table or shipping a JSON file.</p>
+      <p class="muted" style="margin-top:.5rem;" data-i18n="panel.language.help">Additional locales load on demand from i18n/{lang}.json. New translations get added to the dropdown by extending the STRINGS table or shipping a JSON file.</p>
     </div>
   </section>
 </main>
@@ -618,7 +619,7 @@ const STRINGS = {
     "panel.api-host":          "API host",
     "panel.api-host.help":     "When the SPA is loaded outside the device (localhost dev server), set this to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this.",
     "panel.language":          "Language",
-    "panel.language.help":     "Additional locales load on demand from i18n/<lang>.json. New translations get added to the dropdown by extending the STRINGS table or shipping a JSON file.",
+    "panel.language.help":     "Additional locales load on demand from i18n/{lang}.json. New translations get added to the dropdown by extending the STRINGS table or shipping a JSON file.",
     "field.wifi.network":      "network",
     "field.wifi.ssid":         "or type",
     "field.wifi.password":     "password",
@@ -781,7 +782,8 @@ const TAPES = {
   24: { print: 128, margin: 0 },
 };
 
-let printer = null;  // last /api/status response
+let printer    = null;  // last /api/status response
+let deviceInfo = null;  // last /api/info  response (cached, refreshed on demand)
 
 async function refreshStatus() {
   try {
@@ -793,7 +795,22 @@ async function refreshStatus() {
     redraw();
   } catch (e) {
     setConnState(null);
+    renderStatus(null);
   }
+}
+
+/* /api/info carries per-device identity (vid/pid/serial/product/
+ * manufacturer/firmware) and tape geometry. We fetch it lazily —
+ * once at boot, and again whenever the user opens the Status view
+ * — since it doesn't change between prints. */
+async function refreshDeviceInfo() {
+  try {
+    const r = await fetch(apiURL("/api/info"));
+    deviceInfo = await r.json();
+  } catch (e) {
+    deviceInfo = null;
+  }
+  if (printer) renderStatus(printer);
 }
 
 /* Drive the title-bar dot. Green only when there's a real printer
@@ -807,29 +824,102 @@ function setConnState(j) {
 }
 
 
+/* Lookup tables for ID-style fields the printer reports. Keep in
+ * sync with the SDM if these grow. */
+const TAPE_COLORS = {
+  0x01: "white",   0x02: "other",  0x03: "clear",
+  0x04: "red",     0x05: "blue",   0x06: "yellow",
+  0x07: "green",   0x08: "black",  0x09: "clear (white text)",
+  0x20: "matte white",       0x21: "matte clear",   0x22: "matte silver",
+  0x23: "satin gold",        0x24: "satin silver",  0x30: "blue (D)",
+  0x31: "red (D)",           0x40: "fluor. orange", 0x41: "fluor. yellow",
+  0x50: "berry pink",        0x51: "light gray",    0x52: "lime green",
+  0x60: "yellow (F)",        0x61: "pink (F)",      0x62: "blue (F)",
+  0x70: "white (heat)",      0x90: "white (flex)",  0x91: "yellow (flex)",
+  0xF0: "cleaning",          0xF1: "stencil",       0xFF: "incompatible",
+};
+const TEXT_COLORS = {
+  0x01: "white",   0x04: "red",    0x05: "blue",
+  0x08: "black",   0x0A: "gold",   0xF0: "cleaning",
+  0x02: "other",   0xFF: "incompatible",
+};
+const PHASE_TYPES = { 0: "editing", 1: "printing" };
+const STATUS_TYPES = {
+  0x00: "reply to status request", 0x01: "printing completed",
+  0x02: "error occurred",          0x03: "exit IF mode",
+  0x04: "turned off",              0x05: "notification",
+  0x06: "phase change",
+};
+
+function colorChip(name, fallback) {
+  if (!name) return fallback || "?";
+  const swatchMap = {
+    white: "#ffffff", clear: "#e9ecef", red: "#cf222e", blue: "#0969da",
+    yellow: "#ffd33d", green: "#1a7f37", black: "#1f2328",
+    gold: "#daa520", "matte white": "#f1f1f1",
+  };
+  const c = swatchMap[name];
+  if (!c) return name;
+  return `<span class="color-chip" style="background:${c}"></span> ${name}`;
+}
+
+function transportLabel(tx) {
+  if (tx === "usb_host") return ["real PT-* printer (USB)", "kv-ok"];
+  if (tx === "mock")     return ["mock backend (no printer attached)", "kv-err"];
+  if (tx === "plite")    return ["P-Lite mode — slide switch to E or hold PLite button 2 s, then reboot", "kv-err"];
+  if (tx === "libusb")   return ["libusb (host-side test transport)", "kv-ok"];
+  return [tx || "?", "kv-err"];
+}
+
+function apiHostLabel() {
+  if (!apiHost) return "embedded (same origin)";
+  return apiHost;
+}
+
 function renderStatus(j) {
   const g = document.getElementById("status");
   g.innerHTML = "";
-  /* Transport row up top so it's always obvious whether the values
-   * below come from the printer or the in-memory mock. */
-  const tx = j.transport || "?";
-  const txCls = tx === "usb_host" ? "kv-ok" : "kv-err";
-  let txLabel = tx;
-  if (tx === "mock")  txLabel += " (no printer)";
-  if (tx === "plite") txLabel = "P-Lite mode — slide switch to E or hold PLite button 2s, then reboot";
-  g.innerHTML = `<span class="k">transport</span><span class="${txCls}">${txLabel}</span>`;
-  if (!j.ok) {
-    g.innerHTML += `<span class="k">error</span><span class="kv-err">${j.error}</span>`;
+
+  /* Connection block — always shown, even if /api/status failed. */
+  g.innerHTML += `<span class="k">API host</span><span>${escapeHtml(apiHostLabel())}</span>`;
+
+  if (!j) {
+    g.innerHTML += `<span class="k">transport</span><span class="kv-err">unreachable</span>`;
     return;
   }
+
+  const [txLabel, txCls] = transportLabel(j.transport);
+  g.innerHTML += `<span class="k">transport</span><span class="${txCls}">${txLabel}</span>`;
+
+  if (!j.ok) {
+    g.innerHTML += `<span class="k">error</span><span class="kv-err">${escapeHtml(j.error || "?")}</span>`;
+    return;
+  }
+
+  const info = deviceInfo && deviceInfo.ok ? deviceInfo : {};
   const tape = TAPES[j.media_width_mm];
+  const tapeColor = TAPE_COLORS[j.tape_color_id];
+  const textColor = TEXT_COLORS[j.text_color_id];
+  const phase     = PHASE_TYPES[j.phase_type] ?? `0x${(j.phase_type|0).toString(16)}`;
+  const stat      = STATUS_TYPES[j.status_type] ?? `0x${(j.status_type|0).toString(16)}`;
+
   const rows = [
-    ["model",        "0x" + j.model.toString(16)],
-    ["tape",         `${j.media_width_mm} mm  (${tape ? tape.print : "?"} print pins)`],
-    ["error1/2",     `${j.error1.toString(16)} / ${j.error2.toString(16)}`,
-                     (j.error1 || j.error2) ? "kv-err" : "kv-ok"],
-    ["status",       j.status_type === 0 ? "idle" : `0x${j.status_type.toString(16)}`],
-  ];
+    ["model",         "0x" + j.model.toString(16) + (j.model === 0x70 ? " (PT-P700)" : "")],
+    info.product      && ["product",      escapeHtml(info.product)],
+    info.manufacturer && ["manufacturer", escapeHtml(info.manufacturer)],
+    info.serial       && ["serial",       escapeHtml(info.serial)],
+    (info.vid != null && info.pid != null) &&
+      ["USB id",      `${info.vid.toString(16).padStart(4,"0")}:${info.pid.toString(16).padStart(4,"0")}`],
+    info.fw_version   && ["firmware",     escapeHtml(info.fw_version)],
+    ["tape width",    `${j.media_width_mm} mm  (${tape ? tape.print : "?"} print pins)`],
+    tapeColor && ["tape color",  colorChip(tapeColor, "0x"+j.tape_color_id.toString(16))],
+    textColor && ["text color",  colorChip(textColor, "0x"+j.text_color_id.toString(16))],
+    ["error1/2",      `0x${j.error1.toString(16)} / 0x${j.error2.toString(16)}`,
+                      (j.error1 || j.error2) ? "kv-err" : "kv-ok"],
+    ["phase",         phase],
+    ["status",        stat],
+  ].filter(Boolean);
+
   for (const [k, v, cls] of rows) {
     g.innerHTML += `<span class="k">${k}</span><span class="${cls||""}">${v}</span>`;
   }
@@ -3429,6 +3519,9 @@ function showView(name) {
   /* Wi-Fi panel lives under Settings now; init it the first time
    * Settings is shown so the network scan kicks off automatically. */
   if (name === "settings" && !wifiInited) wifiInit();
+  /* Refresh device identity (vid/pid/serial/...) every time the
+   * Status view opens so a printer hot-plug shows up promptly. */
+  if (name === "status") refreshDeviceInfo();
 }
 document.querySelectorAll("nav a").forEach(a => {
   a.addEventListener("click", e => { e.preventDefault(); showView(a.dataset.view); });
@@ -3559,10 +3652,13 @@ libRefresh();
 refreshUndoButtons();
 
 refreshStatus();
+refreshDeviceInfo();
 /* Poll every 3 s. Status changes (cover open, tape change, error
  * clears) need to surface fast enough to feel live; 3 s is a few
- * dozen requests/min, well within what the printer + ESP can handle. */
+ * dozen requests/min, well within what the printer + ESP can handle.
+ * /api/info polled at 1/10 the rate — identity rarely changes. */
 setInterval(refreshStatus, 3000);
+setInterval(refreshDeviceInfo, 30000);
 redraw();
 </script>
 </body>

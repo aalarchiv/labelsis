@@ -43,6 +43,18 @@ STATE = {
     "error2":         0,
     "status_type":    0,           # idle
     "phase_type":     0,
+
+    # USB identity surfaced via /api/info so the SPA Status view can
+    # show what's plugged in. These mirror what the firmware will
+    # eventually report from real string descriptors (pt700-... bd
+    # issue) — for now mock values matching a real PT-P700 in
+    # printer mode (E slider position).
+    "vid":            0x04F9,      # Brother
+    "pid":            0x2061,      # PT-P700 (E mode)
+    "serial":         "MOCK-0000001",
+    "manufacturer":   "Brother (mock)",
+    "product":        "Brother PT-P700 (mock)",
+    "fw_version":     "mock-1.0",
 }
 
 # Tape geometry table from components/pt_protocol/src/geometry.c.
@@ -153,6 +165,12 @@ class Handler(BaseHTTPRequestHandler):
                 "media_type":     STATE["media_type"],
                 "tape_color_id":  STATE["tape_color_id"],
                 "text_color_id":  STATE["text_color_id"],
+                "vid":            STATE["vid"],
+                "pid":            STATE["pid"],
+                "serial":         STATE["serial"],
+                "manufacturer":   STATE["manufacturer"],
+                "product":        STATE["product"],
+                "fw_version":     STATE["fw_version"],
                 "geometry": {
                     "head_pins":                   128,
                     "print_pins":                  tape["print"],
