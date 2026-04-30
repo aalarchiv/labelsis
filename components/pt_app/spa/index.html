@@ -218,6 +218,13 @@ canvas { display:block; image-rendering:pixelated; background:#fff; }
 #zoom-reset { position:absolute; right:.5rem; bottom:.5rem; z-index:5; }
 .status-grid { display:grid; grid-template-columns:auto 1fr; gap:.25rem .75rem; font-size:.85rem; }
 .status-grid .k { color:var(--muted); }
+/* License list in the About panel — name on its own line, license
+ * line indented under it in muted colour. */
+.about-licenses     { margin:.5rem 0 0; font-size:.85rem; }
+.about-licenses dt  { font-weight:600; }
+.about-licenses dt a, .about-licenses dt a:visited { color:var(--accent); text-decoration:none; }
+.about-licenses dt a:hover { text-decoration:underline; }
+.about-licenses dd  { margin:0 0 .5rem 1rem; color:var(--muted); }
 .color-chip   { display:inline-block; width:.85em; height:.85em; vertical-align:middle; border:1px solid var(--line); border-radius:2px; margin-right:.25em; }
 .kv-ok  { color:var(--ok); }
 .kv-err { color:var(--err); }
@@ -334,6 +341,17 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 </header>
 <main>
   <section id="view-status" hidden>
+    <div class="panel">
+      <h2 data-i18n="panel.about">About</h2>
+      <p class="muted" data-i18n="about.intro">pt700 — network print server for the Brother PT-P700, ESP32-S3 USB host with a self-hosted web UI.</p>
+      <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
+      <dl class="about-licenses">
+        <dt><a href="https://github.com/twbs/icons/releases/tag/v1.13.1" target="_blank" rel="noopener">Bootstrap Icons v1.13.1</a></dt>
+        <dd>MIT — © 2019-2024 The Bootstrap Authors</dd>
+        <dt><a href="https://github.com/davidshimjs/qrcodejs" target="_blank" rel="noopener">qrcodejs</a></dt>
+        <dd>MIT — © 2012 davidshimjs</dd>
+      </dl>
+    </div>
     <div class="panel">
       <h2 data-i18n="panel.status">Status</h2>
       <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
@@ -771,6 +789,9 @@ const STRINGS = {
     "tab.settings":            "Settings",
     "panel.label":             "Label",
     "panel.status":            "Status",
+    "panel.about":             "About",
+    "about.intro":             "pt700 — network print server for the Brother PT-P700, ESP32-S3 USB host with a self-hosted web UI.",
+    "about.licenses":          "Third-party components bundled with this firmware:",
     "panel.wifi":              "Wi-Fi",
     "panel.wifi.help":         "Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the pt700-setup AP for re-onboarding.",
     "panel.api-host":          "API host",
