@@ -113,6 +113,26 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <canvas id="preview" width="600" height="128"></canvas>
         <button id="zoom-reset" class="secondary" type="button" hidden title="reset zoom">fit</button>
       </div>
+      <div class="row canvas-opts" style="margin-top:.5rem; flex-wrap:wrap; gap:.5rem .75rem;">
+        <label>length</label>
+        <select id="opt-len-mode" style="max-width:90px; min-width:80px;">
+          <option value="auto">auto</option>
+          <option value="fixed">fixed</option>
+        </select>
+        <input id="opt-len-mm" type="number" min="5" max="500" step="1" value="30" style="max-width:80px; min-width:60px;">
+        <span class="muted" style="font-size:.85rem;">mm</span>
+        <span style="flex:1; min-width:0;"></span>
+        <label><input id="opt-rulers" type="checkbox"> rulers</label>
+        <label><input id="opt-grid"   type="checkbox"> grid</label>
+        <label><input id="opt-center" type="checkbox"> center</label>
+        <label>origin</label>
+        <select id="opt-origin" style="max-width:130px; min-width:100px;">
+          <option value="tl">top-left</option>
+          <option value="tc">top-center</option>
+          <option value="cl">center-left</option>
+          <option value="c">center</option>
+        </select>
+      </div>
       <div class="row" style="margin-top:.75rem">
         <button id="add-text"    class="secondary" type="button">+ text</button>
         <button id="add-image"   class="secondary" type="button">+ image</button>
@@ -170,9 +190,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </div>
         <div class="row">
           <label>x</label>
-          <input id="el-x" type="number" min="0" style="max-width:90px">
+          <input id="el-x" type="number" style="max-width:90px">
           <label>y</label>
-          <input id="el-y" type="number" min="0" max="127" style="max-width:90px">
+          <input id="el-y" type="number" style="max-width:90px">
         </div>
       </div>
 
@@ -195,9 +215,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </div>
         <div class="row">
           <label>x</label>
-          <input id="qr-x" type="number" min="0" style="max-width:90px">
+          <input id="qr-x" type="number" style="max-width:90px">
           <label>y</label>
-          <input id="qr-y" type="number" min="0" max="127" style="max-width:90px">
+          <input id="qr-y" type="number" style="max-width:90px">
         </div>
       </div>
 
@@ -220,9 +240,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </div>
         <div class="row">
           <label>x</label>
-          <input id="bc-x" type="number" min="0" style="max-width:90px">
+          <input id="bc-x" type="number" style="max-width:90px">
           <label>y</label>
-          <input id="bc-y" type="number" min="0" max="127" style="max-width:90px">
+          <input id="bc-y" type="number" style="max-width:90px">
         </div>
       </div>
 
@@ -245,9 +265,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </div>
         <div class="row">
           <label>x</label>
-          <input id="img-x" type="number" min="0" style="max-width:90px">
+          <input id="img-x" type="number" style="max-width:90px">
           <label>y</label>
-          <input id="img-y" type="number" min="0" max="127" style="max-width:90px">
+          <input id="img-y" type="number" style="max-width:90px">
         </div>
       </div>
 
@@ -447,6 +467,37 @@ function renderStatus(j) {
  * a property-panel section, not a rewrite.
  */
 const HEAD_PX = 128;          /* PT-* head height */
+const PAD     = 24;           /* extra canvas margin so selection
+                                 handles/rotate-stem can draw past
+                                 the print area without being clipped.
+                                 Also doubles as the band that holds
+                                 the on-screen rulers. Only applied
+                                 for the on-screen redraw — packRaster
+                                 uses an unpadded redraw(true). */
+const PX_PER_MM = 180 / 25.4; /* PT-* print head is 180 dpi          */
+const mmToPx = mm => mm * PX_PER_MM;
+
+/* Canvas options — persisted to localStorage. Pure UI state, never
+ * sent to the printer. */
+const CANVAS_OPTS_KEY = "pt700:canvasOpts";
+const CANVAS_OPTS_DEFAULT = {
+  labelWidthMode: "auto",   /* "auto" | "fixed"                    */
+  labelWidthMm:   30,       /* used when fixed                     */
+  showRulers:     true,
+  showGrid:       false,
+  showCenter:     false,
+  origin:         "tl",     /* "tl" | "tc" | "cl" | "c"            */
+};
+let canvasOpts = (() => {
+  try {
+    const raw = localStorage.getItem(CANVAS_OPTS_KEY);
+    return Object.assign({}, CANVAS_OPTS_DEFAULT, raw ? JSON.parse(raw) : {});
+  } catch { return Object.assign({}, CANVAS_OPTS_DEFAULT); }
+})();
+function saveCanvasOpts() {
+  try { localStorage.setItem(CANVAS_OPTS_KEY, JSON.stringify(canvasOpts)); }
+  catch {}
+}
 let elements  = [];
 let selectedId = null;
 let nextId    = 1;
@@ -1024,28 +1075,206 @@ function redraw(forPrint = false) {
     if (b.x + b.w > maxRight) maxRight = b.x + b.w;
   }
 
-  c.width  = Math.ceil(maxRight) + 14;
-  c.height = HEAD_PX;
-  /* White ground, then elements, then UI overlays. */
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, c.width, c.height);
-  for (const el of elements) drawElement(ctx, el);
+  /* Auto: expand to rightmost element. Fixed: pin to user mm. */
+  let printW;
+  if (canvasOpts.labelWidthMode === "fixed") {
+    printW = Math.max(20, Math.round(mmToPx(canvasOpts.labelWidthMm)));
+  } else {
+    printW = Math.ceil(maxRight) + 14;
+  }
 
-  if (forPrint) return;
+  if (forPrint) {
+    /* Tight canvas, no padding — packRaster reads this directly so
+     * the printed bitmap stays exactly head-height × printW. */
+    c.width  = printW;
+    c.height = HEAD_PX;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, c.width, c.height);
+    for (const el of elements) drawElement(ctx, el);
+    return;
+  }
+
+  /* On-screen redraw: pad on all sides so resize/rotate handles
+   * stay inside the canvas bitmap when an element sits flush at
+   * the edge, and so we have a band for rulers. The print area
+   * is still printW × HEAD_PX, just offset by (PAD, PAD) inside
+   * the larger canvas. */
+  c.width  = printW + 2 * PAD;
+  c.height = HEAD_PX + 2 * PAD;
+
+  /* Soft grey gutter so the print boundary is visible against
+   * the white print area. */
+  ctx.fillStyle = "#e9ecef";
+  ctx.fillRect(0, 0, c.width, c.height);
+
+  ctx.save();
+  ctx.translate(PAD, PAD);
+
+  /* White ground for the actual print region. */
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, printW, HEAD_PX);
+
+  /* Grid sits between the white fill and the elements so
+   * elements draw on top. */
+  if (canvasOpts.showGrid) drawGrid(ctx, printW, HEAD_PX);
+
+  for (const el of elements) drawElement(ctx, el);
 
   /* Non-printable tape margins (UI hint only — NOT sent to printer). */
   if (marginPx) {
     ctx.fillStyle = "rgba(255,80,80,.18)";
-    ctx.fillRect(0, 0, c.width, marginPx);
-    ctx.fillRect(0, marginPx + printPx, c.width, marginPx);
+    ctx.fillRect(0, 0, printW, marginPx);
+    ctx.fillRect(0, marginPx + printPx, printW, marginPx);
   }
+
+  /* Centre guides for fold-marked labels — above elements so they
+   * show through, below selection chrome. */
+  if (canvasOpts.showCenter) drawCenterGuides(ctx, printW, HEAD_PX);
 
   /* Selection chrome: rotated bounding box + 4 corner resize handles
    * + 1 top rotation handle, matching the convention in Figma /
    * Photoshop / Inkscape. Drawn last so it sits above the
-   * elements. */
+   * elements. The translate above lets corner squares for an
+   * element at x=0 render at canvas x=PAD-3, fully visible. */
   const sel = elementById(selectedId);
   if (sel) drawSelectionChrome(ctx, sel);
+
+  ctx.restore();
+
+  /* Rulers paint last in canvas-absolute coords, on top of the
+   * gutter (covers anything that bled into the top/left bands). */
+  if (canvasOpts.showRulers) drawRulers(ctx, printW, HEAD_PX);
+}
+
+function drawGrid(ctx, w, h) {
+  const step = PX_PER_MM;
+  ctx.save();
+  ctx.lineWidth = 1;
+  /* 1 mm fine grid */
+  ctx.strokeStyle = "rgba(0,0,0,0.06)";
+  ctx.beginPath();
+  for (let mm = 1; mm * step < w; mm++) {
+    if (mm % 5 === 0) continue;
+    const sx = Math.round(mm * step) + 0.5;
+    ctx.moveTo(sx, 0); ctx.lineTo(sx, h);
+  }
+  for (let mm = 1; mm * step < h; mm++) {
+    if (mm % 5 === 0) continue;
+    const sy = Math.round(mm * step) + 0.5;
+    ctx.moveTo(0, sy); ctx.lineTo(w, sy);
+  }
+  ctx.stroke();
+  /* 5 mm bold grid */
+  ctx.strokeStyle = "rgba(0,0,0,0.16)";
+  ctx.beginPath();
+  for (let mm = 5; mm * step < w; mm += 5) {
+    const sx = Math.round(mm * step) + 0.5;
+    ctx.moveTo(sx, 0); ctx.lineTo(sx, h);
+  }
+  for (let mm = 5; mm * step < h; mm += 5) {
+    const sy = Math.round(mm * step) + 0.5;
+    ctx.moveTo(0, sy); ctx.lineTo(w, sy);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCenterGuides(ctx, w, h) {
+  const cx = w / 2, cy = h / 2;
+  ctx.save();
+  ctx.strokeStyle = "rgba(207, 34, 46, 0.55)";   /* matches --err  */
+  ctx.lineWidth   = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(cx) + 0.5, 0);
+  ctx.lineTo(Math.round(cx) + 0.5, h);
+  ctx.moveTo(0, Math.round(cy) + 0.5);
+  ctx.lineTo(w, Math.round(cy) + 0.5);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* Origin offset (in element pixels) for the ruler zero-point. */
+function originOffset(printW, headH) {
+  switch (canvasOpts.origin) {
+    case "tc": return [printW / 2, 0];
+    case "cl": return [0, headH / 2];
+    case "c":  return [printW / 2, headH / 2];
+    default:   return [0, 0];
+  }
+}
+
+function drawRulers(ctx, printW, headH) {
+  const step = PX_PER_MM;
+  const [oxPx, oyPx] = originOffset(printW, headH);
+
+  ctx.save();
+
+  /* Opaque ruler bands (top + left). */
+  ctx.fillStyle = "#dde2e8";
+  ctx.fillRect(0, 0, printW + 2 * PAD, PAD);          /* top    */
+  ctx.fillRect(0, 0, PAD, headH + 2 * PAD);           /* left   */
+  /* Slightly darker corner so the bands look distinct. */
+  ctx.fillStyle = "#cdd3da";
+  ctx.fillRect(0, 0, PAD, PAD);
+  /* Corner unit indicator. */
+  ctx.fillStyle = "#57606a";
+  ctx.font = "9px ui-monospace,monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("mm", PAD / 2, PAD / 2);
+
+  ctx.strokeStyle = "#57606a";
+  ctx.fillStyle   = "#57606a";
+  ctx.lineWidth   = 1;
+
+  /* Horizontal ruler — ticks. mm=0 is at element-x = oxPx,
+   * which maps to canvas-x = PAD + oxPx. */
+  ctx.beginPath();
+  const mmFromH = Math.floor(-oxPx / step) - 1;
+  const mmToH   = Math.ceil((printW - oxPx) / step) + 1;
+  for (let mm = mmFromH; mm <= mmToH; mm++) {
+    const cx = PAD + mm * step + oxPx;
+    if (cx < PAD || cx > PAD + printW) continue;
+    const tickH = (mm % 5 === 0) ? 8 : 4;
+    const sx = Math.round(cx) + 0.5;
+    ctx.moveTo(sx, PAD - tickH);
+    ctx.lineTo(sx, PAD);
+  }
+  ctx.stroke();
+
+  /* Horizontal ruler — labels (every 5 mm). */
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let mm = mmFromH - (mmFromH % 5); mm <= mmToH; mm += 5) {
+    const cx = PAD + mm * step + oxPx;
+    if (cx < PAD + 6 || cx > PAD + printW - 6) continue;
+    ctx.fillText(String(mm), Math.round(cx), 7);
+  }
+
+  /* Vertical ruler — ticks. */
+  ctx.beginPath();
+  const mmFromV = Math.floor(-oyPx / step) - 1;
+  const mmToV   = Math.ceil((headH - oyPx) / step) + 1;
+  for (let mm = mmFromV; mm <= mmToV; mm++) {
+    const cy = PAD + mm * step + oyPx;
+    if (cy < PAD || cy > PAD + headH) continue;
+    const tickW = (mm % 5 === 0) ? 8 : 4;
+    const sy = Math.round(cy) + 0.5;
+    ctx.moveTo(PAD - tickW, sy);
+    ctx.lineTo(PAD, sy);
+  }
+  ctx.stroke();
+
+  /* Vertical ruler — labels (every 5 mm). */
+  ctx.textAlign = "right";
+  for (let mm = mmFromV - (mmFromV % 5); mm <= mmToV; mm += 5) {
+    const cy = PAD + mm * step + oyPx;
+    if (cy < PAD + 5 || cy > PAD + headH - 5) continue;
+    ctx.fillText(String(mm), PAD - 10, Math.round(cy));
+  }
+
+  ctx.restore();
 }
 
 const HANDLE_VIS  = 6;   /* visual side of the corner squares       */
@@ -1656,23 +1885,23 @@ function bindPropInput(id, key, parseFn) {
 bindPropInput("text", "text");
 bindPropInput("size", "size", v => parseInt(v, 10));
 bindPropInput("el-x", "x",    v => parseInt(v, 10) || 0);
-bindPropInput("el-y", "y",    v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+bindPropInput("el-y", "y",    v => parseInt(v, 10) || 0);
 bindPropInput("img-algo",      "algorithm");
 bindPropInput("img-threshold", "threshold", v => parseInt(v, 10));
 bindPropInput("img-h",         "h",         v => Math.max(8, Math.min(128, parseInt(v, 10) || 8)));
 bindPropInput("img-x",         "x",         v => parseInt(v, 10) || 0);
-bindPropInput("img-y",         "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+bindPropInput("img-y",         "y",         v => parseInt(v, 10) || 0);
 bindPropInput("bc-text",       "text");
 bindPropInput("bc-sym",        "symbology");
 bindPropInput("bc-h",          "h",         v => Math.max(16, Math.min(128, parseInt(v, 10) || 16)));
 bindPropInput("bc-size",       "size",      v => Math.max(1, Math.min(6, parseInt(v, 10) || 1)));
 bindPropInput("bc-x",          "x",         v => parseInt(v, 10) || 0);
-bindPropInput("bc-y",          "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+bindPropInput("bc-y",          "y",         v => parseInt(v, 10) || 0);
 bindPropInput("qr-text",       "text");
 bindPropInput("qr-ecc",        "ecc");
 bindPropInput("qr-size",       "size",      v => Math.max(1, Math.min(6, parseInt(v, 10) || 1)));
 bindPropInput("qr-x",          "x",         v => parseInt(v, 10) || 0);
-bindPropInput("qr-y",          "y",         v => Math.max(0, Math.min(127, parseInt(v, 10) || 0)));
+bindPropInput("qr-y",          "y",         v => parseInt(v, 10) || 0);
 bindPropInput("el-composite", "composite");
 bindPropInput("el-rotation",  "rotation",   v => {
   /* Normalise to (-180, 180] so the input doesn't drift. */
@@ -1841,10 +2070,14 @@ function applyTransform() {
 }
 
 function evtToCanvas(ev) {
+  /* Subtract PAD because the on-screen canvas has a PAD-wide gutter
+   * around the printable area but elements live in unpadded
+   * print-pixel space. Negative results mean the pointer is over
+   * the gutter — that's fine, hit tests just won't match. */
   const r = canvas.getBoundingClientRect();
   return {
-    x: (ev.clientX - r.left) * (canvas.width  / r.width),
-    y: (ev.clientY - r.top)  * (canvas.height / r.height),
+    x: (ev.clientX - r.left) * (canvas.width  / r.width)  - PAD,
+    y: (ev.clientY - r.top)  * (canvas.height / r.height) - PAD,
   };
 }
 /* Long-press detection runs alongside drag start. If the pointer
@@ -1988,11 +2221,27 @@ canvas.addEventListener("pointermove", ev => {
   const w = el._w || 0, h = el._h || 0;
   const newCenterX = p.x - drag.dxFromCenter;
   const newCenterY = p.y - drag.dyFromCenter;
-  el.x = Math.max(0, newCenterX - w / 2);
-  el.y = Math.max(0, Math.min(HEAD_PX - 1, newCenterY - h / 2));
+  el.x = newCenterX - w / 2;
+  el.y = newCenterY - h / 2;
+  clampElementPos(el);
   syncPropsPanel();
   redraw();
 });
+
+/* Symmetric clamp: keep at least MIN_VISIBLE pixels of bounding box
+ * inside the print area on every side. Vertical limits are always
+ * the head height; horizontal upper limit only exists in fixed mode
+ * (auto mode lets the label expand right indefinitely). */
+const MIN_VISIBLE = 8;
+function clampElementPos(el) {
+  const w = el._w || 0, h = el._h || 0;
+  el.x = Math.max(-w + MIN_VISIBLE, el.x);
+  if (canvasOpts.labelWidthMode === "fixed") {
+    const limitX = Math.max(20, Math.round(mmToPx(canvasOpts.labelWidthMm)));
+    el.x = Math.min(limitX - MIN_VISIBLE, el.x);
+  }
+  el.y = Math.max(-h + MIN_VISIBLE, Math.min(HEAD_PX - MIN_VISIBLE, el.y));
+}
 function endPointer(ev) {
   if (ev) activePointers.delete(ev.pointerId);
   if (activePointers.size < 2) pinchInitial = null;
@@ -2149,6 +2398,55 @@ document.getElementById("csv-clear").addEventListener("click", () => {
   document.getElementById("csv").value = "";
   csvUpdate();
 });
+
+/* ----- canvas options (rulers / grid / centre / fixed length) ---- */
+(function wireCanvasOpts() {
+  const $mode   = document.getElementById("opt-len-mode");
+  const $mm     = document.getElementById("opt-len-mm");
+  const $rulers = document.getElementById("opt-rulers");
+  const $grid   = document.getElementById("opt-grid");
+  const $center = document.getElementById("opt-center");
+  const $origin = document.getElementById("opt-origin");
+
+  function syncToUI() {
+    $mode.value     = canvasOpts.labelWidthMode;
+    $mm.value       = canvasOpts.labelWidthMm;
+    $mm.disabled    = canvasOpts.labelWidthMode !== "fixed";
+    $rulers.checked = !!canvasOpts.showRulers;
+    $grid.checked   = !!canvasOpts.showGrid;
+    $center.checked = !!canvasOpts.showCenter;
+    $origin.value   = canvasOpts.origin;
+  }
+  syncToUI();
+
+  $mode.addEventListener("change", () => {
+    /* When flipping auto -> fixed, seed the mm value from the
+     * currently-rendered width so the visible width doesn't jump. */
+    if ($mode.value === "fixed" && canvasOpts.labelWidthMode === "auto") {
+      const c = document.getElementById("preview");
+      const currentPx = c.width - 2 * PAD;
+      canvasOpts.labelWidthMm = Math.max(5, Math.min(500, Math.round(currentPx / PX_PER_MM)));
+    }
+    canvasOpts.labelWidthMode = $mode.value;
+    saveCanvasOpts(); syncToUI(); redraw();
+  });
+  $mm.addEventListener("input", () => {
+    const v = parseInt($mm.value, 10);
+    if (!Number.isFinite(v)) return;
+    canvasOpts.labelWidthMm = Math.max(5, Math.min(500, v));
+    saveCanvasOpts(); redraw();
+  });
+  for (const [el, key] of [[$rulers, "showRulers"], [$grid, "showGrid"], [$center, "showCenter"]]) {
+    el.addEventListener("change", () => {
+      canvasOpts[key] = el.checked;
+      saveCanvasOpts(); redraw();
+    });
+  }
+  $origin.addEventListener("change", () => {
+    canvasOpts.origin = $origin.value;
+    saveCanvasOpts(); redraw();
+  });
+})();
 
 /* Settings tab — API host. */
 document.getElementById("api-host").value = apiHost;
