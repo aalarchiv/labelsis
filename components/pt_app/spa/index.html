@@ -56,12 +56,24 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
   #view-print > .col-left  { flex:1; min-width:0; }
   /* Right column grows with the viewport — clamped so it stays
    * usable on small desktops (>=320 px) but isn't a thin sliver on
-   * wide ones (up to 480 px). Long inline tokens in help text
-   * break inside this column instead of clipping. */
-  #view-print > .col-right { flex:0 0 clamp(320px, 28%, 480px); min-width:0; }
+   * wide ones (up to 600 px). The user can also drag the lower-
+   * right corner to widen / narrow it manually (CSS resize:both).
+   * align-self:stretch matches the left column's height so the
+   * resize grip sits next to the bottom of the visible column. */
+  #view-print > .col-right {
+    flex: 0 0 clamp(320px, 36%, 600px);
+    min-width: 0;
+    resize: horizontal;
+    overflow: auto;
+    /* The CSS resize handle is a 16 px grip in the bottom-right
+     * corner. Without min-content padding the column has no extra
+     * room for the grip; padding-bottom gives it a few px so the
+     * grip doesn't sit on top of the last panel's border. */
+    padding-bottom: .25rem;
+  }
 }
 .panel, .panel h2, .panel p { overflow-wrap:anywhere; }
-#tpl-panel code { word-break:break-word; }
+#tpl-panel code, .csv-edit textarea, .csv-edit pre { word-break:break-word; overflow-wrap:anywhere; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 /* Inline panel header: the h2 sits next to the label-library
@@ -277,6 +289,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <input id="opt-len-mm" type="number" min="5" max="500" step="1" value="30" style="max-width:80px; min-width:60px;">
         <span class="muted" style="font-size:.85rem;">mm</span>
         <span style="flex:1; min-width:0;"></span>
+        <label><input id="opt-colors" type="checkbox"> <span data-i18n="field.colors">colors</span></label>
         <label><input id="opt-rulers" type="checkbox"> <span data-i18n="field.rulers">rulers</span></label>
         <label><input id="opt-grid"   type="checkbox"> <span data-i18n="field.grid">grid</span></label>
         <label><input id="opt-center" type="checkbox"> <span data-i18n="field.center">center</span></label>
@@ -669,9 +682,10 @@ const STRINGS = {
     "field.length":            "length",
     "field.length.auto":       "auto",
     "field.length.fixed":      "fixed",
-    "field.rulers":            "rulers",
-    "field.grid":              "grid",
-    "field.center":            "center",
+    "field.colors":            "colors",
+    "field.rulers":             "rulers",
+    "field.grid":               "grid",
+    "field.center":             "center",
     "field.origin":            "origin",
     "field.origin.tl":         "top-left",
     "field.origin.tc":         "top-center",
@@ -852,6 +866,27 @@ const TEXT_COLORS = {
   0x08: "black",   0x0A: "gold",   0xF0: "cleaning",
   0x02: "other",   0xFF: "incompatible",
 };
+/* RGB triples for the ID lookup, used by the on-canvas "colors"
+ * preview. Closely-matched physical-tape approximations — these
+ * never go to the printer, only to the CRT. Missing IDs fall back
+ * to the swatchMap → white/black so colour mode still produces
+ * something legible for tapes we haven't catalogued yet. */
+const TAPE_COLOR_RGB = {
+  0x01: [255,255,255], 0x02: [200,200,200], 0x03: [228,232,235],
+  0x04: [207, 34, 46], 0x05: [  9,105,218], 0x06: [255,210, 60],
+  0x07: [ 26,127, 55], 0x08: [ 31, 35, 40], 0x09: [228,232,235],
+  0x20: [241,241,241], 0x21: [210,215,220], 0x22: [192,192,192],
+  0x23: [218,165, 32], 0x24: [192,192,192], 0x30: [  9,105,218],
+  0x31: [207, 34, 46], 0x40: [255,127,  0], 0x41: [255,250, 80],
+  0x50: [240, 99,160], 0x51: [200,200,200], 0x52: [148,217, 80],
+  0x60: [255,210, 60], 0x61: [240, 99,160], 0x62: [  9,105,218],
+  0x70: [255,255,255], 0x90: [255,255,255], 0x91: [255,210, 60],
+};
+const TEXT_COLOR_RGB = {
+  0x01: [255,255,255], 0x04: [207, 34, 46], 0x05: [  9,105,218],
+  0x08: [ 31, 35, 40], 0x0A: [218,165, 32],
+};
+
 const PHASE_TYPES = { 0: "editing", 1: "printing" };
 const STATUS_TYPES = {
   0x00: "reply to status request", 0x01: "printing completed",
@@ -963,6 +998,7 @@ const CANVAS_OPTS_DEFAULT = {
   showRulers:     true,
   showGrid:       false,
   showCenter:     false,
+  showColors:     false,
   origin:         "tl",     /* "tl" | "tc" | "cl" | "c"            */
 };
 let canvasOpts = (() => {
@@ -1714,22 +1750,55 @@ function redraw(forPrint = false) {
   }
 
   /* Centre guides for fold-marked labels — above elements so they
-   * show through, below selection chrome. */
+   * show through. Colour remap happens after this so the dotted
+   * red guides flatten to text/tape; chrome is drawn afterward
+   * to avoid being recoloured. */
   if (canvasOpts.showCenter) drawCenterGuides(ctx, printW, HEAD_PX);
 
-  /* Selection chrome: rotated bounding box + 4 corner resize handles
-   * + 1 top rotation handle, matching the convention in Figma /
-   * Photoshop / Inkscape. Drawn last so it sits above the
-   * elements. The translate above lets corner squares for an
-   * element at x=0 render at canvas x=PAD-3, fully visible. */
+  ctx.restore();
+
+  /* "Colors" preview — replace b/w pixels in the print area with
+   * the printer's reported tape + text colours. Pure UI; the print
+   * raster is unaffected (postPrint() runs redraw(true)). */
+  if (canvasOpts.showColors) applyTapeColors(ctx, printW);
+
+  /* Selection chrome painted on top of the colour remap so the
+   * blue handles + bounding box stay legible regardless of tape
+   * colour. */
+  ctx.save();
+  ctx.translate(PAD, PAD);
   const sel = elementById(selectedId);
   if (sel) drawSelectionChrome(ctx, sel);
-
   ctx.restore();
 
   /* Rulers paint last in canvas-absolute coords, on top of the
    * gutter (covers anything that bled into the top/left bands). */
   if (canvasOpts.showRulers) drawRulers(ctx, printW, HEAD_PX);
+}
+
+/* Re-colour the on-screen print area by thresholding each pixel
+ * against grey and replacing it with the printer's tape colour
+ * (light pixels) or text colour (dark pixels). Reads/writes
+ * happen in canvas-absolute coordinates so the current transform
+ * doesn't matter. Skips when printer info is missing — falls back
+ * to leaving the b/w preview alone. */
+function applyTapeColors(ctx, printW) {
+  if (!printer || !printer.ok) return;
+  const tape = TAPE_COLOR_RGB[printer.tape_color_id];
+  const text = TEXT_COLOR_RGB[printer.text_color_id];
+  if (!tape || !text) return;
+  const img = ctx.getImageData(PAD, PAD, printW, HEAD_PX);
+  const px  = img.data;
+  for (let i = 0; i < px.length; i += 4) {
+    const lum = (px[i] + px[i+1] + px[i+2]) / 3;
+    const c   = lum < 128 ? text : tape;
+    px[i]   = c[0];
+    px[i+1] = c[1];
+    px[i+2] = c[2];
+    /* Alpha left as-is; canvas was opaque white before the
+     * remap so every pixel is 255 already. */
+  }
+  ctx.putImageData(img, PAD, PAD);
 }
 
 function drawGrid(ctx, w, h) {
@@ -3431,6 +3500,7 @@ document.getElementById("csv-clear").addEventListener("click", () => {
 (function wireCanvasOpts() {
   const $mode   = document.getElementById("opt-len-mode");
   const $mm     = document.getElementById("opt-len-mm");
+  const $colors = document.getElementById("opt-colors");
   const $rulers = document.getElementById("opt-rulers");
   const $grid   = document.getElementById("opt-grid");
   const $center = document.getElementById("opt-center");
@@ -3440,6 +3510,7 @@ document.getElementById("csv-clear").addEventListener("click", () => {
     $mode.value     = canvasOpts.labelWidthMode;
     $mm.value       = canvasOpts.labelWidthMm;
     $mm.disabled    = canvasOpts.labelWidthMode !== "fixed";
+    $colors.checked = !!canvasOpts.showColors;
     $rulers.checked = !!canvasOpts.showRulers;
     $grid.checked   = !!canvasOpts.showGrid;
     $center.checked = !!canvasOpts.showCenter;
@@ -3464,7 +3535,7 @@ document.getElementById("csv-clear").addEventListener("click", () => {
     canvasOpts.labelWidthMm = Math.max(5, Math.min(500, v));
     saveCanvasOpts(); redraw();
   });
-  for (const [el, key] of [[$rulers, "showRulers"], [$grid, "showGrid"], [$center, "showCenter"]]) {
+  for (const [el, key] of [[$colors, "showColors"], [$rulers, "showRulers"], [$grid, "showGrid"], [$center, "showCenter"]]) {
     el.addEventListener("change", () => {
       canvasOpts[key] = el.checked;
       saveCanvasOpts(); redraw();
