@@ -2456,7 +2456,13 @@ function escapeHtml(s) {
 }
 
 function csvUpdate() {
-  csvNormalize();
+  /* Don't normalize structure during typing — mutating the editor's
+   * DOM mid-keystroke disrupts Firefox's caret tracking and produces
+   * the "every char on a new line" symptom. innerText reads the
+   * canonical text correctly even from a messy tree, so the parsed
+   * model stays in sync with what the user is typing. Structure
+   * cleanup happens on click / blur via csvNormalize() — at that
+   * point the editor isn't mid-keystroke, so the caret survives. */
   csvUpdateEmptyClass();
   const text = csvText();
   csvData = text.trim() ? parseCSV(text) : { headers: [], data: [] };
@@ -3757,6 +3763,11 @@ document.getElementById("print-all").addEventListener("click", doPrintAll);
   csv.addEventListener("keyup",   (e) => {
     if (/^Arrow|^Page|^Home|^End/.test(e.key)) activateFromCaret();
   });
+  /* Tidy structure once typing has stopped (focus moves elsewhere)
+   * — Firefox in particular leaves <br>-separated content inside one
+   * big block while the user types, and the per-line highlight only
+   * works once we've split it back out into <div>s. */
+  csv.addEventListener("blur",    () => { csvNormalize(); csvHighlight(); });
   csvSetText("");
 })();
 document.getElementById("tpl-prev").addEventListener("click", () => csvCycle(-1));
