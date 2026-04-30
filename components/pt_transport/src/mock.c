@@ -7,7 +7,7 @@
 
 #include <string.h>
 
-/* ---------------------------------------------------------------- rx ring */
+/* rx ring */
 
 static int rx_push(pt_transport_mock_t *m, const uint8_t *src, size_t n)
 {
@@ -31,7 +31,7 @@ static size_t rx_pop(pt_transport_mock_t *m, uint8_t *dst, size_t cap)
     return n;
 }
 
-/* --------------------------------------------------------- status emitter */
+/* status emitter */
 
 static void emit_status(pt_transport_mock_t *m,
                         pt_status_type_t status, pt_phase_type_t phase)
@@ -57,7 +57,7 @@ static void emit_status(pt_transport_mock_t *m,
     (void)rx_push(m, s, 32);
 }
 
-/* ----------------------------------------------------------- byte parser */
+/* byte parser */
 
 /* Returns the number of bytes consumed, or 0 if the next command is
  * incomplete and we should wait for more. Returns -1 on a malformed
@@ -134,7 +134,7 @@ static void parse_pending(pt_transport_mock_t *m)
     }
 }
 
-/* --------------------------------------------------------- transport API */
+/* transport API */
 
 static int mock_send(void *ctx, const uint8_t *data, size_t len)
 {
@@ -155,7 +155,7 @@ static int mock_recv(void *ctx, uint8_t *out, size_t cap,
     return 0;
 }
 
-/* ----------------------------------------------------------------- API */
+/* API */
 
 pt_transport_t pt_transport_mock_init(pt_transport_mock_t *m)
 {

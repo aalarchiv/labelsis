@@ -7,7 +7,7 @@
 
 #include <string.h>
 
-/* ============================================================ helpers == */
+/* helpers */
 
 void pt_session_options_default(pt_session_options_t *o)
 {
@@ -162,12 +162,12 @@ static pt_err_t wait_print_done(pt_transport_t *t,
     }
     if (opts->on_event)
         opts->on_event("estimated print time elapsed", opts->on_event_user);
-    /* Saw phase=printing → printer accepted the job; declare success.
+    /* Saw phase=printing means printer accepted the job; declare success.
      * Never saw phase=printing → something's wrong upstream. */
     return seen_printing ? PT_OK : PT_ERR_TIMEOUT;
 }
 
-/* =============================================================== API == */
+/* API */
 
 pt_err_t pt_session_query_status(pt_transport_t *t,
                                  pt_status_t *out,

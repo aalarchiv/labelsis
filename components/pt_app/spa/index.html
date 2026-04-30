@@ -765,7 +765,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 <script>
 "use strict";
 
-/* ---- i18n scaffolding -------------------------------------------
+/* i18n scaffolding
  *
  * Every user-visible string lives in STRINGS[lang] keyed by a
  * dotted path (e.g. "btn.print"). t(key, params?) reads from the
@@ -1145,7 +1145,7 @@ function renderStatus(j) {
   }
 }
 
-/* ----- label model: positioned elements --------------------------
+/* label model: positioned elements
  *
  * Each element is a {type, x, y, ...params}. Elements render in
  * array order (last drawn = topmost). x/y are the element's anchor
@@ -1277,7 +1277,7 @@ function drawText(ctx, el) {
   }
 }
 
-/* --- image element + dithering -----------------------------------
+/* image element + dithering
  *
  * Port of niimblue/src/utils/post_process.ts (MIT) with the
  * algorithms named consistently. We pre-dither once when the source,
@@ -1410,7 +1410,7 @@ function drawImage(ctx, el) {
   ctx.fillText(el._loadError ? "image?" : "image…", w / 2, h / 2);
 }
 
-/* --- barcodes: Code128B + EAN13 ----------------------------------
+/* barcodes: Code128B + EAN13
  *
  * Ported from niimblue/src/utils/barcode.ts (MIT). Two transcription
  * typos in the upstream source — ASCII 36 ('$') and 41 (')') had 'h'
@@ -1556,7 +1556,7 @@ function drawBarcode(ctx, el) {
   if (el._barcodeCanvas) ctx.drawImage(el._barcodeCanvas, 0, 0);
 }
 
-/* --- QR code element ---------------------------------------------
+/* QR code element
  *
  * Uses davidshimjs/qrcodejs (MIT) loaded as /qrcode.min.js. Its
  * public API targets a DOM container, so we instantiate against a
@@ -1659,7 +1659,7 @@ function fillTextWrapped(ctx, text, x, y, maxW, lineH) {
   if (line) ctx.fillText(line, x, y);
 }
 
-/* --- filled rectangle element ------------------------------------
+/* filled rectangle element
  *
  * Solid fill of the element's box. Useful as a colour block, a
  * separator bar between text rows, an inverted-text background
@@ -1758,7 +1758,7 @@ function drawRect(ctx, el) {
   ctx.drawImage(scratch, 0, 0);
 }
 
-/* --- icon element ------------------------------------------------
+/* icon element
  *
  * A single Bootstrap-Icons glyph rendered through canvas's font
  * subsystem. The element stores the icon NAME (e.g., "alarm-fill")
@@ -2062,7 +2062,7 @@ function toggleAspectLock() {
   if (!el) return;
   pushUndo();
   if (el.aspectLocked === false) {
-    /* unlocked → locked: figure out the larger visible side and
+    /* going from unlocked to locked: figure out the larger visible side and
      * collapse to a single uniform scale. */
     const sX = el.scaleX ?? 1, sY = el.scaleY ?? 1;
     const visW = (el._baseW || 1) * sX;
@@ -2533,10 +2533,10 @@ function log(msg, ok) {
   el.className = ok === undefined ? "" : (ok ? "kv-ok" : "kv-err");
 }
 
-/* ----- template engine — vanilla port of niimblue's CSV templating
+/* template engine — vanilla port of niimblue's CSV templating
  * (refs/niimblue/src/utils/canvas_preprocess.ts, MIT). Supports
  * {column} substitution and a $copies column for per-row repeat count.
- * Date helpers and richer formats can land later. ----------------- */
+ * Date helpers and richer formats can land later. */
 
 let csvData = { headers: [], data: [] };
 let csvCurrentRow = 0;
@@ -2986,7 +2986,7 @@ async function doPrintAll() {
   }
 }
 
-/* --- serialisation: strip runtime caches --------------------------
+/* serialisation: strip runtime caches
  *
  * Underscore-prefixed fields are runtime caches (Image objects, QR
  * matrices, ImageData, dithered canvases, measured _w/_h). They get
@@ -3062,7 +3062,7 @@ function restoreFromJSON(json) {
   redraw();
 }
 
-/* --- undo / redo --------------------------------------------------
+/* undo / redo
  *
  * Stacks of JSON snapshots. pushUndo() captures the current state
  * BEFORE a change; redo stack is cleared on every fresh edit. We
@@ -3120,7 +3120,7 @@ function refreshPrintButtons() {
   _lastPrintErr = err;
 }
 
-/* --- session persistence -----------------------------------------
+/* session persistence
  *
  * Auto-save the in-progress design + a few UI knobs to localStorage
  * so a page reload (or a fresh visit later) drops the user back into
@@ -3195,7 +3195,7 @@ function loadSession() {
   }
 }
 
-/* --- label library: localStorage-backed save/load -----------------
+/* label library: localStorage-backed save/load
  *
  * One entry per name under localStorage["pt700:labels"]. Image data
  * URLs survive serialisation (small logos round-trip cleanly within
@@ -3277,7 +3277,7 @@ function libClear() {
   redraw();
 }
 
-/* --- duplicate selected ------------------------------------------- */
+/* duplicate selected */
 function duplicateSelected() {
   const el = elementById(selectedId);
   if (!el) return;
@@ -3337,7 +3337,7 @@ function renderLayerList() {
     const li = document.createElement("li");
     li.dataset.id = el.id;
     if (el.id === selectedId) li.classList.add("selected");
-    /* Visual flags: empty text / barcode / qr → grey-out so the
+    /* Visual flags: empty text / barcode / qr -> grey-out so the
      * user sees a forgotten layer; render error or broken image →
      * red border (matches Print-disable trigger). */
     const isText  = el.type === "text"    || el.type === "barcode" || el.type === "qr";
@@ -3574,7 +3574,7 @@ function bindPropInput(id, key, parseFn) {
      * cached dither so the next redraw rebakes. */
     if (el.type === "image" && (id === "img-algo" || id === "img-threshold" || id === "img-h"))
       el._dithered = null;
-    /* QR: text/ECC change → re-encode the matrix. size change →
+    /* QR: text/ECC change rebuilds the matrix. size change just
      * just re-bake the canvas at the new module width. */
     if (el.type === "qr" && (id === "qr-text" || id === "qr-ecc"))
       el._qr = el._qrError = null;
@@ -3742,7 +3742,7 @@ function flipBy(axis) {
 document.getElementById("flip-h").addEventListener("click", () => flipBy("h"));
 document.getElementById("flip-v").addEventListener("click", () => flipBy("v"));
 
-/* ---- font picker + bold/italic/underline/strike ---------------- */
+/* font picker + bold/italic/underline/strike */
 (function wireTextStyle() {
   const $trigger = document.getElementById("font-trigger");
   const $list    = document.getElementById("font-list");
@@ -4576,7 +4576,7 @@ document.getElementById("csv-clear").addEventListener("click", () => {
   csvUpdate();
 });
 
-/* ----- canvas options (rulers / grid / centre / fixed length) ---- */
+/* canvas options (rulers / grid / centre / fixed length) */
 (function wireCanvasOpts() {
   const $mode   = document.getElementById("opt-len-mode");
   const $mm     = document.getElementById("opt-len-mm");
@@ -4659,7 +4659,7 @@ document.getElementById("api-host-clear").addEventListener("click", () => {
   $lang.addEventListener("change", e => setLanguage(e.target.value));
 }
 
-/* ----- view switcher (Status / Label / Wi-Fi / Settings) + burger menu ---- */
+/* view switcher (Status / Label / Wi-Fi / Settings) + burger menu */
 
 /* Remember which "real" tab the user was on before they jumped to
  * status, so the title-bar h1 toggle can flip back to it. */
@@ -4714,7 +4714,7 @@ document.getElementById("phone-more").addEventListener("click", () => {
   document.getElementById("phone-more").setAttribute("aria-expanded", open ? "true" : "false");
 });
 
-/* ----- Wi-Fi tab (scan + save credentials) ---------------------- */
+/* Wi-Fi tab (scan + save credentials) */
 
 let wifiInited = false;
 let wifiRevealed = false;
@@ -4801,7 +4801,7 @@ function wifiInit() {
   wifiScan();
 }
 
-/* ----- boot ---------------------------------------------------- */
+/* boot */
 
 /* Translate everything on the page once at startup. setLanguage()
  * lazy-loads the JSON file for any non-default locale persisted

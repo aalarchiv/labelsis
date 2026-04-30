@@ -33,7 +33,7 @@
 
 static const char *TAG = "pt_app";
 
-/* ---------------------------------------------------- Wi-Fi creds (NVS) -- */
+/* Wi-Fi creds (NVS) */
 
 /* Persist Wi-Fi creds in NVS so first-boot provisioning (whether via
  * compiled-in cfg or AP-mode onboarding) is durable across reboots.
@@ -87,7 +87,7 @@ static esp_err_t creds_clear(void)
     return err;
 }
 
-/* ----------------------------------------------------- reset button -- */
+/* reset button */
 
 #define RESET_HOLD_MS  5000   /* duration to qualify as a long press */
 #define RESET_POLL_MS  50     /* GPIO sample period */
@@ -142,7 +142,7 @@ static void reset_button_up(int gpio)
     else             ESP_LOGI(TAG, "reset: gpio %d, hold %d ms", gpio, RESET_HOLD_MS);
 }
 
-/* ------------------------------------------------------------ Wi-Fi --- */
+/* Wi-Fi */
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
@@ -262,7 +262,7 @@ static esp_err_t wifi_ap_up(const char *ssid)
     return ESP_OK;
 }
 
-/* --------------------------------------------------------- transport --- */
+/* transport */
 
 static pt_transport_t            s_transport;
 static pt_transport_mock_t       s_mock;
@@ -293,7 +293,7 @@ static void transport_up(const pt_app_config_t *cfg)
     ESP_LOGI(TAG, "transport: mock (no real printer)");
 }
 
-/* ----------------------------------------------------------- HTTP API --- */
+/* HTTP API */
 
 /* Permissive CORS so the SPA can be developed and tested from any
  * origin (e.g. file://, localhost dev server) hitting a real device
@@ -677,7 +677,7 @@ extern const char index_html_end[]   asm("_binary_index_html_end");
 extern const char qrcode_js_start[] asm("_binary_qrcode_min_js_start");
 extern const char qrcode_js_end[]   asm("_binary_qrcode_min_js_end");
 
-/* Bootstrap Icons font (woff2, ~130 KB) + name→codepoint table
+/* Bootstrap Icons font (woff2, ~130 KB) + name-to-codepoint table
  * (JSON, ~52 KB). MIT-licensed, https://icons.getbootstrap.com/.
  * Used by the SPA's icon element + picker. */
 extern const uint8_t icon_woff2_start[] asm("_binary_bootstrap_icons_woff2_start");
@@ -806,7 +806,7 @@ static esp_err_t http_up(uint16_t port)
     return ESP_OK;
 }
 
-/* ------------------------------------------------------ AP onboarding -- */
+/* AP onboarding */
 
 #define AP_SETUP_SSID "pt700-setup"
 
@@ -990,7 +990,7 @@ static esp_err_t http_ap_up(void)
     return ESP_OK;
 }
 
-/* ------------------------------------------------------------- mDNS --- */
+/* mDNS */
 
 static esp_err_t mdns_up(void)
 {
@@ -1003,7 +1003,7 @@ static esp_err_t mdns_up(void)
     return ESP_OK;
 }
 
-/* --------------------------------------------------------- public ---- */
+/* public */
 
 esp_err_t pt_app_run(const pt_app_config_t *cfg)
 {

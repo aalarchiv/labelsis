@@ -59,7 +59,7 @@ static const char *USAGE =
     "      --info           probe the connected printer + tape and exit\n"
     "  -h, --help           show this help\n";
 
-/* ----------------------------------------------------------- PBM reader */
+/* PBM reader */
 
 typedef struct {
     int      width;   /* feed direction (raster lines)        */
@@ -159,7 +159,7 @@ static uint8_t *render_to_raster_rows(const pbm_t *src, size_t *out_rows)
     return out;
 }
 
-/* ----------------------------------------------------------- scale */
+/* scale */
 
 /* Nearest-neighbour scale of a 1-bit PBM. Cheap and good enough at
  * typical label scales — bilinear/dither would be nicer but needs
@@ -188,7 +188,7 @@ static int pbm_scale(const pbm_t *src, int new_w, int new_h, pbm_t *out)
     return 0;
 }
 
-/* ----------------------------------------------------------- verbose log */
+/* verbose log */
 
 static const char *status_type_name(pt_status_type_t t)
 {
@@ -221,7 +221,7 @@ static void log_event(const char *msg, void *unused)
     fprintf(stderr, "  event:  %s\n", msg);
 }
 
-/* ----------------------------------------------------------- error map */
+/* error map */
 
 static const char *err_str(pt_err_t e)
 {
@@ -245,7 +245,7 @@ static const char *err_str(pt_err_t e)
     return "unknown error";
 }
 
-/* ----------------------------------------------------------- main */
+/* main */
 
 int main(int argc, char **argv)
 {

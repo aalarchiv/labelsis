@@ -10,7 +10,7 @@
 
 #include <string.h>
 
-/* ========================================================== tape geom == */
+/* tape geom */
 
 /* SDM p. 20 TZe table — left margin pins | print area pins | right pins
  * for the H500/P700/E500 (128-pin head). The printer reports the tape
@@ -44,7 +44,7 @@ pt_err_t pt_tape_geometry_tze(uint8_t width_mm, pt_tape_geometry_t *out)
     return PT_ERR_INVALID_ARG;
 }
 
-/* ============================================================ status === */
+/* status */
 
 pt_err_t pt_status_decode(const uint8_t *buf, size_t len, pt_status_t *out)
 {
@@ -71,7 +71,7 @@ pt_err_t pt_status_decode(const uint8_t *buf, size_t len, pt_status_t *out)
     return PT_OK;
 }
 
-/* =========================================================== encoders == */
+/* encoders */
 
 int pt_encode_invalidate(uint8_t *buf, size_t cap)
 {
@@ -221,7 +221,7 @@ int pt_encode_print_last(uint8_t *buf, size_t cap)
     return 1;
 }
 
-/* =========================================================== packbits == */
+/* packbits */
 
 /* PackBits encoder per SDM §4 M (p. 35). Strict-SDM: a run of 2 equal
  * bytes encodes as a repeat code (matching the SDM example). Raw chunks
@@ -308,7 +308,7 @@ int pt_packbits_decode(uint8_t *out, size_t cap,
     return (int)o;
 }
 
-/* ============================================================ bitmap === */
+/* bitmap */
 
 /* Layout convention (matches the .pbm fixtures in refs/ptouch-770):
  *   - bitmap is row-major, MSB-first within byte.

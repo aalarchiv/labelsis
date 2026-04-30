@@ -77,7 +77,7 @@ struct pt_transport_usb_host {
     bool                     interface_claimed;
 };
 
-/* ------------------------------------------------------------ tasks --- */
+/* tasks */
 
 static void lib_task(void *arg)
 {
@@ -98,7 +98,7 @@ static void client_task(void *arg)
     vTaskDelete(NULL);
 }
 
-/* ----------------------------------------------------- descriptor walk */
+/* descriptor walk */
 
 /* Search the active config for a printer-class interface (0x07) with
  * one bulk-IN and one bulk-OUT endpoint. Records intf_num + endpoint
@@ -157,7 +157,7 @@ static int pick_endpoints(struct pt_transport_usb_host *u)
     return -1;
 }
 
-/* ----------------------------------------------- enumeration callback */
+/* enumeration callback */
 
 static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
 {
@@ -243,7 +243,7 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
     }
 }
 
-/* --------------------------------------------------------- transfers */
+/* transfers */
 
 static void xfer_in_cb(usb_transfer_t *t)  { xSemaphoreGive((SemaphoreHandle_t)t->context); }
 static void xfer_out_cb(usb_transfer_t *t) { xSemaphoreGive((SemaphoreHandle_t)t->context); }
@@ -335,7 +335,7 @@ done:
     return rc;
 }
 
-/* --------------------------------------------------- public lifecycle */
+/* public lifecycle */
 
 pt_transport_usb_host_t *pt_transport_usb_host_open(uint32_t connect_timeout_ms)
 {
