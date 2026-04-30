@@ -42,12 +42,15 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
  * which the previous grid layout did. On narrow viewports both
  * columns stack into one column via natural source order: Design,
  * Props, Layers, CSV. */
-#view-print              { display:flex; flex-direction:column; gap:1rem; }
+/* :not([hidden]) keeps the higher-specificity ID rule from
+ * overriding the user-agent [hidden]{display:none} when the view
+ * switcher hides this section. */
+#view-print:not([hidden])              { display:flex; flex-direction:column; gap:1rem; }
 #view-print > .col-left,
 #view-print > .col-right { display:flex; flex-direction:column; gap:1rem; }
 @media (min-width: 1024px) {
   main { max-width:1280px; }
-  #view-print              { flex-direction:row; align-items:flex-start; }
+  #view-print:not([hidden])              { flex-direction:row; align-items:flex-start; }
   #view-print > .col-left  { flex:1; min-width:0; }
   #view-print > .col-right { flex:0 0 360px; }
 }
@@ -187,8 +190,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 <header>
   <h1 id="title" title="click to toggle status">pt700</h1>
   <nav id="nav">
-    <a href="#print"    data-view="print" data-i18n="tab.label" class="active">Label</a>
-    <a href="#wifi"     data-view="wifi"  data-i18n="tab.wifi">Wi-Fi</a>
+    <a href="#status"   data-view="status"   data-i18n="tab.status">Printer</a>
+    <a href="#print"    data-view="print"    data-i18n="tab.label" class="active">Label</a>
+    <a href="#wifi"     data-view="wifi"     data-i18n="tab.wifi">Wi-Fi</a>
     <a href="#settings" data-view="settings" data-i18n="tab.settings">Settings</a>
   </nav>
   <button id="burger" class="burger" aria-label="menu" aria-expanded="false">
@@ -196,10 +200,12 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   </button>
 </header>
 <main>
-  <div id="status-panel" class="panel" hidden>
-    <h2>Printer</h2>
-    <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
-  </div>
+  <section id="view-status" hidden>
+    <div class="panel">
+      <h2 data-i18n="panel.printer">Printer</h2>
+      <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
+    </div>
+  </section>
   <section id="view-print">
    <div class="col-left">
     <div class="panel">
@@ -544,10 +550,12 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 const I18N_DEFAULT_LANG = "en";
 const STRINGS = {
   en: {
-    "tab.label":              "Label",
+    "tab.status":              "Printer",
+    "tab.label":               "Label",
     "tab.wifi":                "Wi-Fi",
     "tab.settings":            "Settings",
     "panel.label":             "Label",
+    "panel.printer":           "Printer",
     "panel.element":           "Element",
     "panel.layers":            "Layers",
     "panel.layers.hint":       "— bottom of canvas first; drag to reorder",
@@ -3132,15 +3140,23 @@ document.getElementById("api-host-clear").addEventListener("click", () => {
   $lang.addEventListener("change", e => setLanguage(e.target.value));
 }
 
-/* ----- view switcher (Print / Wi-Fi / Settings) + burger menu ---- */
+/* ----- view switcher (Status / Label / Wi-Fi / Settings) + burger menu ---- */
+
+/* Remember which "real" tab the user was on before they jumped to
+ * status, so the title-bar h1 toggle can flip back to it. */
+let lastNonStatusView = "print";
 
 function showView(name) {
+  if (name !== "status") lastNonStatusView = name;
   document.querySelectorAll("section[id^=view-]").forEach(s => {
     s.hidden = (s.id !== "view-" + name);
   });
   document.querySelectorAll("nav a").forEach(a => {
     a.classList.toggle("active", a.dataset.view === name);
   });
+  /* The h1 chevron rotates while the status view is showing — same
+   * affordance as before, just driven from the central switcher. */
+  document.getElementById("title").classList.toggle("expanded", name === "status");
   document.getElementById("nav").classList.remove("open");
   document.getElementById("burger").setAttribute("aria-expanded", "false");
   if (name === "wifi" && !wifiInited) wifiInit();
@@ -3155,12 +3171,12 @@ document.getElementById("burger").addEventListener("click", () => {
 });
 
 /* h1 doubles as the connection indicator (green/red dot via CSS) and
- * a click target that toggles the status panel — keeps the print
- * panel uncluttered while still being one tap away from full status. */
+ * a shortcut to the Printer status view — same effect as picking
+ * "Printer" from the nav / burger menu. Click again to toggle back
+ * to the previously-selected view. */
 document.getElementById("title").addEventListener("click", () => {
-  const p = document.getElementById("status-panel");
-  p.hidden = !p.hidden;
-  document.getElementById("title").classList.toggle("expanded", !p.hidden);
+  const isStatus = !document.getElementById("view-status").hidden;
+  showView(isStatus ? (lastNonStatusView || "print") : "status");
 });
 
 /* Phone-only "⋯" toggle that reveals the secondary toolbar
