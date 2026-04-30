@@ -36,31 +36,20 @@ nav a:hover { color:var(--fg); }
 .burger { display:none; background:transparent; border:0; cursor:pointer; padding:.4rem; margin-left:auto; }
 .burger span { display:block; width:22px; height:2px; background:var(--fg); margin:4px 0; border-radius:1px; }
 main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-direction:column; gap:1rem; }
-/* On narrow viewports we want most-used panels near the top:
- * Design (canvas + print), Props (selected element editor),
- * Layers (only shows with >=2 elements), Template/CSV. HTML
- * source order has Layers before Props for legacy reasons; flex
- * `order` rearranges without DOM moves. */
-#view-print { display:flex; flex-direction:column; gap:1rem; }
-#view-print > .panel:first-child { order:1; }
-#props-panel                     { order:2; }
-#layers-panel                    { order:3; }
-#tpl-panel                       { order:4; }
-/* Desktop 2-column landscape: there's plenty of vertical room
- * under the design panel, so put Props in the LEFT column under
- * it. Right column carries Layers + CSV. */
+/* view-print holds two column wrappers (col-left, col-right). Each
+ * column flows independently as its own flex stack — so a tall
+ * Layers list in col-right doesn't push Props in col-left down,
+ * which the previous grid layout did. On narrow viewports both
+ * columns stack into one column via natural source order: Design,
+ * Props, Layers, CSV. */
+#view-print              { display:flex; flex-direction:column; gap:1rem; }
+#view-print > .col-left,
+#view-print > .col-right { display:flex; flex-direction:column; gap:1rem; }
 @media (min-width: 1024px) {
-  main { max-width:1280px; display:grid; grid-template-columns:minmax(0, 1fr) 360px; gap:1rem; align-items:start; }
-  /* display:contents lets the section's children participate in
-   * the parent grid directly, so we don't need an inner grid. */
-  main > #view-print               { display:contents; }
-  #view-print > .panel:first-child { grid-column:1; grid-row:1; }
-  #props-panel                     { grid-column:1; grid-row:2; }
-  /* Layers + CSV stack in column 2, in source order; if Layers is
-   * hidden CSV moves up to fill row 1. */
-  #layers-panel                    { grid-column:2; }
-  #tpl-panel                       { grid-column:2; }
-  #view-wifi, #view-settings       { grid-column:1 / -1; }
+  main { max-width:1280px; }
+  #view-print              { flex-direction:row; align-items:flex-start; }
+  #view-print > .col-left  { flex:1; min-width:0; }
+  #view-print > .col-right { flex:0 0 360px; }
 }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
@@ -70,7 +59,7 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
  * groups visually without a heavy uppercase header per group.
  * Adjacent-sibling combinator: only applies between successive
  * .group-start rows, never above the first one. */
-#view-print > .panel:first-child > .row.group-start ~ .row.group-start { padding-top:.6rem; border-top:1px solid var(--line); }
+#view-print .col-left > .panel:first-child > .row.group-start ~ .row.group-start { padding-top:.6rem; border-top:1px solid var(--line); }
 /* Pair rows — fixed 2-column grid so labels and inputs never wrap
  * onto separate lines for x/y, w/h, rotation+buttons. The first
  * column is the same width as the props-panel label gutter (below)
@@ -179,6 +168,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
     <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
   </div>
   <section id="view-print">
+   <div class="col-left">
     <div class="panel">
       <h2>Label</h2>
       <div class="canvas-viewport">
@@ -244,11 +234,6 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="print-all" class="secondary" hidden>Print all rows</button>
       </div>
       <div id="log"></div>
-    </div>
-
-    <div class="panel" id="layers-panel" hidden>
-      <h2>Layers <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;">— bottom of canvas first; drag to reorder</span></h2>
-      <ul id="el-list" style="list-style:none; padding:0; margin:0;"></ul>
     </div>
 
     <div class="panel" id="props-panel">
@@ -379,6 +364,13 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </div>
       </div>
     </div>
+   </div><!-- /col-left -->
+
+   <div class="col-right">
+    <div class="panel" id="layers-panel" hidden>
+      <h2>Layers <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;">— bottom of canvas first; drag to reorder</span></h2>
+      <ul id="el-list" style="list-style:none; padding:0; margin:0;"></ul>
+    </div>
 
     <details class="panel" id="tpl-panel">
       <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;">Template &amp; CSV data</summary>
@@ -403,6 +395,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <input id="csv-file" type="file" accept=".csv,.tsv,text/csv,text/plain,text/tab-separated-values" hidden>
       </div>
     </details>
+   </div><!-- /col-right -->
   </section>
 
   <section id="view-wifi" hidden>
