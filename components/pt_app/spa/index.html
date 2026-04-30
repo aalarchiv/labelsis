@@ -65,6 +65,12 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+/* Subtle hairline between grouped action rows inside the Label
+ * panel — separates "add", "modify", "label library", and "print"
+ * groups visually without a heavy uppercase header per group.
+ * Adjacent-sibling combinator: only applies between successive
+ * .group-start rows, never above the first one. */
+#view-print > .panel:first-child > .row.group-start ~ .row.group-start { padding-top:.6rem; border-top:1px solid var(--line); }
 /* Pair rows — fixed 2-column grid so labels and inputs never wrap
  * onto separate lines for x/y, w/h, rotation+buttons. The first
  * column is the same width as the props-panel label gutter (below)
@@ -159,7 +165,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 <header>
   <h1 id="title" title="click to toggle status">pt700</h1>
   <nav id="nav">
-    <a href="#print"    data-view="print" class="active">Print</a>
+    <a href="#print"    data-view="print" class="active">Label</a>
     <a href="#wifi"     data-view="wifi">Wi-Fi</a>
     <a href="#settings" data-view="settings">Settings</a>
   </nav>
@@ -199,23 +205,26 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <option value="c">center</option>
         </select>
       </div>
-      <div class="row" style="margin-top:.75rem">
+      <!-- Group: add tools -->
+      <div class="row group-start" style="margin-top:.75rem">
         <button id="add-text"    class="secondary" type="button">+ text</button>
         <button id="add-image"   class="secondary" type="button">+ image</button>
         <input  id="image-file"  type="file" accept="image/*" hidden>
         <button id="add-qr"      class="secondary" type="button">+ QR</button>
         <button id="add-barcode" class="secondary" type="button">+ barcode</button>
-        <span class="more-actions">
-          <button id="el-dup"      class="secondary" type="button" disabled title="Ctrl+D">duplicate</button>
-          <button id="el-delete"   class="secondary" type="button" disabled title="Del">delete</button>
-          <span style="flex:1"></span>
-          <button id="undo"        class="secondary" type="button" disabled title="Ctrl+Z">undo</button>
-          <button id="redo"        class="secondary" type="button" disabled title="Ctrl+Y">redo</button>
-        </span>
         <span style="flex:1"></span>
-        <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows">⋯</button>
+        <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows" title="show more actions">⋯</button>
       </div>
-      <div class="row more-row" style="margin-top:.5rem">
+      <!-- Group: element modifiers (collapsed on phone) -->
+      <div class="row more-row group-start" style="margin-top:.5rem">
+        <button id="el-dup"    class="secondary" type="button" disabled title="Ctrl+D">duplicate</button>
+        <button id="el-delete" class="secondary" type="button" disabled title="Del">delete</button>
+        <span style="flex:1"></span>
+        <button id="undo"      class="secondary" type="button" disabled title="Ctrl+Z">undo</button>
+        <button id="redo"      class="secondary" type="button" disabled title="Ctrl+Y">redo</button>
+      </div>
+      <!-- Group: label library / file ops (collapsed on phone) -->
+      <div class="row more-row group-start" style="margin-top:.5rem">
         <label>label</label>
         <select id="lib-select" style="max-width:160px;">
           <option value="">— load saved label —</option>
@@ -225,7 +234,8 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="lib-delete" class="secondary" type="button" disabled>delete</button>
         <button id="lib-clear"  class="secondary" type="button">new</button>
       </div>
-      <div class="row" style="margin-top:.5rem">
+      <!-- Group: print actions -->
+      <div class="row group-start" style="margin-top:.5rem">
         <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
         <label><input id="mirror"   type="checkbox"> mirror</label>
         <label><input id="chain"    type="checkbox"> chain</label>
