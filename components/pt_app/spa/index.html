@@ -3554,21 +3554,27 @@ document.getElementById("ctx-menu").addEventListener("click", ev => {
 
 /* Keyboard shortcuts: Del/Backspace removes selection, Ctrl+D
  * duplicates, Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. We
- * suppress these when an INPUT/TEXTAREA has focus so the user's
- * actual typing isn't hijacked. */
+ * suppress every shortcut when the focus is in an editable field
+ * (input/textarea/select OR a contenteditable like the CSV editor)
+ * so typing/native-undo is never hijacked. */
+function isInField(target) {
+  if (!target) return false;
+  if (target.matches && target.matches("input, textarea, select")) return true;
+  return !!target.isContentEditable;
+}
 document.addEventListener("keydown", ev => {
-  const inField = ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA";
+  const inField = isInField(ev.target);
   const ctrl = ev.ctrlKey || ev.metaKey;
   if (!inField && (ev.key === "Delete" || ev.key === "Backspace")) {
     if (selectedId != null) { ev.preventDefault(); document.getElementById("el-delete").click(); }
     return;
   }
-  if (ctrl && (ev.key === "z" || ev.key === "Z")) {
+  if (!inField && ctrl && (ev.key === "z" || ev.key === "Z")) {
     if (ev.shiftKey) { ev.preventDefault(); redo(); }
     else             { ev.preventDefault(); undo(); }
     return;
   }
-  if (ctrl && (ev.key === "y" || ev.key === "Y")) {
+  if (!inField && ctrl && (ev.key === "y" || ev.key === "Y")) {
     ev.preventDefault(); redo(); return;
   }
   if (!inField && ctrl && (ev.key === "d" || ev.key === "D")) {
