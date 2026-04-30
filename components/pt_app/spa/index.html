@@ -1059,6 +1059,11 @@ const PAD     = 24;           /* extra canvas margin so selection
                                  uses an unpadded redraw(true). */
 const PX_PER_MM = 180 / 25.4; /* PT-* print head is 180 dpi          */
 const mmToPx = mm => mm * PX_PER_MM;
+/* Soft cap on auto-extending label width — protects against
+ * sluggishness from a stray element dragged off-canvas. 2500 px
+ * ≈ 353 mm of tape, far past anything realistic. Beyond this,
+ * redraw clamps printW and shows an overflow banner. */
+const PRINT_W_MAX = 2500;
 
 /* Canvas options — persisted to localStorage. Pure UI state, never
  * sent to the printer. */
@@ -1881,12 +1886,18 @@ function redraw(forPrint = false) {
     if (b.x + b.w > maxRight) maxRight = b.x + b.w;
   }
 
-  /* Auto: expand to rightmost element. Fixed: pin to user mm. */
-  let printW;
+  /* Auto: expand to rightmost element. Fixed: pin to user mm. Hard
+   * cap at PRINT_W_MAX (~350 mm of tape at 180 dpi); beyond that the
+   * canvas paints a "label too wide" overlay so the user notices a
+   * stray element instead of just seeing a sluggish multi-thousand-
+   * pixel canvas. */
+  let printW, overflow = false;
   if (canvasOpts.labelWidthMode === "fixed") {
     printW = Math.max(20, Math.round(mmToPx(canvasOpts.labelWidthMm)));
   } else {
-    printW = Math.ceil(maxRight) + 14;
+    const wanted = Math.ceil(maxRight) + 14;
+    if (wanted > PRINT_W_MAX) overflow = true;
+    printW = Math.min(wanted, PRINT_W_MAX);
   }
 
   if (forPrint) {
@@ -1954,6 +1965,24 @@ function redraw(forPrint = false) {
   /* Rulers paint last in canvas-absolute coords, on top of the
    * gutter (covers anything that bled into the top/left bands). */
   if (canvasOpts.showRulers) drawRulers(ctx, printW, HEAD_PX);
+
+  /* Overflow banner: an element somewhere is past PRINT_W_MAX, so
+   * we clamped printW to keep the canvas usable. Paint a flag at
+   * the right edge so the user knows the label is being truncated
+   * — printing beyond the cap would just produce a blank tape
+   * since elements past it aren't rendered. */
+  if (overflow) {
+    ctx.save();
+    const x = c.width - 8, y = PAD;
+    ctx.fillStyle = "rgba(248,81,73,.92)";
+    ctx.fillRect(x - 130, y, 130, 18);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 11px sans-serif";
+    ctx.textBaseline = "top";
+    ctx.textAlign = "right";
+    ctx.fillText("⚠ label too wide — clipped", x - 4, y + 3);
+    ctx.restore();
+  }
 
   /* Run AFTER the measure pass — barcode/QR errors are populated
    * inside drawElement(), so reading them at the start of redraw
@@ -2756,12 +2785,46 @@ function snapshot() {
 /* Replace the live elements[] with a fresh deserialised set. Re-
  * creates the Image object for image elements from the stored data
  * URL; QR / barcode caches are regenerated lazily on first draw. */
+/* Default field values per element type — same as the constructors
+ * the + buttons use, minus the runtime-specific bits (id, src, etc).
+ * applyElementDefaults merges saved data on top so older sessions
+ * pick up any fields added later in the schema. Saved values always
+ * win; missing-field defaults only fill the gaps. */
+function applyElementDefaults(el) {
+  const common = {
+    rotation: 0, composite: "or",
+    scaleX: 1, scaleY: 1, aspectLocked: true,
+    x: 14, y: 0,
+  };
+  let typeDefaults = {};
+  if (el.type === "text") {
+    typeDefaults = {
+      text: "", size: 80,
+      fontFamily: "sans-serif",
+      bold: false, italic: false, underline: false, strike: false,
+    };
+  } else if (el.type === "image") {
+    typeDefaults = { h: HEAD_PX, algorithm: "atkinson", threshold: 128 };
+  } else if (el.type === "barcode") {
+    typeDefaults = { h: 60, symbology: "code128b", text: "", size: 2 };
+  } else if (el.type === "qr") {
+    typeDefaults = { text: "", ecc: "M", size: 3 };
+  } else if (el.type === "rect") {
+    typeDefaults = { w: 80, h: 40, pattern: "solid", module: 1 };
+  }
+  return { ...common, ...typeDefaults, ...el };
+}
+
 function restoreFromJSON(json) {
   const arr = JSON.parse(json);
   elements = [];
   for (const data of arr) {
-    const el = { ...data };
-    nextId = Math.max(nextId, el.id + 1);
+    /* Drop unknown types defensively — saved labels from a future
+     * schema with new element kinds shouldn't crash the older
+     * codebase trying to render them. */
+    if (!data || !["text", "image", "barcode", "qr", "rect"].includes(data.type)) continue;
+    const el = applyElementDefaults(data);
+    nextId = Math.max(nextId, (el.id | 0) + 1);
     if (el.type === "image" && el.src) {
       const img = new Image();
       img.onload  = () => { el._dithered = null; el._loadError = false; redraw(); };
