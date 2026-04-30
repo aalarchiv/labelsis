@@ -73,7 +73,7 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
   }
 }
 .panel, .panel h2, .panel p { overflow-wrap:anywhere; }
-#tpl-panel code, #csv, .csv-rows li { word-break:break-word; overflow-wrap:anywhere; }
+#tpl-panel code, #csv > div { word-break:break-word; overflow-wrap:anywhere; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 /* Inline panel header: the h2 sits next to the label-library
@@ -169,35 +169,36 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #ctx-menu button { display:block; width:100%; text-align:left; background:transparent; color:var(--fg); padding:.5rem .75rem; border-radius:3px; font-weight:normal; }
 #ctx-menu button:hover { background:rgba(88,166,255,.12); }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
-/* CSV editor: a plain textarea + a clickable row list. Header row
- * appears bold in the list, the active row gets the accent
- * background. Edits to the textarea re-parse and rebuild the list;
- * clicking a row in the list activates it (drives the canvas
- * preview without touching the textarea). Avoids the alignment
- * fragility of the previous transparent-textarea + overlay-pre
- * approach. */
+/* CSV editor: a single contenteditable div where each line renders
+ * as its own child <div>. The first child is bold (header), the
+ * line containing the caret / last clicked is highlighted (active
+ * row driving the preview). Edits go straight into the model — no
+ * separate parsed-row list to keep in sync. plaintext-only keeps
+ * pasted rich text out and gives one-div-per-line behaviour for
+ * free in Chromium-based browsers. */
 #csv {
   width:100%; box-sizing:border-box; padding:.5rem;
   background:var(--bg); color:var(--fg);
   border:1px solid var(--line); border-radius:4px;
   font:.85rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
-  resize:vertical; tab-size:4;
+  min-height: calc(1.4em * 6 + 1rem);
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre;
+  outline: none;
+  resize: vertical;
+  tab-size: 4;
 }
-.csv-rows {
-  list-style:none; padding:0; margin:.5rem 0 0;
-  display:flex; flex-direction:column; gap:.15rem;
-  font:.85rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
-  max-height:240px; overflow:auto;
+#csv:focus { border-color: var(--accent); }
+#csv > div { padding: 0 .25rem; border-radius: 3px; min-height: 1.4em; }
+#csv > div.header { font-weight: 700; }
+#csv > div.active { background: rgba(88,166,255,.18); }
+#csv.empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  white-space: pre;
+  pointer-events: none;
 }
-.csv-rows li {
-  padding:.25rem .5rem; border-radius:3px;
-  cursor:pointer; user-select:none;
-  white-space:pre; overflow:hidden; text-overflow:ellipsis;
-  background:var(--bg); border:1px solid var(--line);
-}
-.csv-rows li.header  { font-weight:700; }
-.csv-rows li.active  { background:rgba(88,166,255,.18); border-color:var(--accent); }
-.csv-rows li:hover   { border-color:var(--accent); }
 /* When there's no log message, collapse the line so it doesn't
  * leave dead space at the bottom of the Label panel. */
 #log:empty { display:none; }
@@ -524,9 +525,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <code>{$col}</code> (0-based copy within the row),
       <code>{$seq}</code> (1-based label number),
       <code>{$total}</code> (total labels in batch).</p>
-      <textarea id="csv" rows="6" placeholder="name,$copies&#10;Alice,2&#10;Bob,1"
-                spellcheck="false"></textarea>
-      <ol id="csv-rows" class="csv-rows" aria-label="parsed CSV rows"></ol>
+      <div id="csv" contenteditable="plaintext-only" spellcheck="false"
+           role="textbox" aria-multiline="true" aria-label="CSV editor"
+           data-placeholder="name,$copies&#10;Alice,2&#10;Bob,1"></div>
       <div class="row" style="margin-top:.5rem;">
         <span class="muted" id="tpl-cols">no data</span>
       </div>
@@ -2315,54 +2316,76 @@ function csvRender() {
     allBtn.textContent = "Print all rows";
     allBtn.hidden = true;
   }
-  csvRowsRender();
+  csvHighlight();
 }
 
-/* Build the clickable rows list — one <li> per non-empty CSV line.
- * Header (first row) gets .header (bold). The currently-active row
- * gets .active (accent background). Click activates the row,
- * driving the canvas preview without touching the textarea. */
-function csvRowsRender() {
-  const ul    = document.getElementById("csv-rows");
-  ul.innerHTML = "";
-  const text  = document.getElementById("csv").value;
-  const lines = text.split("\n").map(s => s.replace(/\r$/, ""));
-  /* Hide the list entirely when nothing's been typed — no point
-   * showing an empty box. */
-  ul.hidden = !text.trim();
-  if (!text.trim()) return;
+/* Paint .header on the first child line and .active on the line
+ * driving the canvas preview. Pure class flipping — never rewrites
+ * children, so the user's caret/selection survives. */
+function csvHighlight() {
+  const csv = document.getElementById("csv");
   const activeLine = csvShowHeader ? 0 : (csvCurrentRow + 1);
-  lines.forEach((line, i) => {
-    /* Skip blank tail lines so a stray trailing newline doesn't
-     * render as an empty row. */
-    if (i === lines.length - 1 && line === "") return;
-    const li = document.createElement("li");
-    li.textContent = line || " ";   /* non-breaking space keeps height */
-    if (i === 0)            li.classList.add("header");
-    if (i === activeLine)   li.classList.add("active");
-    li.addEventListener("click", () => {
-      const n = csvData.data.length;
-      if (i === 0 && csvData.headers.length) {
-        csvShowHeader = true;
-      } else if (n) {
-        csvShowHeader = false;
-        csvCurrentRow = Math.min(Math.max(0, i - 1), n - 1);
-      } else {
-        return;
-      }
-      csvRender();
-      redraw();
-    });
-    ul.appendChild(li);
-  });
+  const kids = csv.children;
+  for (let i = 0; i < kids.length; i++) {
+    kids[i].classList.toggle("header", i === 0 && csvData.headers.length > 0);
+    kids[i].classList.toggle("active", i === activeLine);
+  }
 }
+
+/* Read / write the CSV editor as plain text. innerText preserves the
+ * line breaks the browser inserts as <div> children in plaintext-only
+ * contenteditables, while textContent would mash them together. */
+function csvText() {
+  const csv = document.getElementById("csv");
+  if (!csv.firstChild) return "";
+  return csv.innerText.replace(/\r\n/g, "\n").replace(/\n$/, "");
+}
+
+function csvSetText(text) {
+  const csv = document.getElementById("csv");
+  csv.innerHTML = "";
+  if (text) {
+    for (const line of text.split(/\r?\n/)) {
+      const div = document.createElement("div");
+      if (line) div.textContent = line;
+      else      div.appendChild(document.createElement("br"));
+      csv.appendChild(div);
+    }
+  }
+  csvUpdateEmptyClass();
+}
+
+function csvUpdateEmptyClass() {
+  const csv = document.getElementById("csv");
+  csv.classList.toggle("empty", !csvText().trim());
+}
+
+/* Wrap any orphan text/<br> nodes that Chrome can leave at the top
+ * level when typing into an empty contenteditable, so the per-line
+ * styling rules consistently apply. Called from the input listener. */
+function csvNormalize() {
+  const csv = document.getElementById("csv");
+  const orphans = [];
+  for (const n of Array.from(csv.childNodes)) {
+    if (n.nodeType === Node.TEXT_NODE || n.nodeName === "BR") orphans.push(n);
+    else break;
+  }
+  if (orphans.length) {
+    const div = document.createElement("div");
+    for (const n of orphans) div.appendChild(n);
+    csv.insertBefore(div, csv.firstChild);
+  }
+}
+
 
 function escapeHtml(s) {
   return s.replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
 }
 
 function csvUpdate() {
-  const text = document.getElementById("csv").value;
+  csvNormalize();
+  csvUpdateEmptyClass();
+  const text = csvText();
   csvData = text.trim() ? parseCSV(text) : { headers: [], data: [] };
   if (csvCurrentRow >= csvData.data.length) csvCurrentRow = 0;
   /* If there's no data, header preview is the only meaningful
@@ -3594,15 +3617,50 @@ document.getElementById("props-panel").addEventListener("focusout", () => {
 });
 document.getElementById("print").addEventListener("click", doPrint);
 document.getElementById("print-all").addEventListener("click", doPrintAll);
-/* Textarea edits drive both the parsed model (parseCSV → csvData)
- * and the rows list below. Row activation is driven entirely by
- * clicking items in #csv-rows — the textarea stays a plain editor
- * with native caret behaviour. */
-document.getElementById("csv").addEventListener("input", csvUpdate);
+/* The contenteditable IS the rows list — typing updates the parsed
+ * model (csvData) and re-paints .header / .active classes. Click to
+ * position the caret in a row also activates it (drives the canvas
+ * preview without rebuilding the editor's DOM). */
+(function wireCsvEditor() {
+  const csv = document.getElementById("csv");
+  /* Activate whichever row holds the caret. Pure model update +
+   * class flip, never rewrites the editor's children, so the
+   * caret/selection survive. */
+  function activateFromCaret() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    let node = sel.anchorNode;
+    if (!node || !csv.contains(node)) return;
+    while (node && node.parentNode !== csv) node = node.parentNode;
+    if (!node) return;
+    const i = Array.from(csv.children).indexOf(node);
+    if (i < 0) return;
+    const n = csvData.data.length;
+    if (i === 0 && csvData.headers.length) {
+      csvShowHeader = true;
+    } else if (n) {
+      csvShowHeader = false;
+      csvCurrentRow = Math.min(Math.max(0, i - 1), n - 1);
+    } else {
+      return;
+    }
+    csvRender();
+    redraw();
+  }
+  csv.addEventListener("input",   () => { csvUpdate(); activateFromCaret(); });
+  /* requestAnimationFrame defers until after the browser has placed
+   * the caret at the click point — selection isn't updated yet at
+   * the time the click handler fires synchronously. */
+  csv.addEventListener("click",   () => requestAnimationFrame(activateFromCaret));
+  csv.addEventListener("keyup",   (e) => {
+    if (/^Arrow|^Page|^Home|^End/.test(e.key)) activateFromCaret();
+  });
+  csvSetText("");
+})();
 document.getElementById("tpl-prev").addEventListener("click", () => csvCycle(-1));
 document.getElementById("tpl-next").addEventListener("click", () => csvCycle(+1));
 
-/* CSV import/export — file <-> textarea round-trip. */
+/* CSV import/export — file <-> contenteditable round-trip. */
 document.getElementById("csv-import").addEventListener("click", () => {
   document.getElementById("csv-file").click();
 });
@@ -3610,12 +3668,12 @@ document.getElementById("csv-file").addEventListener("change", async e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
   const text = await f.text();
-  document.getElementById("csv").value = text;
+  csvSetText(text);
   csvUpdate();
   e.target.value = "";  /* allow re-importing the same filename */
 });
 document.getElementById("csv-export").addEventListener("click", () => {
-  const text = document.getElementById("csv").value;
+  const text = csvText();
   if (!text.trim()) return;
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const a = document.createElement("a");
@@ -3626,8 +3684,8 @@ document.getElementById("csv-export").addEventListener("click", () => {
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 0);
 });
 document.getElementById("csv-clear").addEventListener("click", () => {
-  if (document.getElementById("csv").value && !confirm("clear all CSV data?")) return;
-  document.getElementById("csv").value = "";
+  if (csvText() && !confirm("clear all CSV data?")) return;
+  csvSetText("");
   csvUpdate();
 });
 
