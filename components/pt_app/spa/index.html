@@ -37,6 +37,7 @@ input[type=range] { flex:1; }
 button { background:var(--accent); color:#fff; border:0; border-radius:4px; padding:.6rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
 button:disabled { background:var(--muted); cursor:not-allowed; }
 button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+button.secondary[aria-pressed="true"], button.secondary.toggled { background:var(--accent); color:var(--bg); }
 .canvas-viewport { position:relative; overflow:hidden; max-width:100%; touch-action:none; border:1px solid var(--line); border-radius:4px; background:#fff; }
 canvas { display:block; image-rendering:pixelated; background:#fff; }
 #el-list .grip { touch-action:none; }
@@ -278,6 +279,11 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <span class="muted">°</span>
           <button id="rot-cw"  class="secondary" type="button">+90°</button>
           <button id="rot-ccw" class="secondary" type="button">-90°</button>
+        </div>
+        <div class="row" style="margin-bottom:.5rem">
+          <label>flip</label>
+          <button id="flip-h" class="secondary" type="button" aria-pressed="false" title="mirror left-right">↔ horizontal</button>
+          <button id="flip-v" class="secondary" type="button" aria-pressed="false" title="mirror top-bottom">↕ vertical</button>
         </div>
         <div class="row">
           <label>blend</label>
@@ -921,6 +927,11 @@ function drawElement(ctx, el) {
   ctx.translate(el.x + w / 2, el.y + h / 2);
   const rot = (el.rotation || 0) * Math.PI / 180;
   if (rot) ctx.rotate(rot);
+  /* Flip about the element centre. Applied AFTER rotate so the
+   * geometric flip happens in the rotated frame — visually this
+   * matches what users expect from "mirror left-right" / "mirror
+   * top-bottom" buttons in vector tools. */
+  if (el.flipH || el.flipV) ctx.scale(el.flipH ? -1 : 1, el.flipV ? -1 : 1);
   ctx.translate(-w / 2, -h / 2);
 
   const op = el.composite || "and";
@@ -1840,6 +1851,12 @@ function syncPropsPanel() {
   if (el) {
     document.getElementById("el-rotation").value  = el.rotation  || 0;
     document.getElementById("el-composite").value = el.composite || "and";
+    const $fh = document.getElementById("flip-h");
+    const $fv = document.getElementById("flip-v");
+    $fh.setAttribute("aria-pressed", el.flipH ? "true" : "false");
+    $fv.setAttribute("aria-pressed", el.flipV ? "true" : "false");
+    $fh.classList.toggle("toggled", !!el.flipH);
+    $fv.classList.toggle("toggled", !!el.flipV);
   }
   if (el && el.type === "text") {
     document.getElementById("text").value = el.text;
@@ -1943,6 +1960,18 @@ function rotateBy(delta) {
 }
 document.getElementById("rot-cw").addEventListener("click",  () => rotateBy(+90));
 document.getElementById("rot-ccw").addEventListener("click", () => rotateBy(-90));
+
+function flipBy(axis) {
+  const el = elementById(selectedId);
+  if (!el) return;
+  pushUndo();
+  if (axis === "h") el.flipH = !el.flipH;
+  if (axis === "v") el.flipV = !el.flipV;
+  syncPropsPanel();
+  redraw();
+}
+document.getElementById("flip-h").addEventListener("click", () => flipBy("h"));
+document.getElementById("flip-v").addEventListener("click", () => flipBy("v"));
 
 function rightmostX() {
   let r = 14;
