@@ -50,26 +50,26 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 #view-settings:not([hidden]) { display:flex; flex-direction:column; gap:1rem; }
 #view-print > .col-left,
 #view-print > .col-right { display:flex; flex-direction:column; gap:1rem; }
-@media (min-width: 1024px) {
+/* 2-column layout kicks in at >= 900 px so tablet-landscape
+ * (~1024×768, ~1180×820) and small desktops both get the side-by-
+ * side view. Below that, columns stack via natural source order:
+ * Design → Props → Layers → CSV. */
+@media (min-width: 900px) {
   main { max-width:1280px; }
   #view-print:not([hidden])              { flex-direction:row; align-items:flex-start; }
-  #view-print > .col-left  { flex:1; min-width:0; }
-  /* Right column grows with the viewport — clamped so it stays
-   * usable on small desktops (>=320 px) but isn't a thin sliver on
-   * wide ones (up to 600 px). The user can also drag the lower-
-   * right corner to widen / narrow it manually (CSS resize:both).
-   * align-self:stretch matches the left column's height so the
-   * resize grip sits next to the bottom of the visible column. */
+  #view-print > .col-left  { flex:1 1 0;        min-width:0; }
+  /* Right column shares the viewport with col-left. flex-basis is
+   * a clamp() so it stays usable on small landscape tablets
+   * (>=300 px) but doesn't hog space on wide screens (up to
+   * ~520 px). flex:0 1 lets the basis shrink under pressure
+   * (very narrow desktops), while min-width:0 prevents min-content
+   * sizing of the textarea from inflating the column. No internal
+   * overflow / resize — the column grows with its content and
+   * the page itself scrolls if everything together is taller than
+   * the viewport. */
   #view-print > .col-right {
-    flex: 0 0 clamp(320px, 36%, 600px);
+    flex: 0 1 clamp(300px, 32%, 520px);
     min-width: 0;
-    resize: horizontal;
-    overflow: auto;
-    /* The CSS resize handle is a 16 px grip in the bottom-right
-     * corner. Without min-content padding the column has no extra
-     * room for the grip; padding-bottom gives it a few px so the
-     * grip doesn't sit on top of the last panel's border. */
-    padding-bottom: .25rem;
   }
 }
 .panel, .panel h2, .panel p { overflow-wrap:anywhere; }
