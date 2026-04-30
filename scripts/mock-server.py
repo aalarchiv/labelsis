@@ -161,6 +161,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_file(os.path.join(SPA_DIR, "i18n", name), "application/json")
             return
 
+        if path == "/fonts/bootstrap-icons.woff2":
+            self._send_file(os.path.join(SPA_DIR, "fonts", "bootstrap-icons.woff2"),
+                            "font/woff2")
+            return
+
+        if path == "/fonts/bootstrap-icons.json":
+            self._send_file(os.path.join(SPA_DIR, "fonts", "bootstrap-icons.json"),
+                            "application/json")
+            return
+
         if path == "/api/status":
             self._send_json(200, {**STATE, "ok": True})
             return

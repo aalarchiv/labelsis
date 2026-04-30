@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>pt700</title>
 <style>
+/* Bootstrap Icons v1.13.1 (MIT, https://icons.getbootstrap.com/).
+ * Used for the icon element + picker. Renamed family to "bi" so
+ * canvas ctx.font doesn't have to escape the dash. font-display:
+ * block holds short to avoid an icon flash; the picker awaits
+ * document.fonts.ready before rendering. */
+@font-face {
+  font-family: "bi";
+  src: url("/fonts/bootstrap-icons.woff2") format("woff2");
+  font-display: block;
+}
 :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --err:#f85149; --panel:#161b22; --line:#30363d; }
 @media (prefers-color-scheme: light) {
   :root { --bg:#ffffff; --fg:#1f2328; --muted:#57606a; --accent:#0969da; --ok:#1a7f37; --err:#cf222e; --panel:#f6f8fa; --line:#d1d9e0; }
@@ -162,6 +172,37 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
 .font-row:hover, .font-row.selected { background:rgba(88,166,255,.12); }
 .font-row .name   { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
 .font-row .sample { color:var(--muted); white-space:nowrap; flex:0 0 auto; }
+/* Icon picker — modal <dialog> with a search field + scrollable
+ * grid of all 2078 Bootstrap Icons. Tiles use the bi font directly
+ * (no per-icon CSS class). Filter is plain string-contains on the
+ * icon name. */
+#icon-picker            { width:min(560px, 92vw); max-height:80vh; padding:1rem; }
+#icon-picker form       { display:flex; flex-direction:column; gap:.75rem; min-height:0; }
+#icon-picker input      { width:100%; box-sizing:border-box; }
+#icon-picker .grid      {
+  flex:1; min-height:0; overflow:auto;
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(48px, 1fr));
+  gap:.25rem;
+}
+#icon-picker .tile      {
+  font-family:"bi"; font-size:24px;
+  display:flex; align-items:center; justify-content:center;
+  aspect-ratio:1; border:1px solid transparent; border-radius:4px;
+  background:transparent; color:var(--fg); cursor:pointer;
+}
+#icon-picker .tile:hover, #icon-picker .tile.selected {
+  background:rgba(88,166,255,.12); border-color:var(--accent);
+}
+#icon-picker .footer    { display:flex; justify-content:space-between; align-items:center; gap:.5rem; }
+#icon-picker .count     { color:var(--muted); font-size:.85rem; }
+/* Inline preview in the props panel — shows the chosen icon glyph
+ * next to the "change…" button. */
+.icon-preview {
+  font-family:"bi"; font-size:1.5rem; line-height:1;
+  display:inline-flex; align-items:center; justify-content:center;
+  width:2rem; height:2rem;
+  border:1px solid var(--line); border-radius:4px; background:var(--bg);
+}
 /* Text style toggles render their own state in the glyph (B in
  * bold, I in italic, etc.) so users can preview without trying. */
 .text-style       { min-width:38px; text-align:center; padding:.5rem .6rem; }
@@ -347,6 +388,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="add-qr"      class="secondary" type="button" data-i18n="btn.add.qr">+ QR</button>
         <button id="add-barcode" class="secondary" type="button" data-i18n="btn.add.barcode">+ barcode</button>
         <button id="add-rect"    class="secondary" type="button" data-i18n="btn.add.rect">+ rect</button>
+        <button id="add-icon"    class="secondary" type="button" data-i18n="btn.add.icon">+ icon</button>
         <span class="spacer"></span>
         <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows" aria-label="show more actions" data-i18n-attr="title:btn.more" title="show more actions">⋯</button>
       </div>
@@ -481,6 +523,26 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </div>
       </div>
 
+      <div id="props-icon" hidden>
+        <div class="row">
+          <label data-i18n="field.icon">icon</label>
+          <span id="icon-preview" class="icon-preview" aria-hidden="true"></span>
+          <span id="icon-name" class="muted" style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+          <button id="icon-pick" class="secondary" type="button" data-i18n="btn.icon.change">change…</button>
+        </div>
+        <div class="row">
+          <label data-i18n="field.icon.size">size</label>
+          <input id="icon-size" type="number" min="4" max="500" step="1" class="compact-input">
+          <span class="muted">px</span>
+        </div>
+        <div class="row pair">
+          <label data-i18n="field.x">x</label>
+          <input id="icon-x" type="number">
+          <label data-i18n="field.y">y</label>
+          <input id="icon-y" type="number">
+        </div>
+      </div>
+
       <div id="props-image" hidden>
         <div class="row">
           <label data-i18n="field.algorithm">algorithm</label>
@@ -610,6 +672,19 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
     </form>
   </dialog>
 
+  <dialog id="icon-picker">
+    <form method="dialog">
+      <h3 style="margin:0 0 .5rem;" data-i18n="dialog.icon.title">Pick an icon</h3>
+      <input id="icon-search" type="search" placeholder="search…" data-i18n-attr="placeholder:dialog.icon.search" autocomplete="off">
+      <div id="icon-grid" class="grid" role="listbox" aria-label="icon grid"></div>
+      <div class="footer">
+        <span class="count" id="icon-count">—</span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="secondary" type="button" id="icon-cancel" data-i18n="btn.cancel">cancel</button>
+      </div>
+    </form>
+  </dialog>
+
   <section id="view-settings" hidden>
     <div class="panel">
       <h2 data-i18n="panel.wifi">Wi-Fi</h2>
@@ -723,6 +798,13 @@ const STRINGS = {
     "props.title.barcode":     "Barcode",
     "props.title.qr":          "QR",
     "props.title.rect":        "Rectangle",
+    "props.title.icon":        "Icon",
+    "field.icon":              "icon",
+    "field.icon.size":         "size",
+    "btn.icon.change":         "change…",
+    "btn.cancel":              "cancel",
+    "dialog.icon.title":       "Pick an icon",
+    "dialog.icon.search":      "search…",
     "field.fill":              "fill",
     "field.fill.solid":        "solid",
     "field.fill.hatch":        "hatch /",
@@ -743,6 +825,7 @@ const STRINGS = {
     "btn.add.qr":              "+ QR",
     "btn.add.barcode":         "+ barcode",
     "btn.add.rect":            "+ rect",
+    "btn.add.icon":            "+ icon",
     "btn.duplicate":           "duplicate",
     "btn.delete":              "delete",
     "btn.undo":                "undo",
@@ -1653,6 +1736,119 @@ function drawRect(ctx, el) {
   ctx.drawImage(scratch, 0, 0);
 }
 
+/* --- icon element ------------------------------------------------
+ *
+ * A single Bootstrap-Icons glyph rendered through canvas's font
+ * subsystem. The element stores the icon NAME (e.g., "alarm-fill")
+ * — the codepoint is looked up at render time from the lazily-
+ * fetched bootstrap-icons.json. icon.size controls the glyph height
+ * in print-px the same way as text.size; corner-drag scaling still
+ * works. Because the glyph paints solid black through fillStyle, it
+ * thresholds to clean ink in the print pass. */
+
+/* Restrict the picker to a subset of the font by codepoint range.
+ * Empty array = no filter (all 2078 icons in v1.13.1). Each entry
+ * is [start, end] inclusive in hex. The font + JSON still ship
+ * every glyph; this only narrows what shows up in the picker grid
+ * and what the catalog exposes via ICON_NAMES_LIST. Render-time
+ * lookup is unfiltered so an element saved with an icon outside
+ * the current range still draws correctly.
+ *
+ * Bootstrap Icons lives in U+F000–U+F8FF (private-use area). To
+ * trim the picker to a curated subset, drop ranges in here:
+ *
+ *   const ICON_RANGES = [[0xF100, 0xF1FF]];   // ~256 icons
+ *   const ICON_RANGES = [[0xF400, 0xF4FF],    // alarms + alerts
+ *                        [0xF600, 0xF6FF]];   // tools + symbols
+ *
+ * Or pick by family with a name regex via ICON_NAME_FILTER below.
+ */
+const ICON_RANGES      = [];    /* empty = all icons */
+const ICON_NAME_FILTER = null;  /* RegExp | null — additional name */
+                                /* match (e.g. /-fill$/ for the   */
+                                /* filled variants only)          */
+
+function iconAllowed(name, codepoint) {
+  if (ICON_RANGES.length) {
+    let inRange = false;
+    for (const [a, b] of ICON_RANGES) {
+      if (codepoint >= a && codepoint <= b) { inRange = true; break; }
+    }
+    if (!inRange) return false;
+  }
+  if (ICON_NAME_FILTER && !ICON_NAME_FILTER.test(name)) return false;
+  return true;
+}
+
+let ICON_CODEPOINTS = null;     /* lazy-loaded {name: int} map */
+let ICON_NAMES_LIST = null;     /* names allowed by ICON_RANGES / NAME_FILTER */
+let _iconLoadPromise = null;
+
+function loadIconCatalog() {
+  if (ICON_CODEPOINTS) return Promise.resolve(ICON_CODEPOINTS);
+  if (_iconLoadPromise) return _iconLoadPromise;
+  _iconLoadPromise = (async () => {
+    const r    = await fetch(apiURL("/fonts/bootstrap-icons.json"));
+    const data = await r.json();
+    ICON_CODEPOINTS = data;
+    ICON_NAMES_LIST = Object.entries(data)
+      .filter(([n, cp]) => iconAllowed(n, cp))
+      .map(([n]) => n)
+      .sort();
+    /* Now that the codepoint table exists, re-sync the props panel
+     * (so the preview glyph + name show up if the user added an icon
+     * before the JSON arrived) and redraw any on-canvas placeholders. */
+    if (typeof syncPropsPanel === "function") syncPropsPanel();
+    if (typeof renderLayerList === "function") renderLayerList();
+    if (typeof redraw === "function") redraw();
+    return data;
+  })();
+  return _iconLoadPromise;
+}
+
+function defaultIcon() {
+  return { id: nextId++, type: "icon", x: 14, y: 0, rotation: 0, composite: "or",
+           scaleX: 1, scaleY: 1, aspectLocked: true,
+           icon: "star", size: 80 };
+}
+
+function iconCodepoint(name) {
+  if (ICON_CODEPOINTS && ICON_CODEPOINTS[name] != null) return ICON_CODEPOINTS[name];
+  return null;
+}
+
+function measureIcon(ctx, el) {
+  const cp = iconCodepoint(el.icon);
+  /* Catalog still loading? Reserve a placeholder square so the
+   * element has bounds + position; first draw after the JSON
+   * arrives re-measures at the right width. */
+  if (cp == null) {
+    el._w = el._h = el.size | 0;
+    return;
+  }
+  ctx.font = `${el.size | 0}px bi`;
+  el._w = Math.ceil(ctx.measureText(String.fromCodePoint(cp)).width);
+  el._h = Math.max(1, el.size | 0);
+}
+
+function drawIcon(ctx, el) {
+  const cp = iconCodepoint(el.icon);
+  if (cp == null) {
+    /* Placeholder square while the catalog is still loading. */
+    ctx.strokeStyle = "#888";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, (el._baseW || el.size) - 1, (el._baseH || el.size) - 1);
+    /* Kick off / await the load and redraw once it lands. */
+    loadIconCatalog().then(() => redraw());
+    return;
+  }
+  ctx.font = `${el.size | 0}px bi`;
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#000";
+  ctx.fillText(String.fromCodePoint(cp), 0, 0);
+}
+
 /* Measure first (writes _w/_h), then translate to the element's
  * centre, rotate, translate back to origin, paint. Centre-pivot is
  * the natural "rotate in place" UX — and crucially it makes
@@ -1664,6 +1860,7 @@ function measureElement(ctx, el) {
   if (el.type === "barcode") measureBarcode(ctx, el);
   if (el.type === "qr")      measureQR(ctx, el);
   if (el.type === "rect")    measureRect(ctx, el);
+  if (el.type === "icon")    measureIcon(ctx, el);
   /* Type-specific measure writes intrinsic size to _w/_h. Save those
    * as base, then apply scale to get the visible bounds the rest of
    * the code (hit-test, bounds, handles) operates on. */
@@ -1738,6 +1935,7 @@ function drawElement(ctx, el) {
   if (el.type === "barcode") drawBarcode(ctx, el);
   if (el.type === "qr")      drawQR(ctx, el);
   if (el.type === "rect")    drawRect(ctx, el);
+  if (el.type === "icon")    drawIcon(ctx, el);
   ctx.restore();
 }
 
@@ -2811,6 +3009,8 @@ function applyElementDefaults(el) {
     typeDefaults = { text: "", ecc: "M", size: 3 };
   } else if (el.type === "rect") {
     typeDefaults = { w: 80, h: 40, pattern: "solid", module: 1 };
+  } else if (el.type === "icon") {
+    typeDefaults = { icon: "star", size: 80 };
   }
   return { ...common, ...typeDefaults, ...el };
 }
@@ -3099,6 +3299,7 @@ function summarise(el) {
   if (el.type === "barcode") return el.text;
   if (el.type === "qr")      return el.text;
   if (el.type === "rect")    return `${el.w}×${el.h} ${el.pattern || "solid"}${el.module > 1 ? ` ×${el.module}` : ""}`;
+  if (el.type === "icon")    return `${el.icon} ${el.size}px`;
   return "";
 }
 
@@ -3214,6 +3415,7 @@ function syncPropsPanel() {
   document.getElementById("props-barcode").hidden   = !el || el.type !== "barcode";
   document.getElementById("props-qr").hidden        = !el || el.type !== "qr";
   document.getElementById("props-rect").hidden      = !el || el.type !== "rect";
+  document.getElementById("props-icon").hidden      = !el || el.type !== "icon";
   document.getElementById("props-transform").hidden = !el;
   /* Title reflects the selected element's type so users get a
    * one-glance reminder of what they're editing. */
@@ -3322,6 +3524,18 @@ function syncPropsPanel() {
       Math.max(1, Math.round((el.module || 1) * (el.scaleX ?? 1)));
     document.getElementById("rect-x").value       = Math.round(el.x);
     document.getElementById("rect-y").value       = Math.round(el.y);
+  } else if (el && el.type === "icon") {
+    document.getElementById("icon-name").textContent = el.icon;
+    document.getElementById("icon-size").value =
+      Math.max(1, Math.round((el.size || 0) * (el.scaleY ?? 1)));
+    document.getElementById("icon-x").value    = Math.round(el.x);
+    document.getElementById("icon-y").value    = Math.round(el.y);
+    /* Render the live preview using the bi font + the icon name as
+     * a CSS class would, but cheaper: just drop the codepoint glyph
+     * into the span and let .icon-preview's font-family handle it. */
+    const cp = iconCodepoint(el.icon);
+    document.getElementById("icon-preview").textContent =
+      cp != null ? String.fromCodePoint(cp) : "?";
   }
 }
 
@@ -3408,6 +3622,8 @@ bindPropInput("qr-y",          "y",         v => parseInt(v, 10) || 0);
 bindPropInput("rect-pattern",  "pattern");
 bindPropInput("rect-x",        "x",         v => parseInt(v, 10) || 0);
 bindPropInput("rect-y",        "y",         v => parseInt(v, 10) || 0);
+bindPropInput("icon-x",        "x",         v => parseInt(v, 10) || 0);
+bindPropInput("icon-y",        "y",         v => parseInt(v, 10) || 0);
 
 /* Dimension inputs that should read the EFFECTIVE printed size
  * (intrinsic × scale). Editing one sets the intrinsic field to the
@@ -3443,6 +3659,7 @@ bindDimensionInput("bc-h",        "barcode", "h",      v => Math.max(16, Math.mi
 bindDimensionInput("bc-size",     "barcode", "size",   v => Math.max(1,  Math.min(6,   parseInt(v, 10) || 1)));
 bindDimensionInput("qr-size",     "qr",      "size",   v => Math.max(1,  Math.min(6,   parseInt(v, 10) || 1)));
 bindDimensionInput("rect-module", "rect",    "module", v => Math.max(1,  Math.min(8,   parseInt(v, 10) || 1)));
+bindDimensionInput("icon-size",   "icon",    "size",   v => Math.max(4,  Math.min(500, parseInt(v, 10) || 4)));
 bindPropInput("el-composite", "composite");
 bindPropInput("el-rotation",  "rotation",   v => {
   /* Normalise to (-180, 180] so the input doesn't drift. */
@@ -3655,6 +3872,18 @@ document.getElementById("add-rect").addEventListener("click", () => {
   selectElement(el.id);
 });
 
+document.getElementById("add-icon").addEventListener("click", () => {
+  /* Pre-fetch the catalog so the picker is ready by the time the
+   * user clicks "change…". The element's first draw also kicks
+   * a load if needed. */
+  loadIconCatalog();
+  pushUndo();
+  const el = defaultIcon();
+  el.x = rightmostX();
+  elements.push(el);
+  selectElement(el.id);
+});
+
 document.getElementById("image-file").addEventListener("change", async e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
@@ -3708,6 +3937,80 @@ document.getElementById("lib-save").addEventListener("click", () => {
   input.focus();
   input.select();
 });
+
+/* Icon picker dialog. Opens from the props-icon "change…" button.
+ * The grid is rendered once on first open (post-catalog-fetch) and
+ * filtered by the search input on every keystroke. Clicking a tile
+ * commits the choice and closes the dialog. */
+(function wireIconPicker() {
+  const dialog = document.getElementById("icon-picker");
+  const search = document.getElementById("icon-search");
+  const grid   = document.getElementById("icon-grid");
+  const count  = document.getElementById("icon-count");
+  const cancel = document.getElementById("icon-cancel");
+  let pending  = false;     /* already opening — coalesce double clicks */
+
+  function renderGrid(filter) {
+    if (!ICON_NAMES_LIST) return;
+    const f = (filter || "").trim().toLowerCase();
+    grid.innerHTML = "";
+    let n = 0;
+    const frag = document.createDocumentFragment();
+    for (const name of ICON_NAMES_LIST) {
+      if (f && !name.toLowerCase().includes(f)) continue;
+      const cp = ICON_CODEPOINTS[name];
+      const b  = document.createElement("button");
+      b.type   = "button";
+      b.className = "tile";
+      b.dataset.name = name;
+      b.title  = name;
+      b.setAttribute("aria-label", name);
+      b.textContent = String.fromCodePoint(cp);
+      frag.appendChild(b);
+      n++;
+    }
+    grid.appendChild(frag);
+    count.textContent = `${n} icon${n === 1 ? "" : "s"}`;
+  }
+
+  document.getElementById("icon-pick").addEventListener("click", async () => {
+    if (pending) return;
+    pending = true;
+    try {
+      await loadIconCatalog();
+      await (document.fonts && document.fonts.ready);
+      const el = elementById(selectedId);
+      search.value = "";
+      renderGrid("");
+      dialog.showModal();
+      search.focus();
+      /* Highlight the currently-selected icon so the user can see
+       * what they've got picked. */
+      if (el && el.icon) {
+        const cur = grid.querySelector(`[data-name="${el.icon}"]`);
+        if (cur) {
+          cur.classList.add("selected");
+          cur.scrollIntoView({ block: "center" });
+        }
+      }
+    } finally { pending = false; }
+  });
+  search.addEventListener("input", () => renderGrid(search.value));
+  grid.addEventListener("click", ev => {
+    const tile = ev.target.closest(".tile");
+    if (!tile) return;
+    const name = tile.dataset.name;
+    const el = elementById(selectedId);
+    if (!el || el.type !== "icon") { dialog.close(); return; }
+    pushUndo();
+    el.icon = name;
+    syncPropsPanel();
+    renderLayerList();
+    redraw();
+    dialog.close("ok");
+  });
+  cancel.addEventListener("click", () => dialog.close("cancel"));
+})();
 document.getElementById("lib-save-cancel").addEventListener("click", () => {
   document.getElementById("lib-save-dialog").close("cancel");
 });

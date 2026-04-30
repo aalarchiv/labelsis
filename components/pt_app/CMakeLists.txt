@@ -13,4 +13,8 @@ idf_component_register(
         mdns
         esp_driver_gpio
     EMBED_TXTFILES "spa/index.html" "spa/setup.html" "spa/qrcode.min.js"
+    # Bootstrap Icons v1.13.1 (MIT, https://icons.getbootstrap.com/) —
+    # binary woff2 (~130 KB) + name->codepoint JSON for the picker.
+    EMBED_FILES    "spa/fonts/bootstrap-icons.woff2"
+                   "spa/fonts/bootstrap-icons.json"
 )

@@ -677,6 +677,14 @@ extern const char index_html_end[]   asm("_binary_index_html_end");
 extern const char qrcode_js_start[] asm("_binary_qrcode_min_js_start");
 extern const char qrcode_js_end[]   asm("_binary_qrcode_min_js_end");
 
+/* Bootstrap Icons font (woff2, ~130 KB) + name→codepoint table
+ * (JSON, ~52 KB). MIT-licensed, https://icons.getbootstrap.com/.
+ * Used by the SPA's icon element + picker. */
+extern const uint8_t icon_woff2_start[] asm("_binary_bootstrap_icons_woff2_start");
+extern const uint8_t icon_woff2_end[]   asm("_binary_bootstrap_icons_woff2_end");
+extern const uint8_t icon_json_start[]  asm("_binary_bootstrap_icons_json_start");
+extern const uint8_t icon_json_end[]    asm("_binary_bootstrap_icons_json_end");
+
 static esp_err_t api_index(httpd_req_t *req)
 {
     cors_headers(req);
@@ -691,6 +699,26 @@ static esp_err_t api_qrcode_js(httpd_req_t *req)
     httpd_resp_set_type(req, "application/javascript");
     return httpd_resp_send(req, qrcode_js_start,
                            qrcode_js_end - qrcode_js_start);
+}
+
+static esp_err_t api_icon_woff2(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_type(req, "font/woff2");
+    /* font assets are immutable; long Cache-Control lets the browser
+     * skip re-downloading the 130 KB blob on every page reload. */
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=31536000, immutable");
+    return httpd_resp_send(req, (const char *)icon_woff2_start,
+                           icon_woff2_end - icon_woff2_start);
+}
+
+static esp_err_t api_icon_json(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=31536000, immutable");
+    return httpd_resp_send(req, (const char *)icon_json_start,
+                           icon_json_end - icon_json_start);
 }
 
 static httpd_handle_t s_http;
@@ -751,6 +779,14 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/qrcode.min.js", .method = HTTP_GET,
         .handler = api_qrcode_js, .user_ctx = NULL,
     };
+    static const httpd_uri_t icon_woff2_route = {
+        .uri = "/fonts/bootstrap-icons.woff2", .method = HTTP_GET,
+        .handler = api_icon_woff2, .user_ctx = NULL,
+    };
+    static const httpd_uri_t icon_json_route = {
+        .uri = "/fonts/bootstrap-icons.json", .method = HTTP_GET,
+        .handler = api_icon_json, .user_ctx = NULL,
+    };
     static const httpd_uri_t cors_route = {
         .uri = "/*", .method = HTTP_OPTIONS,
         .handler = cors_preflight, .user_ctx = NULL,
@@ -764,6 +800,8 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &setup_route);
     httpd_register_uri_handler(s_http, &index_route);
     httpd_register_uri_handler(s_http, &qrcode_route);
+    httpd_register_uri_handler(s_http, &icon_woff2_route);
+    httpd_register_uri_handler(s_http, &icon_json_route);
     httpd_register_uri_handler(s_http, &cors_route);
     return ESP_OK;
 }
