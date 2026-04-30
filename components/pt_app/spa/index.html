@@ -28,11 +28,30 @@ nav a:hover { color:var(--fg); }
 .burger { display:none; background:transparent; border:0; cursor:pointer; padding:.4rem; margin-left:auto; }
 .burger span { display:block; width:22px; height:2px; background:var(--fg); margin:4px 0; border-radius:1px; }
 main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-direction:column; gap:1rem; }
+/* Desktop 2-column: canvas/print panel on the left, Element + Layers
+ * + CSV stacked on the right. The print panel naturally wants the
+ * extra width (canvas grows); the side rail keeps a comfortable
+ * reading width for the form. */
+@media (min-width: 1024px) {
+  main { max-width:1280px; display:grid; grid-template-columns:minmax(0, 1fr) 360px; gap:1rem; align-items:start; }
+  main > #view-print > .panel:first-child { grid-column:1; }
+  main > #view-print               { display:contents; }
+  #layers-panel, #props-panel, #tpl-panel { grid-column:2; }
+  /* The first panel inside #view-print (the Label panel) goes into
+   * column 1; subsequent panels into column 2. Rest of views (Wi-Fi,
+   * Settings) span both columns when active. */
+  #view-print > .panel:nth-child(n+2) { grid-column:2; }
+  #view-wifi, #view-settings { grid-column:1 / -1; }
+}
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+/* Pair rows — fixed 2-column grid so labels and inputs never wrap
+ * onto separate lines for x/y, w/h, rotation+buttons. */
+.row.pair { display:grid; grid-template-columns:auto minmax(0, 1fr) auto minmax(0, 1fr); gap:.5rem; align-items:center; }
+.row.pair > input { min-width:0; }
 label { font-size:.85rem; color:var(--muted); }
-input[type=text], input[type=number], input[type=password], select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:inherit; flex:1; min-width:160px; }
+input[type=text], input[type=number], input[type=password], select { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:inherit; flex:1; min-width:80px; }
 input[type=range] { flex:1; }
 button { background:var(--accent); color:#fff; border:0; border-radius:4px; padding:.6rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
 button:disabled { background:var(--muted); cursor:not-allowed; }
@@ -92,6 +111,14 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   .more-row { display:none; }
   body.show-more .more-actions { display:contents; }
   body.show-more .more-row     { display:flex; }
+  /* Checkbox tap targets — labels wrapping a checkbox get bumped
+   * to the WCAG 44 px minimum so the whole label is hittable. Uses
+   * :has() so the rule only fires on labels that actually contain
+   * a checkbox (not text-input labels). */
+  label:has(> input[type="checkbox"]) {
+    display:inline-flex; align-items:center; gap:.4rem;
+    min-height:44px; padding:.25rem .25rem .25rem 0;
+  }
 }
 </style>
 </head>
@@ -195,11 +222,11 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <span id="size-val" class="dim">80px</span>
           <span class="muted">(base size; w/h scales on top)</span>
         </div>
-        <div class="row">
+        <div class="row pair">
           <label>x</label>
-          <input id="el-x" type="number" style="max-width:90px">
+          <input id="el-x" type="number">
           <label>y</label>
-          <input id="el-y" type="number" style="max-width:90px">
+          <input id="el-y" type="number">
         </div>
       </div>
 
@@ -220,11 +247,11 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <input id="qr-size" type="number" min="1" max="6" style="max-width:90px">
           <span class="muted">(px per cell)</span>
         </div>
-        <div class="row">
+        <div class="row pair">
           <label>x</label>
-          <input id="qr-x" type="number" style="max-width:90px">
+          <input id="qr-x" type="number">
           <label>y</label>
-          <input id="qr-y" type="number" style="max-width:90px">
+          <input id="qr-y" type="number">
         </div>
       </div>
 
@@ -245,11 +272,11 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <input id="bc-size" type="number" min="1" max="6" style="max-width:90px">
           <span class="muted">(px/bar)</span>
         </div>
-        <div class="row">
+        <div class="row pair">
           <label>x</label>
-          <input id="bc-x" type="number" style="max-width:90px">
+          <input id="bc-x" type="number">
           <label>y</label>
-          <input id="bc-y" type="number" style="max-width:90px">
+          <input id="bc-y" type="number">
         </div>
       </div>
 
@@ -270,11 +297,11 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <input id="img-h" type="number" min="8" max="128" style="max-width:90px">
           <span class="muted">(px; width scales)</span>
         </div>
-        <div class="row">
+        <div class="row pair">
           <label>x</label>
-          <input id="img-x" type="number" style="max-width:90px">
+          <input id="img-x" type="number">
           <label>y</label>
-          <input id="img-y" type="number" style="max-width:90px">
+          <input id="img-y" type="number">
         </div>
       </div>
 
@@ -1041,7 +1068,10 @@ function hitTest(x, y) {
  * "tr", "br", "bl", "rotate", or null. Tested in element-local space
  * (same inverse-rotate as hitTest). Hit radius is bigger than the
  * visual handle so they're easy to grab on touch. */
-const HANDLE_HIT = 10;
+/* Hit radius is bigger on coarse pointers (touch) so the small
+ * mid-edge bars and corner squares are reachable with a fingertip
+ * even at 1× zoom. matchMedia is read once at startup. */
+const HANDLE_HIT = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ? 14 : 10;
 function hitHandle(el, x, y) {
   if (!el) return null;
   const w = el._w || 0, h = el._h || 0;
@@ -1836,7 +1866,9 @@ function renderLayerList() {
     attachLayerDrag(li, el.id);
     ul.appendChild(li);
   }
-  document.getElementById("layers-panel").hidden = elements.length === 0;
+  /* Hide the panel until there's something to actually reorder.
+   * One element by itself doesn't need a layer list. */
+  document.getElementById("layers-panel").hidden = elements.length < 2;
 }
 
 /* Pointer-event-based reorder: works on mouse, pen, and touch
@@ -1913,6 +1945,10 @@ function syncPropsPanel() {
   document.getElementById("props-barcode").hidden   = !el || el.type !== "barcode";
   document.getElementById("props-qr").hidden        = !el || el.type !== "qr";
   document.getElementById("props-transform").hidden = !el;
+  /* Title reflects the selected element's type so users get a
+   * one-glance reminder of what they're editing. */
+  const titles = { text: "Text", image: "Image", barcode: "Barcode", qr: "QR" };
+  document.getElementById("props-title").textContent = el ? (titles[el.type] || "Element") : "Element";
   /* Freshly-added elements may not have been measured yet; do a
    * one-shot scratch measure so the size inputs aren't blank on
    * first selection. */
