@@ -229,6 +229,16 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #el-list li.dragging { opacity:.4; }
 #el-list li.drop-above { box-shadow:inset 0 2px 0 0 var(--accent); }
 #el-list li.drop-below { box-shadow:inset 0 -2px 0 0 var(--accent); }
+/* Greyed when the element has no meaningful content yet (empty
+ * text / blank barcode / blank QR) — won't print anything visible.
+ * The .err class flags barcode/QR strings the encoder rejected
+ * AND broken image loads — print is blocked while any element has
+ * either set. Both cues are subtle but readable so the user
+ * spots forgotten / invalid layers in a busy list. */
+#el-list li.empty   { opacity:.55; }
+#el-list li.empty .summary::after { content:" — empty"; color:var(--muted); font-style:italic; }
+#el-list li.err     { border-color:var(--err); background:rgba(248,81,73,.06); }
+#el-list li.err .summary { color:var(--err); }
 #el-list .grip { color:var(--muted); cursor:grab; padding:0 .25rem; font-size:1rem; line-height:1; }
 #el-list .type { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; min-width:48px; }
 #el-list .summary { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -338,7 +348,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="add-barcode" class="secondary" type="button" data-i18n="btn.add.barcode">+ barcode</button>
         <button id="add-rect"    class="secondary" type="button" data-i18n="btn.add.rect">+ rect</button>
         <span class="spacer"></span>
-        <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows" data-i18n-attr="title:btn.more" title="show more actions">⋯</button>
+        <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows" aria-label="show more actions" data-i18n-attr="title:btn.more" title="show more actions">⋯</button>
       </div>
       <!-- Group: element modifiers (collapsed on phone) -->
       <div class="row more-row group-start" style="margin-top:.5rem">
@@ -372,16 +382,17 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <label data-i18n="field.font">font</label>
           <div class="font-picker">
             <button id="font-trigger" class="font-trigger" type="button"
-                    aria-haspopup="listbox" aria-expanded="false">sans-serif</button>
+                    aria-haspopup="listbox" aria-expanded="false"
+                    aria-label="font family">sans-serif</button>
             <div id="font-list" class="font-list" role="listbox"></div>
           </div>
         </div>
         <div class="row">
           <label data-i18n="field.style">style</label>
-          <button id="text-bold"      class="secondary text-style" type="button" aria-pressed="false" title="bold (Ctrl+B)">B</button>
-          <button id="text-italic"    class="secondary text-style" type="button" aria-pressed="false" title="italic (Ctrl+I)"><i>I</i></button>
-          <button id="text-underline" class="secondary text-style" type="button" aria-pressed="false" title="underline (Ctrl+U)"><u>U</u></button>
-          <button id="text-strike"    class="secondary text-style" type="button" aria-pressed="false" title="strikethrough"><s>S</s></button>
+          <button id="text-bold"      class="secondary text-style" type="button" aria-pressed="false" aria-label="bold"          title="bold (Ctrl+B)">B</button>
+          <button id="text-italic"    class="secondary text-style" type="button" aria-pressed="false" aria-label="italic"        title="italic (Ctrl+I)"><i>I</i></button>
+          <button id="text-underline" class="secondary text-style" type="button" aria-pressed="false" aria-label="underline"     title="underline (Ctrl+U)"><u>U</u></button>
+          <button id="text-strike"    class="secondary text-style" type="button" aria-pressed="false" aria-label="strikethrough" title="strikethrough"><s>S</s></button>
         </div>
         <div class="row">
           <label data-i18n="field.font-px">font px</label>
@@ -499,20 +510,20 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <div class="row">
           <label data-i18n="field.size" title="visible bounding box in pixels — width × height">size px</label>
           <input id="el-w" type="number" min="1" step="1" class="compact-input" title="visible width (px)">
-          <button id="aspect-lock" class="secondary" type="button" aria-pressed="true" title="lock aspect ratio: when on, w and h scale together; when off, mid-edge handles stretch one axis">🔒</button>
+          <button id="aspect-lock" class="secondary" type="button" aria-pressed="true" aria-label="lock aspect ratio" title="lock aspect ratio: when on, w and h scale together; when off, mid-edge handles stretch one axis">🔒</button>
           <input id="el-h" type="number" min="1" step="1" class="compact-input" title="visible height (px)">
         </div>
         <div class="row">
           <label data-i18n="field.rotation">rotation</label>
           <input id="el-rotation" type="number" step="1" class="compact-input">
           <span class="muted">°</span>
-          <button id="rot-cw"  class="secondary" type="button">+90°</button>
-          <button id="rot-ccw" class="secondary" type="button">-90°</button>
+          <button id="rot-cw"  class="secondary" type="button" aria-label="rotate 90 degrees clockwise">+90°</button>
+          <button id="rot-ccw" class="secondary" type="button" aria-label="rotate 90 degrees counter-clockwise">-90°</button>
         </div>
         <div class="row">
           <label data-i18n="field.flip">flip</label>
-          <button id="flip-h" class="secondary" type="button" aria-pressed="false" title="mirror left-right" data-i18n="field.flip.h">↔ horizontal</button>
-          <button id="flip-v" class="secondary" type="button" aria-pressed="false" title="mirror top-bottom" data-i18n="field.flip.v">↕ vertical</button>
+          <button id="flip-h" class="secondary" type="button" aria-pressed="false" aria-label="flip horizontal" title="mirror left-right" data-i18n="field.flip.h">↔ horizontal</button>
+          <button id="flip-v" class="secondary" type="button" aria-pressed="false" aria-label="flip vertical"   title="mirror top-bottom" data-i18n="field.flip.v">↕ vertical</button>
         </div>
         <div class="row">
           <label data-i18n="field.blend">blend</label>
@@ -1420,20 +1431,16 @@ function measureBarcode(_ctx, el) {
     el._barcodeBits  = null;
     el._barcodeError = e.message;
     el._barcodeCanvas = null;
-    el._w = 80;
-    el._h = el.h | 0;
+    /* Reserve enough room for a wrapped error message + heading. */
+    el._w = 160;
+    el._h = Math.max(40, el.h | 0);
   }
   if (!el._barcodeError && !el._barcodeCanvas) bakeBarcode(el);
 }
 
 function drawBarcode(ctx, el) {
   if (el._barcodeError) {
-    ctx.fillStyle = "#fdd";
-    ctx.fillRect(0, 0, el._baseW || 0, el._baseH || 0);
-    ctx.fillStyle = "#900";
-    ctx.font = "10px sans-serif";
-    ctx.textBaseline = "top";
-    ctx.fillText(el._barcodeError.slice(0, 18), 2, 2);
+    drawErrorBox(ctx, el, "barcode", el._barcodeError);
     return;
   }
   if (el._barcodeCanvas) ctx.drawImage(el._barcodeCanvas, 0, 0);
@@ -1492,8 +1499,8 @@ function bakeQR(el) {
 
 function measureQR(_ctx, el) {
   if (!el._qr && !el._qrError) qrRebake(el);
-  if (el._qrError) { el._w = 80; el._h = 30; return; }
-  if (!el._qr)     { el._w = 0;  el._h = 0;  return; }
+  if (el._qrError) { el._w = 160; el._h = 60; return; }
+  if (!el._qr)     { el._w = 0;   el._h = 0;  return; }
   const sz = Math.max(1, Math.min(6, el.size | 0));
   el._w = el._h = el._qr.getModuleCount() * sz;
   if (!el._qrCanvas) bakeQR(el);
@@ -1501,15 +1508,45 @@ function measureQR(_ctx, el) {
 
 function drawQR(ctx, el) {
   if (el._qrError) {
-    ctx.fillStyle = "#fdd";
-    ctx.fillRect(0, 0, el._baseW || 0, el._baseH || 0);
-    ctx.fillStyle = "#900";
-    ctx.font = "10px sans-serif";
-    ctx.textBaseline = "top";
-    ctx.fillText("QR: " + el._qrError.slice(0, 16), 2, 2);
+    drawErrorBox(ctx, el, "QR", el._qrError);
     return;
   }
   if (el._qrCanvas) ctx.drawImage(el._qrCanvas, 0, 0);
+}
+
+/* Shared error renderer for barcode / QR. Paints a red-tinted box
+ * the size of the element's reserved bounds and word-wraps the
+ * full message inside (no slice() truncation). */
+function drawErrorBox(ctx, el, kind, msg) {
+  const w = el._baseW || 0, h = el._baseH || 0;
+  if (!w || !h) return;
+  ctx.fillStyle = "#fdd";
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "#900";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+  ctx.fillStyle = "#900";
+  ctx.font = "bold 10px sans-serif";
+  ctx.textBaseline = "top";
+  ctx.fillText(kind, 4, 3);
+  ctx.font = "10px sans-serif";
+  fillTextWrapped(ctx, msg, 4, 16, w - 8, 11);
+}
+
+function fillTextWrapped(ctx, text, x, y, maxW, lineH) {
+  const words = String(text).split(/\s+/);
+  let line = "";
+  for (const word of words) {
+    const probe = line ? line + " " + word : word;
+    if (line && ctx.measureText(probe).width > maxW) {
+      ctx.fillText(line, x, y);
+      y += lineH;
+      line = word;
+    } else {
+      line = probe;
+    }
+  }
+  if (line) ctx.fillText(line, x, y);
 }
 
 /* --- filled rectangle element ------------------------------------
@@ -1917,6 +1954,11 @@ function redraw(forPrint = false) {
   /* Rulers paint last in canvas-absolute coords, on top of the
    * gutter (covers anything that bled into the top/left bands). */
   if (canvasOpts.showRulers) drawRulers(ctx, printW, HEAD_PX);
+
+  /* Run AFTER the measure pass — barcode/QR errors are populated
+   * inside drawElement(), so reading them at the start of redraw
+   * would always be one frame stale. */
+  if (!forPrint) refreshPrintButtons();
 }
 
 /* Re-colour the on-screen *printable* strip — i.e. only the
@@ -2221,8 +2263,8 @@ async function postPrint() {
 }
 
 async function doPrint() {
-  const btn = document.getElementById("print");
-  btn.disabled = true;
+  printingInProgress = true;
+  refreshPrintButtons();
   log(t("msg.printing"));
   try {
     const j = await postPrint();
@@ -2230,7 +2272,8 @@ async function doPrint() {
   } catch (e) {
     log(t("msg.print.error", { error: e.message }), false);
   } finally {
-    btn.disabled = false;
+    printingInProgress = false;
+    refreshPrintButtons();
     refreshStatus();
   }
 }
@@ -2654,7 +2697,8 @@ async function doPrintAll() {
   if (total > BATCH_CONFIRM_THRESHOLD) {
     if (!confirm(`Print ${total} labels in this batch?`)) return;
   }
-  btn.disabled = printBtn.disabled = true;
+  printingInProgress = true;
+  refreshPrintButtons();
   /* Header preview must NOT be printed — it's a layout aid only.
    * Force-clear it for the duration of the batch and remember to
    * restore the user's preview selection when we're done. */
@@ -2686,8 +2730,9 @@ async function doPrintAll() {
   finally {
     csvBatchCtx = null;
     csvShowHeader = wasHeader;
+    printingInProgress = false;
     csvRender(); redraw();
-    btn.disabled = printBtn.disabled = false;
+    refreshPrintButtons();
     refreshStatus();
   }
 }
@@ -2766,6 +2811,28 @@ function redo() {
 function refreshUndoButtons() {
   document.getElementById("undo").disabled = !undoStack.length;
   document.getElementById("redo").disabled = !redoStack.length;
+}
+
+/* Disable Print / Print all when any element on the canvas has a
+ * render error (invalid barcode chars, QR overflow), and during
+ * an in-progress print job. Prints containing the error placeholder
+ * would just waste tape; tooltip explains the disable. The layer
+ * list is rerendered when the error state flips so the .err class
+ * tracks reality without thrashing the DOM on every redraw. */
+let printingInProgress = false;
+let _lastPrintErr      = null;
+function refreshPrintButtons() {
+  const err = elements.some(e => e._barcodeError || e._qrError);
+  const print = document.getElementById("print");
+  const all   = document.getElementById("print-all");
+  if (!print || !all) return;
+  print.disabled = err || printingInProgress;
+  all.disabled   = err || printingInProgress;
+  const tip = err ? "Fix barcode / QR errors before printing" : "";
+  print.title = tip;
+  all.title   = tip;
+  if (_lastPrintErr !== null && _lastPrintErr !== err) renderLayerList();
+  _lastPrintErr = err;
 }
 
 /* --- session persistence -----------------------------------------
@@ -2984,6 +3051,14 @@ function renderLayerList() {
     const li = document.createElement("li");
     li.dataset.id = el.id;
     if (el.id === selectedId) li.classList.add("selected");
+    /* Visual flags: empty text / barcode / qr → grey-out so the
+     * user sees a forgotten layer; render error or broken image →
+     * red border (matches Print-disable trigger). */
+    const isText  = el.type === "text"    || el.type === "barcode" || el.type === "qr";
+    const empty   = isText && !(el.text || "").trim();
+    const errored = !!(el._barcodeError || el._qrError || el._loadError);
+    if (empty)   li.classList.add("empty");
+    if (errored) li.classList.add("err");
     li.innerHTML = `<span class="grip" title="drag to reorder">⋮⋮</span><span class="type">${el.type}</span><span class="summary"></span>`;
     li.querySelector(".summary").textContent = summarise(el);
     li.addEventListener("click", ev => {
