@@ -53,6 +53,15 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+/* Inline panel header: the h2 sits next to the label-library
+ * controls so they don't take a separate row underneath. */
+.panel-header { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.5rem; }
+.panel-header h2 { margin:0; }
+/* display:contents lets the .more-row span participate in the
+ * .panel-header flex without forming its own box — children flow
+ * inline. On phone the same rule with display:none collapses the
+ * file-op buttons under the ⋯ overflow. */
+.inline-actions { display:contents; }
 .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
 /* Subtle hairline between grouped action rows inside the Label
  * panel — separates "add", "modify", "label library", and "print"
@@ -123,6 +132,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #ctx-menu button { display:block; width:100%; text-align:left; background:transparent; color:var(--fg); padding:.5rem .75rem; border-radius:3px; font-weight:normal; }
 #ctx-menu button:hover { background:rgba(88,166,255,.12); }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
+/* When there's no log message, collapse the line so it doesn't
+ * leave dead space at the bottom of the Label panel. */
+#log:empty { display:none; }
 #el-list li { display:flex; align-items:center; gap:.5rem; padding:.4rem .5rem; border:1px solid var(--line); border-radius:4px; margin-bottom:.25rem; cursor:pointer; user-select:none; background:var(--bg); }
 #el-list li:hover { border-color:var(--accent); }
 #el-list li.selected { border-color:var(--accent); background:rgba(88,166,255,.08); }
@@ -185,7 +197,19 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   <section id="view-print">
    <div class="col-left">
     <div class="panel">
-      <h2>Label</h2>
+      <div class="panel-header">
+        <h2>Label</h2>
+        <select id="lib-select" title="load saved label">
+          <option value="">— load saved label —</option>
+        </select>
+        <span style="flex:1"></span>
+        <span class="more-row inline-actions">
+          <button id="lib-save"   class="secondary" type="button">save as…</button>
+          <button id="lib-update" class="secondary" type="button" disabled>update</button>
+          <button id="lib-delete" class="secondary" type="button" disabled>delete</button>
+          <button id="lib-clear"  class="secondary" type="button">new</button>
+        </span>
+      </div>
       <div class="canvas-viewport">
         <canvas id="preview" width="600" height="128"></canvas>
         <button id="zoom-reset" class="secondary" type="button" hidden title="reset zoom">fit</button>
@@ -227,17 +251,6 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <span style="flex:1"></span>
         <button id="undo"      class="secondary" type="button" disabled title="Ctrl+Z">undo</button>
         <button id="redo"      class="secondary" type="button" disabled title="Ctrl+Y">redo</button>
-      </div>
-      <!-- Group: label library / file ops (collapsed on phone) -->
-      <div class="row more-row group-start" style="margin-top:.5rem">
-        <label>label</label>
-        <select id="lib-select" style="max-width:160px;">
-          <option value="">— load saved label —</option>
-        </select>
-        <button id="lib-save"   class="secondary" type="button">save as…</button>
-        <button id="lib-update" class="secondary" type="button" disabled>update</button>
-        <button id="lib-delete" class="secondary" type="button" disabled>delete</button>
-        <button id="lib-clear"  class="secondary" type="button">new</button>
       </div>
       <!-- Group: print actions -->
       <div class="row group-start" style="margin-top:.5rem">
@@ -2085,13 +2098,21 @@ function syncPropsPanel() {
     document.getElementById("size-val").textContent = el.size + "px";
     document.getElementById("el-x").value = Math.round(el.x);
     document.getElementById("el-y").value = Math.round(el.y);
-    /* Font picker + style toggles. */
-    const family = el.fontFamily || "sans-serif";
+    /* Font picker + style toggles. The trigger AND each row in the
+     * popup mirror the element's current bold/italic so the user
+     * sees a real preview, not just the family default. */
+    const family   = el.fontFamily || "sans-serif";
+    const fWeight  = el.bold   ? "bold"   : "normal";
+    const fStyle   = el.italic ? "italic" : "normal";
     const $trigger = document.getElementById("font-trigger");
-    $trigger.textContent      = family;
-    $trigger.style.fontFamily = fontFamilyCSS(family);
+    $trigger.textContent       = family;
+    $trigger.style.fontFamily  = fontFamilyCSS(family);
+    $trigger.style.fontWeight  = fWeight;
+    $trigger.style.fontStyle   = fStyle;
     for (const r of document.querySelectorAll(".font-row")) {
       r.classList.toggle("selected", r.dataset.font === family);
+      r.style.fontWeight = fWeight;
+      r.style.fontStyle  = fStyle;
     }
     for (const [id, key] of [
       ["text-bold",      "bold"],
