@@ -433,6 +433,8 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
             <option value="dense_dots" data-i18n="field.fill.dense_dots">dense dots ⠿</option>
             <option value="none"       data-i18n="field.fill.none">outline only</option>
           </select>
+          <label data-i18n="field.bc.module">module</label>
+          <input id="rect-module" type="number" min="1" max="8" class="compact-input">
         </div>
         <div class="row pair">
           <label data-i18n="field.x">x</label>
@@ -489,10 +491,10 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <div class="row">
           <label data-i18n="field.blend">blend</label>
           <select id="el-composite">
-            <option value="and" data-i18n="field.blend.and">AND (over, default)</option>
-            <option value="or"  data-i18n="field.blend.or">OR (lighten)</option>
-            <option value="xor" data-i18n="field.blend.xor">XOR (toggle)</option>
-            <option value="not" data-i18n="field.blend.not">NOT (invert)</option>
+            <option value="or"  data-i18n="field.blend.or">OR (stack, default)</option>
+            <option value="and" data-i18n="field.blend.and">AND (intersect)</option>
+            <option value="xor" data-i18n="field.blend.xor">XOR (cancel)</option>
+            <option value="not" data-i18n="field.blend.not">NOT (subtract)</option>
           </select>
           <span class="muted" data-i18n="field.blend.hint">how this element overlays the layers below it</span>
         </div>
@@ -502,7 +504,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
    <div class="col-right">
     <div class="panel" id="layers-panel" hidden>
-      <h2><span data-i18n="panel.layers">Layers</span> <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;" data-i18n="panel.layers.hint">— bottom of canvas first; drag to reorder</span></h2>
+      <h2><span data-i18n="panel.layers">Layers</span> <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;" data-i18n="panel.layers.hint">— top of canvas first; drag to reorder</span></h2>
       <ul id="el-list" style="list-style:none; padding:0; margin:0;"></ul>
     </div>
 
@@ -661,7 +663,7 @@ const STRINGS = {
     "btn.clear":               "clear",
     "panel.element":           "Element",
     "panel.layers":            "Layers",
-    "panel.layers.hint":       "— bottom of canvas first; drag to reorder",
+    "panel.layers.hint":       "— top of canvas first; drag to reorder",
     "panel.tpl":               "Template & CSV data",
     "panel.props.empty":       "Click an element on the canvas to edit it, or hit + text to add one.",
     "props.title.text":        "Text",
@@ -723,11 +725,11 @@ const STRINGS = {
     "field.flip.h":            "↔ horizontal",
     "field.flip.v":            "↕ vertical",
     "field.blend":             "blend",
-    "field.blend.and":         "AND (over, default)",
-    "field.blend.or":          "OR (lighten)",
-    "field.blend.xor":         "XOR (toggle)",
-    "field.blend.not":         "NOT (invert)",
-    "field.blend.hint":        "how this element overlays the layers below it",
+    "field.blend.and":         "AND (intersect — ink only where both layers have ink)",
+    "field.blend.or":          "OR (stack, default — ink from either layer)",
+    "field.blend.xor":         "XOR (cancel — ink where exactly one layer has ink)",
+    "field.blend.not":         "NOT (subtract — punch this layer out of what's below)",
+    "field.blend.hint":        "binary blend with the layers below",
     "field.algorithm":         "algorithm",
     "field.algorithm.atkinson":         "Atkinson",
     "field.algorithm.floyd-steinberg":  "Floyd-Steinberg",
@@ -1033,7 +1035,7 @@ let selectedId = null;
 let nextId    = 1;
 
 function defaultText() {
-  return { id: nextId++, type: "text", x: 14, y: 0, rotation: 0, composite: "and",
+  return { id: nextId++, type: "text", x: 14, y: 0, rotation: 0, composite: "or",
            scaleX: 1, scaleY: 1, aspectLocked: true,
            text: "hello", size: 80,
            fontFamily: "sans-serif",
@@ -1458,9 +1460,9 @@ function drawQR(ctx, el) {
  * colour; for thermal printing the bitmap is thresholded to b/w
  * after rasterisation, so darker fills print solid black. */
 function defaultRect() {
-  return { id: nextId++, type: "rect", x: 14, y: 32, rotation: 0, composite: "and",
+  return { id: nextId++, type: "rect", x: 14, y: 32, rotation: 0, composite: "or",
            scaleX: 1, scaleY: 1, aspectLocked: true,
-           w: 80, h: 40, pattern: "solid" };
+           w: 80, h: 40, pattern: "solid", module: 1 };
 }
 
 function measureRect(_ctx, el) {
@@ -1468,54 +1470,67 @@ function measureRect(_ctx, el) {
   el._h = Math.max(1, el.h | 0);
 }
 
-/* Atari ST / GEM-style fill patterns. Each entry paints a single
- * 8x8 tile that ctx.createPattern then tiles across the rect.
+/* Atari ST / GEM-style fill patterns. Each entry paints into a tile
+ * sized 8 × `m` square, where `m` is the rect's "module" — px per
+ * pattern unit. m=1 is the densest 8×8 tile; m=4 makes everything
+ * four times chunkier (32×32 tile). Same idea as bc-size and
+ * qr-size — chunky modules read better at small print scales /
+ * larger viewing distance.
  *
  * IMPORTANT: tiles paint INK ONLY — non-ink pixels stay alpha=0
  * transparent. That's what makes the blend modes (AND/OR/XOR/NOT)
- * behave correctly: with alpha=0 source pixels the composite
- * operation has no effect on the destination, so only the actual
- * ink areas of the rect interact with the underlying layers. */
+ * act on actual ink only. */
 const RECT_PATTERN_TILES = {
-  solid: t => { t.fillStyle = "#000"; t.fillRect(0, 0, 8, 8); },
-  hatch: t => {
+  solid: (t, m) => { t.fillStyle = "#000"; t.fillRect(0, 0, 8 * m, 8 * m); },
+  hatch: (t, m) => {
     t.fillStyle = "#000";
-    /* 45° down-right diagonal, 1 px wide, every 4 px. */
-    for (let i = 0; i < 8; i++) { t.fillRect(i, i, 1, 1); t.fillRect((i + 4) % 8, i, 1, 1); }
+    /* 45° down-right diagonal, m px wide, every 4 modules. */
+    for (let i = 0; i < 8; i++) {
+      t.fillRect(i * m, i * m, m, m);
+      t.fillRect(((i + 4) % 8) * m, i * m, m, m);
+    }
   },
-  crosshatch: t => {
+  crosshatch: (t, m) => {
     t.fillStyle = "#000";
-    for (let i = 0; i < 8; i++) { t.fillRect(i, i, 1, 1); t.fillRect(7 - i, i, 1, 1); }
+    for (let i = 0; i < 8; i++) {
+      t.fillRect(i * m, i * m, m, m);
+      t.fillRect((7 - i) * m, i * m, m, m);
+    }
   },
-  vlines: t => {
-    t.fillStyle = "#000"; t.fillRect(0, 0, 1, 8); t.fillRect(4, 0, 1, 8);
-  },
-  hlines: t => {
-    t.fillStyle = "#000"; t.fillRect(0, 0, 8, 1); t.fillRect(0, 4, 8, 1);
-  },
-  checker: t => {
-    t.fillStyle = "#000"; t.fillRect(0, 0, 4, 4); t.fillRect(4, 4, 4, 4);
-  },
-  dots: t => {
-    t.fillStyle = "#000"; t.fillRect(1, 1, 1, 1); t.fillRect(5, 5, 1, 1);
-  },
-  dense_dots: t => {
+  vlines: (t, m) => {
     t.fillStyle = "#000";
-    t.fillRect(0, 0, 1, 1); t.fillRect(2, 2, 1, 1);
-    t.fillRect(4, 0, 1, 1); t.fillRect(6, 2, 1, 1);
-    t.fillRect(0, 4, 1, 1); t.fillRect(2, 6, 1, 1);
-    t.fillRect(4, 4, 1, 1); t.fillRect(6, 6, 1, 1);
+    t.fillRect(0, 0, m, 8 * m); t.fillRect(4 * m, 0, m, 8 * m);
+  },
+  hlines: (t, m) => {
+    t.fillStyle = "#000";
+    t.fillRect(0, 0, 8 * m, m); t.fillRect(0, 4 * m, 8 * m, m);
+  },
+  checker: (t, m) => {
+    t.fillStyle = "#000";
+    t.fillRect(0, 0, 4 * m, 4 * m); t.fillRect(4 * m, 4 * m, 4 * m, 4 * m);
+  },
+  dots: (t, m) => {
+    t.fillStyle = "#000";
+    t.fillRect(1 * m, 1 * m, m, m); t.fillRect(5 * m, 5 * m, m, m);
+  },
+  dense_dots: (t, m) => {
+    t.fillStyle = "#000";
+    t.fillRect(0 * m, 0 * m, m, m); t.fillRect(2 * m, 2 * m, m, m);
+    t.fillRect(4 * m, 0 * m, m, m); t.fillRect(6 * m, 2 * m, m, m);
+    t.fillRect(0 * m, 4 * m, m, m); t.fillRect(2 * m, 6 * m, m, m);
+    t.fillRect(4 * m, 4 * m, m, m); t.fillRect(6 * m, 6 * m, m, m);
   },
   /* Empty tile — fully transparent. Useful when rect is just a
    * positional/sizing reference and shouldn't paint anything. */
-  none: _ => {},
+  none: (_t, _m) => {},
 };
 
-function makeRectPattern(ctx, name) {
+function makeRectPattern(ctx, name, module) {
+  const m  = Math.max(1, Math.min(8, module | 0));
   const fn = RECT_PATTERN_TILES[name] || RECT_PATTERN_TILES.solid;
   const tile = document.createElement("canvas");
-  tile.width = tile.height = 8;
-  fn(tile.getContext("2d"));
+  tile.width = tile.height = 8 * m;
+  fn(tile.getContext("2d"), m);
   return ctx.createPattern(tile, "repeat");
 }
 
@@ -1531,7 +1546,7 @@ function drawRect(ctx, el) {
   scratch.width = w; scratch.height = h;
   const sctx = scratch.getContext("2d");
   sctx.imageSmoothingEnabled = false;
-  sctx.fillStyle = makeRectPattern(sctx, el.pattern || "solid");
+  sctx.fillStyle = makeRectPattern(sctx, el.pattern || "solid", el.module || 1);
   sctx.fillRect(0, 0, w, h);
   ctx.drawImage(scratch, 0, 0);
 }
@@ -1557,33 +1572,28 @@ function measureElement(ctx, el) {
   el._h = el._baseH * sY;
 }
 
-/* Composite mode — how this element's pixels combine with the
- * already-drawn layers below it. Mappings to canvas blend modes
- * for our 1-bit black-on-white world. All element types now paint
- * ink-only (alpha=0 in non-ink areas), so transparent pixels are
- * a true no-op under any composite mode and the blend acts only
- * on actual ink.
+/* Binary blend modes — pixels are either INK (text colour, opaque)
+ * or TRANSPARENT (tape colour shines through). Each mode is a
+ * Boolean operation on the ink masks of the new layer (B) and the
+ * canvas content drawn so far (A):
  *
- *   AND (default) — multiply: ink overrides bg pixel-wise. The
- *                   natural "stack on top" for label work.
- *   OR  — multiply too: in 1-bit black/white the union-of-ink
- *                       semantic is indistinguishable from AND,
- *                       so we keep both behaving the same rather
- *                       than mapping OR to canvas's "lighter"
- *                       (which is additive and silently makes
- *                       black ink invisible on white tape).
- *   XOR — xor: ink areas of new layer cancel ink areas below
- *              (alpha-XOR). Useful for cutouts where elements
- *              overlap.
- *   NOT — invert: this element renders inverted (black ↔ white)
- *                 in a scratch buffer first, then multiplied —
- *                 flips the element's own ink rather than touching
- *                 what's underneath. */
+ *   OR (default)  — ink ∈ A ∪ B. Source-over stack.
+ *   AND           — ink ∈ A ∩ B. Implemented with destination-in
+ *                   inside a clip rect over the element's bounding
+ *                   box, so pixels OUTSIDE the box are preserved
+ *                   (destination-in is a global op without the
+ *                   clip and would clear them).
+ *   XOR           — ink ∈ A △ B (symmetric difference). Canvas's
+ *                   "xor" composite. Overlapping ink cancels.
+ *   NOT           — ink ∈ A \ B. destination-out: this layer's
+ *                   ink REMOVES ink from what's below. Useful for
+ *                   "white text on a black bar" — punch the text
+ *                   through the bar so the tape shines through. */
 const COMPOSITE_MAP = {
-  and: "multiply",
-  or:  "multiply",
+  and: "destination-in",
+  or:  "source-over",
   xor: "xor",
-  not: "multiply",  /* element drawn into a scratch buffer, inverted, then multiplied */
+  not: "destination-out",
 };
 
 function drawElement(ctx, el) {
@@ -1610,39 +1620,22 @@ function drawElement(ctx, el) {
   ctx.scale((el.flipH ? -1 : 1) * sX, (el.flipV ? -1 : 1) * sY);
   ctx.translate(-baseW / 2, -baseH / 2);
 
-  const op = el.composite || "and";
-  ctx.globalCompositeOperation = COMPOSITE_MAP[op] || "multiply";
-
-  if (op === "not" && baseW > 0 && baseH > 0) {
-    /* Render the element into a scratch canvas at base size with
-     * white ground, invert luminance, then drawImage the result onto
-     * the main context (under the centre-pivot transform). The scale
-     * already on ctx will paint scratch at visible × visible. */
-    const scratch = document.createElement("canvas");
-    scratch.width = baseW; scratch.height = baseH;
-    const sctx = scratch.getContext("2d");
-    sctx.fillStyle = "#fff";
-    sctx.fillRect(0, 0, baseW, baseH);
-    if (el.type === "text")    drawText(sctx, el);
-    if (el.type === "image")   drawImage(sctx, el);
-    if (el.type === "barcode") drawBarcode(sctx, el);
-    if (el.type === "qr")      drawQR(sctx, el);
-    if (el.type === "rect")    drawRect(sctx, el);
-    const data = sctx.getImageData(0, 0, baseW, baseH);
-    for (let i = 0; i < data.data.length; i += 4) {
-      data.data[i]     = 255 - data.data[i];
-      data.data[i + 1] = 255 - data.data[i + 1];
-      data.data[i + 2] = 255 - data.data[i + 2];
-    }
-    sctx.putImageData(data, 0, 0);
-    ctx.drawImage(scratch, 0, 0);
-  } else {
-    if (el.type === "text")    drawText(ctx, el);
-    if (el.type === "image")   drawImage(ctx, el);
-    if (el.type === "barcode") drawBarcode(ctx, el);
-    if (el.type === "qr")      drawQR(ctx, el);
-    if (el.type === "rect")    drawRect(ctx, el);
+  const op = el.composite || "or";
+  /* AND uses destination-in, which is a GLOBAL op — without a clip
+   * it would clear pixels outside this element's bounding box too.
+   * Restrict it to the element's local rect. */
+  if (op === "and" && baseW > 0 && baseH > 0) {
+    ctx.beginPath();
+    ctx.rect(0, 0, baseW, baseH);
+    ctx.clip();
   }
+  ctx.globalCompositeOperation = COMPOSITE_MAP[op] || "source-over";
+
+  if (el.type === "text")    drawText(ctx, el);
+  if (el.type === "image")   drawImage(ctx, el);
+  if (el.type === "barcode") drawBarcode(ctx, el);
+  if (el.type === "qr")      drawQR(ctx, el);
+  if (el.type === "rect")    drawRect(ctx, el);
   ctx.restore();
 }
 
@@ -1878,13 +1871,20 @@ function applyTapeColors(ctx, printW, marginPx, printPx) {
   const img = ctx.getImageData(PAD, top, printW, h);
   const px  = img.data;
   for (let i = 0; i < px.length; i += 4) {
+    /* alpha=0 = "tape shows through" (e.g. XOR/NOT/AND punched a
+     * hole). Force opaque tape colour so the preview shows the
+     * actual tape colour, not whatever's behind the canvas
+     * element in the DOM. */
+    if (px[i + 3] < 128) {
+      px[i] = tape[0]; px[i+1] = tape[1]; px[i+2] = tape[2]; px[i+3] = 255;
+      continue;
+    }
     const lum = (px[i] + px[i+1] + px[i+2]) / 3;
     const c   = lum < 128 ? text : tape;
     px[i]   = c[0];
     px[i+1] = c[1];
     px[i+2] = c[2];
-    /* Alpha left as-is; canvas was opaque white before the
-     * remap so every pixel is 255 already. */
+    px[i+3] = 255;
   }
   ctx.putImageData(img, PAD, top);
 }
@@ -2125,7 +2125,12 @@ function packRaster(canvas) {
   for (let x = 0; x < w; x++) {
     for (let y = 0; y < h; y++) {
       const i = (y * w + x) * 4;
-      // Treat any pixel below the threshold as black.
+      /* Ink only when the pixel is BOTH opaque AND below the
+       * luminance threshold. Transparent pixels (alpha < 128) are
+       * "tape shows through" and must NOT print as ink — XOR/NOT/AND
+       * blend modes can produce alpha=0 holes whose RGB is whatever
+       * was last painted (often 0,0,0,0 by canvas default). */
+      if (data[i+3] < 128) continue;
       const lum = (data[i] + data[i+1] + data[i+2]) / 3;
       if (lum < 128) out[x * 16 + (y >> 3)] |= 0x80 >> (y & 7);
     }
@@ -2626,14 +2631,19 @@ function summarise(el) {
   }
   if (el.type === "barcode") return el.text;
   if (el.type === "qr")      return el.text;
-  if (el.type === "rect")    return `${el.w}×${el.h} ${el.pattern || "solid"}`;
+  if (el.type === "rect")    return `${el.w}×${el.h} ${el.pattern || "solid"}${el.module > 1 ? ` ×${el.module}` : ""}`;
   return "";
 }
 
 function renderLayerList() {
   const ul = document.getElementById("el-list");
   ul.innerHTML = "";
-  for (const el of elements) {
+  /* Iterate back-to-front so the topmost (last-drawn) element sits
+   * at the top of the list — natural top-down ordering, same as
+   * Photoshop / Figma / Inkscape. The drag-reorder logic below
+   * flips the splice index to match. */
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
     const li = document.createElement("li");
     li.dataset.id = el.id;
     if (el.id === selectedId) li.classList.add("selected");
@@ -2703,7 +2713,10 @@ function attachLayerDrag(li, id) {
         pushUndo();
         const [moved] = elements.splice(fromIdx, 1);
         if (fromIdx < toIdx) toIdx--;
-        elements.splice(toIdx + (active.above ? 0 : 1), 0, moved);
+        /* List is rendered back-to-front (z-front first), so
+         * dropping VISUALLY above target means INSERTING AFTER
+         * target in the array (higher z-index). */
+        elements.splice(toIdx + (active.above ? 1 : 0), 0, moved);
         renderLayerList();
         redraw();
       }
@@ -2817,6 +2830,7 @@ function syncPropsPanel() {
     document.getElementById("qr-y").value    = Math.round(el.y);
   } else if (el && el.type === "rect") {
     document.getElementById("rect-pattern").value = el.pattern || "solid";
+    document.getElementById("rect-module").value  = el.module  || 1;
     document.getElementById("rect-x").value       = Math.round(el.x);
     document.getElementById("rect-y").value       = Math.round(el.y);
   }
@@ -2888,6 +2902,7 @@ bindPropInput("qr-size",       "size",      v => Math.max(1, Math.min(6, parseIn
 bindPropInput("qr-x",          "x",         v => parseInt(v, 10) || 0);
 bindPropInput("qr-y",          "y",         v => parseInt(v, 10) || 0);
 bindPropInput("rect-pattern",  "pattern");
+bindPropInput("rect-module",   "module",    v => Math.max(1, Math.min(8, parseInt(v, 10) || 1)));
 bindPropInput("rect-x",        "x",         v => parseInt(v, 10) || 0);
 bindPropInput("rect-y",        "y",         v => parseInt(v, 10) || 0);
 bindPropInput("el-composite", "composite");
@@ -3050,7 +3065,7 @@ document.getElementById("add-barcode").addEventListener("click", () => {
   pushUndo();
   const el = {
     id: nextId++, type: "barcode",
-    x: rightmostX(), y: 24, rotation: 0, composite: "and",
+    x: rightmostX(), y: 24, rotation: 0, composite: "or",
     scaleX: 1, scaleY: 1, aspectLocked: true,
     h: 60,
     symbology: "code128b",
@@ -3066,7 +3081,7 @@ document.getElementById("add-qr").addEventListener("click", () => {
   pushUndo();
   const el = {
     id: nextId++, type: "qr",
-    x: rightmostX(), y: 0, rotation: 0, composite: "and",
+    x: rightmostX(), y: 0, rotation: 0, composite: "or",
     scaleX: 1, scaleY: 1, aspectLocked: true,
     text: "https://pt700.local/",
     ecc: "M",
@@ -3098,7 +3113,7 @@ document.getElementById("image-file").addEventListener("change", async e => {
     img.onload = () => {
       const el = {
         id: nextId++, type: "image",
-        x: rightmostX(), y: 0, rotation: 0, composite: "and",
+        x: rightmostX(), y: 0, rotation: 0, composite: "or",
         scaleX: 1, scaleY: 1, aspectLocked: true,
         h: HEAD_PX,
         algorithm: "atkinson",
