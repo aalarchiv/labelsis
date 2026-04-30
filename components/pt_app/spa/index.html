@@ -145,7 +145,12 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
  * bold, I in italic, etc.) so users can preview without trying. */
 .text-style       { min-width:38px; text-align:center; padding:.5rem .6rem; }
 #text-bold        { font-weight:700; }
-.canvas-viewport { position:relative; overflow:hidden; max-width:100%; touch-action:none; border:1px solid var(--line); border-radius:4px; background:#fff; }
+/* When the auto-extending label grows wider than its column, the
+ * viewport gets a horizontal scrollbar so the user can pan to see
+ * the right edge — was previously clipping silently with
+ * overflow:hidden. Vertical stays hidden because the canvas height
+ * is fixed at HEAD_PX + 2*PAD. */
+.canvas-viewport { position:relative; overflow-x:auto; overflow-y:hidden; max-width:100%; touch-action:none; border:1px solid var(--line); border-radius:4px; background:#fff; }
 canvas { display:block; image-rendering:pixelated; background:#fff; }
 #el-list .grip { touch-action:none; }
 #zoom-reset { position:absolute; right:.5rem; bottom:.5rem; z-index:5; }
