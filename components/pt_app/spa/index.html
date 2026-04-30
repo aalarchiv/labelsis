@@ -63,6 +63,12 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
  * file-op buttons under the ⋯ overflow. */
 .inline-actions { display:contents; }
 .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+/* Common row utilities — extracted from repeating inline styles. */
+.spacer        { flex:1; }
+.compact-input { max-width:90px; }
+/* Vertical spacing between consecutive rows in the props panel —
+ * replaces inline margin-bottom:.5rem on every form row. */
+#props-panel .row + .row { margin-top:.5rem; }
 /* Subtle hairline between grouped action rows inside the Label
  * panel — separates "add", "modify", "label library", and "print"
  * groups visually without a heavy uppercase header per group.
@@ -143,7 +149,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #el-list li.drop-below { box-shadow:inset 0 -2px 0 0 var(--accent); }
 #el-list .grip { color:var(--muted); cursor:grab; padding:0 .25rem; font-size:1rem; line-height:1; }
 #el-list .type { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; min-width:48px; }
-#el-list .label { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#el-list .summary { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dim  { opacity:.6; }
 .phone-only { display:none; }
 @media (max-width: 600px) {
@@ -181,9 +187,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 <header>
   <h1 id="title" title="click to toggle status">pt700</h1>
   <nav id="nav">
-    <a href="#print"    data-view="print" class="active">Label</a>
-    <a href="#wifi"     data-view="wifi">Wi-Fi</a>
-    <a href="#settings" data-view="settings">Settings</a>
+    <a href="#print"    data-view="print" data-i18n="tab.label" class="active">Label</a>
+    <a href="#wifi"     data-view="wifi"  data-i18n="tab.wifi">Wi-Fi</a>
+    <a href="#settings" data-view="settings" data-i18n="tab.settings">Settings</a>
   </nav>
   <button id="burger" class="burger" aria-label="menu" aria-expanded="false">
     <span></span><span></span><span></span>
@@ -198,16 +204,16 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
    <div class="col-left">
     <div class="panel">
       <div class="panel-header">
-        <h2>Label</h2>
-        <select id="lib-select" title="load saved label">
-          <option value="">— load saved label —</option>
+        <h2 data-i18n="panel.label">Label</h2>
+        <select id="lib-select" data-i18n-attr="title:lib.option.placeholder" title="load saved label">
+          <option value="" data-i18n="lib.option.placeholder">— load saved label —</option>
         </select>
-        <span style="flex:1"></span>
+        <span class="spacer"></span>
         <span class="more-row inline-actions">
-          <button id="lib-save"   class="secondary" type="button">save as…</button>
-          <button id="lib-update" class="secondary" type="button" disabled>update</button>
-          <button id="lib-delete" class="secondary" type="button" disabled>delete</button>
-          <button id="lib-clear"  class="secondary" type="button">new</button>
+          <button id="lib-save"   class="secondary" type="button" data-i18n="lib.btn.save">save as…</button>
+          <button id="lib-update" class="secondary" type="button" disabled data-i18n="lib.btn.update">update</button>
+          <button id="lib-delete" class="secondary" type="button" disabled data-i18n="lib.btn.delete">delete</button>
+          <button id="lib-clear"  class="secondary" type="button" data-i18n="lib.btn.new">new</button>
         </span>
       </div>
       <div class="canvas-viewport">
@@ -215,194 +221,194 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="zoom-reset" class="secondary" type="button" hidden title="reset zoom">fit</button>
       </div>
       <div class="row canvas-opts" style="margin-top:.5rem; flex-wrap:wrap; gap:.5rem .75rem;">
-        <label>length</label>
+        <label data-i18n="field.length">length</label>
         <select id="opt-len-mode" style="max-width:90px; min-width:80px;">
-          <option value="auto">auto</option>
-          <option value="fixed">fixed</option>
+          <option value="auto"  data-i18n="field.length.auto">auto</option>
+          <option value="fixed" data-i18n="field.length.fixed">fixed</option>
         </select>
         <input id="opt-len-mm" type="number" min="5" max="500" step="1" value="30" style="max-width:80px; min-width:60px;">
         <span class="muted" style="font-size:.85rem;">mm</span>
         <span style="flex:1; min-width:0;"></span>
-        <label><input id="opt-rulers" type="checkbox"> rulers</label>
-        <label><input id="opt-grid"   type="checkbox"> grid</label>
-        <label><input id="opt-center" type="checkbox"> center</label>
-        <label>origin</label>
+        <label><input id="opt-rulers" type="checkbox"> <span data-i18n="field.rulers">rulers</span></label>
+        <label><input id="opt-grid"   type="checkbox"> <span data-i18n="field.grid">grid</span></label>
+        <label><input id="opt-center" type="checkbox"> <span data-i18n="field.center">center</span></label>
+        <label data-i18n="field.origin">origin</label>
         <select id="opt-origin" style="max-width:130px; min-width:100px;">
-          <option value="tl">top-left</option>
-          <option value="tc">top-center</option>
-          <option value="cl">center-left</option>
-          <option value="c">center</option>
+          <option value="tl" data-i18n="field.origin.tl">top-left</option>
+          <option value="tc" data-i18n="field.origin.tc">top-center</option>
+          <option value="cl" data-i18n="field.origin.cl">center-left</option>
+          <option value="c"  data-i18n="field.origin.c">center</option>
         </select>
       </div>
       <!-- Group: add tools -->
       <div class="row group-start" style="margin-top:.75rem">
-        <button id="add-text"    class="secondary" type="button">+ text</button>
-        <button id="add-image"   class="secondary" type="button">+ image</button>
+        <button id="add-text"    class="secondary" type="button" data-i18n="btn.add.text">+ text</button>
+        <button id="add-image"   class="secondary" type="button" data-i18n="btn.add.image">+ image</button>
         <input  id="image-file"  type="file" accept="image/*" hidden>
-        <button id="add-qr"      class="secondary" type="button">+ QR</button>
-        <button id="add-barcode" class="secondary" type="button">+ barcode</button>
-        <span style="flex:1"></span>
-        <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows" title="show more actions">⋯</button>
+        <button id="add-qr"      class="secondary" type="button" data-i18n="btn.add.qr">+ QR</button>
+        <button id="add-barcode" class="secondary" type="button" data-i18n="btn.add.barcode">+ barcode</button>
+        <span class="spacer"></span>
+        <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows" data-i18n-attr="title:btn.more" title="show more actions">⋯</button>
       </div>
       <!-- Group: element modifiers (collapsed on phone) -->
       <div class="row more-row group-start" style="margin-top:.5rem">
-        <button id="el-dup"    class="secondary" type="button" disabled title="Ctrl+D">duplicate</button>
-        <button id="el-delete" class="secondary" type="button" disabled title="Del">delete</button>
-        <span style="flex:1"></span>
-        <button id="undo"      class="secondary" type="button" disabled title="Ctrl+Z">undo</button>
-        <button id="redo"      class="secondary" type="button" disabled title="Ctrl+Y">redo</button>
+        <button id="el-dup"    class="secondary" type="button" disabled title="Ctrl+D" data-i18n="btn.duplicate">duplicate</button>
+        <button id="el-delete" class="secondary" type="button" disabled title="Del"    data-i18n="btn.delete">delete</button>
+        <span class="spacer"></span>
+        <button id="undo"      class="secondary" type="button" disabled title="Ctrl+Z" data-i18n="btn.undo">undo</button>
+        <button id="redo"      class="secondary" type="button" disabled title="Ctrl+Y" data-i18n="btn.redo">redo</button>
       </div>
       <!-- Group: print actions -->
       <div class="row group-start" style="margin-top:.5rem">
-        <label><input id="auto-cut" type="checkbox" checked> auto cut</label>
-        <label><input id="mirror"   type="checkbox"> mirror</label>
-        <label><input id="chain"    type="checkbox"> chain</label>
-        <span style="flex:1"></span>
-        <button id="print">Print</button>
-        <button id="print-all" class="secondary" hidden>Print all rows</button>
+        <label><input id="print-auto-cut" type="checkbox" checked> <span data-i18n="field.auto-cut">auto cut</span></label>
+        <label><input id="print-mirror"   type="checkbox"> <span data-i18n="field.mirror">mirror</span></label>
+        <label><input id="print-chain"    type="checkbox"> <span data-i18n="field.chain">chain</span></label>
+        <span class="spacer"></span>
+        <button id="print"     data-i18n="btn.print">Print</button>
+        <button id="print-all" class="secondary" hidden data-i18n="btn.print.all">Print all rows</button>
       </div>
       <div id="log"></div>
     </div>
 
     <div class="panel" id="props-panel">
-      <h2 id="props-title">Element</h2>
-      <div id="props-empty" class="muted">Click an element on the canvas to edit it, or hit <b>+ text</b> to add one.</div>
+      <h2 id="props-title" data-i18n="panel.element">Element</h2>
+      <div id="props-empty" class="muted" data-i18n="panel.props.empty">Click an element on the canvas to edit it, or hit + text to add one.</div>
       <div id="props-text" hidden>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>text</label>
-          <input id="text" type="text" placeholder='Type text — use {column} for CSV substitution'>
+        <div class="row">
+          <label data-i18n="field.text">text</label>
+          <input id="text-content" type="text" placeholder='Type text — use {column} for CSV substitution'>
         </div>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>font</label>
+        <div class="row">
+          <label data-i18n="field.font">font</label>
           <div class="font-picker">
             <button id="font-trigger" class="font-trigger" type="button"
                     aria-haspopup="listbox" aria-expanded="false">sans-serif</button>
             <div id="font-list" class="font-list" role="listbox"></div>
           </div>
         </div>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>style</label>
+        <div class="row">
+          <label data-i18n="field.style">style</label>
           <button id="text-bold"      class="secondary text-style" type="button" aria-pressed="false" title="bold (Ctrl+B)">B</button>
           <button id="text-italic"    class="secondary text-style" type="button" aria-pressed="false" title="italic (Ctrl+I)"><i>I</i></button>
           <button id="text-underline" class="secondary text-style" type="button" aria-pressed="false" title="underline (Ctrl+U)"><u>U</u></button>
           <button id="text-strike"    class="secondary text-style" type="button" aria-pressed="false" title="strikethrough"><s>S</s></button>
         </div>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>font px</label>
-          <input id="size" type="range" min="20" max="120" value="80">
-          <span id="size-val" class="dim">80px</span>
+        <div class="row">
+          <label data-i18n="field.font-px">font px</label>
+          <input id="text-size" type="range" min="20" max="120" value="80">
+          <span id="text-size-val" class="dim">80px</span>
         </div>
         <div class="row pair">
-          <label>x</label>
+          <label data-i18n="field.x">x</label>
           <input id="el-x" type="number">
-          <label>y</label>
+          <label data-i18n="field.y">y</label>
           <input id="el-y" type="number">
         </div>
       </div>
 
       <div id="props-qr" hidden>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>text</label>
+        <div class="row">
+          <label data-i18n="field.text">text</label>
           <input id="qr-text" type="text" placeholder="any text or URL">
         </div>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>ECC</label>
+        <div class="row">
+          <label data-i18n="field.qr.ecc">ECC</label>
           <select id="qr-ecc">
-            <option value="L">L (low, ~7%)</option>
-            <option value="M" selected>M (medium, ~15%)</option>
-            <option value="Q">Q (quartile, ~25%)</option>
-            <option value="H">H (high, ~30%)</option>
+            <option value="L"          data-i18n="field.qr.ecc.l">L (low, ~7%)</option>
+            <option value="M" selected data-i18n="field.qr.ecc.m">M (medium, ~15%)</option>
+            <option value="Q"          data-i18n="field.qr.ecc.q">Q (quartile, ~25%)</option>
+            <option value="H"          data-i18n="field.qr.ecc.h">H (high, ~30%)</option>
           </select>
-          <label>module</label>
-          <input id="qr-size" type="number" min="1" max="6" style="max-width:90px">
-          <span class="muted">(px per cell)</span>
+          <label data-i18n="field.qr.module">module</label>
+          <input id="qr-size" type="number" min="1" max="6" class="compact-input">
+          <span class="muted" data-i18n="field.qr.module.hint">(px per cell)</span>
         </div>
         <div class="row pair">
-          <label>x</label>
+          <label data-i18n="field.x">x</label>
           <input id="qr-x" type="number">
-          <label>y</label>
+          <label data-i18n="field.y">y</label>
           <input id="qr-y" type="number">
         </div>
       </div>
 
       <div id="props-barcode" hidden>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>text</label>
+        <div class="row">
+          <label data-i18n="field.text">text</label>
           <input id="bc-text" type="text" placeholder="ABC123 (Code128) or 12-digit (EAN13)">
         </div>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>type</label>
+        <div class="row">
+          <label data-i18n="field.bc.type">type</label>
           <select id="bc-sym">
             <option value="code128b">Code 128 (B)</option>
             <option value="ean13">EAN-13</option>
           </select>
-          <label>height</label>
-          <input id="bc-h" type="number" min="16" max="128" style="max-width:90px">
-          <label>module</label>
-          <input id="bc-size" type="number" min="1" max="6" style="max-width:90px">
-          <span class="muted">(px/bar)</span>
+          <label data-i18n="field.height">height</label>
+          <input id="bc-h" type="number" min="16" max="128" class="compact-input">
+          <label data-i18n="field.bc.module">module</label>
+          <input id="bc-size" type="number" min="1" max="6" class="compact-input">
+          <span class="muted" data-i18n="field.bc.module.hint">(px/bar)</span>
         </div>
         <div class="row pair">
-          <label>x</label>
+          <label data-i18n="field.x">x</label>
           <input id="bc-x" type="number">
-          <label>y</label>
+          <label data-i18n="field.y">y</label>
           <input id="bc-y" type="number">
         </div>
       </div>
 
       <div id="props-image" hidden>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>algorithm</label>
+        <div class="row">
+          <label data-i18n="field.algorithm">algorithm</label>
           <select id="img-algo">
-            <option value="atkinson">Atkinson</option>
-            <option value="floyd-steinberg">Floyd-Steinberg</option>
-            <option value="threshold">Threshold</option>
+            <option value="atkinson"        data-i18n="field.algorithm.atkinson">Atkinson</option>
+            <option value="floyd-steinberg" data-i18n="field.algorithm.floyd-steinberg">Floyd-Steinberg</option>
+            <option value="threshold"       data-i18n="field.algorithm.threshold">Threshold</option>
           </select>
-          <label>threshold</label>
+          <label data-i18n="field.threshold">threshold</label>
           <input id="img-threshold" type="range" min="32" max="224" value="128" style="max-width:140px">
           <span id="img-threshold-val" class="dim">128</span>
         </div>
-        <div class="row" style="margin-bottom:.5rem">
+        <div class="row">
           <label>height</label>
-          <input id="img-h" type="number" min="8" max="128" style="max-width:90px">
-          <span class="muted">(px; width scales)</span>
+          <input id="img-h" type="number" min="8" max="128" class="compact-input">
+          <span class="muted" data-i18n="field.height.hint">(px; width scales)</span>
         </div>
         <div class="row pair">
-          <label>x</label>
+          <label data-i18n="field.x">x</label>
           <input id="img-x" type="number">
-          <label>y</label>
+          <label data-i18n="field.y">y</label>
           <input id="img-y" type="number">
         </div>
       </div>
 
       <div id="props-transform" hidden style="margin-top:.75rem; padding-top:.75rem; border-top:1px solid var(--line);">
-        <div class="row" style="margin-bottom:.5rem">
-          <label title="visible bounding box in pixels — width × height">size px</label>
-          <input id="el-w" type="number" min="1" step="1" style="max-width:90px" title="visible width (px)">
+        <div class="row">
+          <label data-i18n="field.size" title="visible bounding box in pixels — width × height">size px</label>
+          <input id="el-w" type="number" min="1" step="1" class="compact-input" title="visible width (px)">
           <button id="aspect-lock" class="secondary" type="button" aria-pressed="true" title="lock aspect ratio: when on, w and h scale together; when off, mid-edge handles stretch one axis">🔒</button>
-          <input id="el-h" type="number" min="1" step="1" style="max-width:90px" title="visible height (px)">
+          <input id="el-h" type="number" min="1" step="1" class="compact-input" title="visible height (px)">
         </div>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>rotation</label>
-          <input id="el-rotation" type="number" step="1" style="max-width:90px">
+        <div class="row">
+          <label data-i18n="field.rotation">rotation</label>
+          <input id="el-rotation" type="number" step="1" class="compact-input">
           <span class="muted">°</span>
           <button id="rot-cw"  class="secondary" type="button">+90°</button>
           <button id="rot-ccw" class="secondary" type="button">-90°</button>
         </div>
-        <div class="row" style="margin-bottom:.5rem">
-          <label>flip</label>
-          <button id="flip-h" class="secondary" type="button" aria-pressed="false" title="mirror left-right">↔ horizontal</button>
-          <button id="flip-v" class="secondary" type="button" aria-pressed="false" title="mirror top-bottom">↕ vertical</button>
+        <div class="row">
+          <label data-i18n="field.flip">flip</label>
+          <button id="flip-h" class="secondary" type="button" aria-pressed="false" title="mirror left-right" data-i18n="field.flip.h">↔ horizontal</button>
+          <button id="flip-v" class="secondary" type="button" aria-pressed="false" title="mirror top-bottom" data-i18n="field.flip.v">↕ vertical</button>
         </div>
         <div class="row">
-          <label>blend</label>
+          <label data-i18n="field.blend">blend</label>
           <select id="el-composite">
-            <option value="and">AND (over, default)</option>
-            <option value="or">OR (lighten)</option>
-            <option value="xor">XOR (toggle)</option>
-            <option value="not">NOT (invert)</option>
+            <option value="and" data-i18n="field.blend.and">AND (over, default)</option>
+            <option value="or"  data-i18n="field.blend.or">OR (lighten)</option>
+            <option value="xor" data-i18n="field.blend.xor">XOR (toggle)</option>
+            <option value="not" data-i18n="field.blend.not">NOT (invert)</option>
           </select>
-          <span class="muted">how this element overlays the layers below it</span>
+          <span class="muted" data-i18n="field.blend.hint">how this element overlays the layers below it</span>
         </div>
       </div>
     </div>
@@ -410,12 +416,12 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
    <div class="col-right">
     <div class="panel" id="layers-panel" hidden>
-      <h2>Layers <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;">— bottom of canvas first; drag to reorder</span></h2>
+      <h2><span data-i18n="panel.layers">Layers</span> <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;" data-i18n="panel.layers.hint">— bottom of canvas first; drag to reorder</span></h2>
       <ul id="el-list" style="list-style:none; padding:0; margin:0;"></ul>
     </div>
 
     <details class="panel" id="tpl-panel">
-      <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;">Template &amp; CSV data</summary>
+      <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;" data-i18n="panel.tpl">Template &amp; CSV data</summary>
       <p class="muted" style="margin:.75rem 0 .5rem;">Paste CSV with a header row. Use <code>{column}</code> in the
       label text above to substitute. Optional <code>$copies</code>
       column repeats a row N times in batch print. Date helpers:
@@ -430,7 +436,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="tpl-prev" class="secondary" type="button">prev</button>
         <span class="muted" id="tpl-rowinfo">—</span>
         <button id="tpl-next" class="secondary" type="button">next</button>
-        <span style="flex:1"></span>
+        <span class="spacer"></span>
         <button id="csv-import" class="secondary" type="button">import…</button>
         <button id="csv-export" class="secondary" type="button">export</button>
         <button id="csv-clear"  class="secondary" type="button">clear</button>
@@ -446,16 +452,16 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <p class="muted">Pick a network and enter the password. Saving reboots
       the device into the new network. If it can't connect, the next boot
       brings up the <b>pt700-setup</b> AP for re-onboarding.</p>
-      <div class="row" style="margin-bottom:.5rem">
+      <div class="row">
         <label>network</label>
         <select id="wifi-ssid-select"><option value="">(scanning…)</option></select>
         <button id="wifi-rescan" class="secondary">rescan</button>
       </div>
-      <div class="row" style="margin-bottom:.5rem">
+      <div class="row">
         <label>or type</label>
         <input id="wifi-ssid-text" type="text" placeholder="SSID">
       </div>
-      <div class="row" style="margin-bottom:.5rem">
+      <div class="row">
         <label>password</label>
         <input id="wifi-password" type="password" placeholder="WPA2 passphrase">
         <button id="wifi-reveal" class="secondary" type="button">show</button>
@@ -502,12 +508,176 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="api-host-clear" class="secondary">clear</button>
       </div>
       <div id="settings-log" class="muted" style="margin-top:.5rem;"></div>
+
+      <h2 style="margin-top:1.25rem;">Language</h2>
+      <div class="row">
+        <label for="lang-select">UI language</label>
+        <select id="lang-select">
+          <option value="en">English</option>
+        </select>
+      </div>
+      <p class="muted" style="margin-top:.5rem;">Additional locales load on demand from <code>i18n/&lt;lang&gt;.json</code>. New translations get added to the dropdown by extending the <code>STRINGS</code> table at the top of <code>spa/index.html</code> or shipping a JSON file.</p>
     </div>
   </section>
 </main>
 <script src="qrcode.min.js"></script>
 <script>
 "use strict";
+
+/* ---- i18n scaffolding -------------------------------------------
+ *
+ * Every user-visible string lives in STRINGS[lang] keyed by a
+ * dotted path (e.g. "btn.print"). t(key, params?) reads from the
+ * current lang, falls back to "en", then to the key itself if the
+ * string is missing — so adding new strings without translations
+ * still renders something legible.
+ *
+ * HTML markup uses data-i18n="key" on the element whose textContent
+ * should be replaced; data-i18n-attr="title:key1,placeholder:key2"
+ * sets attribute values. applyI18n() walks the DOM once at boot
+ * (and again when the locale changes) to populate everything.
+ *
+ * Translation files for non-EN locales live in spa/i18n/<lang>.json
+ * and are fetched lazily when the user picks a locale in Settings.
+ * EN ships inline so the SPA renders immediately even with the
+ * filesystem in a half-flashed state. */
+const I18N_DEFAULT_LANG = "en";
+const STRINGS = {
+  en: {
+    "tab.label":              "Label",
+    "tab.wifi":                "Wi-Fi",
+    "tab.settings":            "Settings",
+    "panel.label":             "Label",
+    "panel.element":           "Element",
+    "panel.layers":            "Layers",
+    "panel.layers.hint":       "— bottom of canvas first; drag to reorder",
+    "panel.tpl":               "Template & CSV data",
+    "panel.props.empty":       "Click an element on the canvas to edit it, or hit + text to add one.",
+    "props.title.text":        "Text",
+    "props.title.image":       "Image",
+    "props.title.barcode":     "Barcode",
+    "props.title.qr":          "QR",
+    "lib.option.placeholder":  "— load saved label —",
+    "lib.btn.save":            "save as…",
+    "lib.btn.update":          "update",
+    "lib.btn.delete":          "delete",
+    "lib.btn.new":             "new",
+    "btn.add.text":            "+ text",
+    "btn.add.image":           "+ image",
+    "btn.add.qr":              "+ QR",
+    "btn.add.barcode":         "+ barcode",
+    "btn.duplicate":           "duplicate",
+    "btn.delete":              "delete",
+    "btn.undo":                "undo",
+    "btn.redo":                "redo",
+    "btn.print":               "Print",
+    "btn.print.all":           "Print all rows",
+    "btn.more":                "show more actions",
+    "field.length":            "length",
+    "field.length.auto":       "auto",
+    "field.length.fixed":      "fixed",
+    "field.rulers":            "rulers",
+    "field.grid":              "grid",
+    "field.center":            "center",
+    "field.origin":            "origin",
+    "field.origin.tl":         "top-left",
+    "field.origin.tc":         "top-center",
+    "field.origin.cl":         "center-left",
+    "field.origin.c":          "center",
+    "field.auto-cut":          "auto cut",
+    "field.mirror":            "mirror",
+    "field.chain":             "chain",
+    "field.text":              "text",
+    "field.font":              "font",
+    "field.style":             "style",
+    "field.font-px":           "font px",
+    "field.x":                 "x",
+    "field.y":                 "y",
+    "field.size":              "size px",
+    "field.rotation":          "rotation",
+    "field.flip":              "flip",
+    "field.flip.h":            "↔ horizontal",
+    "field.flip.v":            "↕ vertical",
+    "field.blend":             "blend",
+    "field.blend.and":         "AND (over, default)",
+    "field.blend.or":          "OR (lighten)",
+    "field.blend.xor":         "XOR (toggle)",
+    "field.blend.not":         "NOT (invert)",
+    "field.blend.hint":        "how this element overlays the layers below it",
+    "field.algorithm":         "algorithm",
+    "field.algorithm.atkinson":         "Atkinson",
+    "field.algorithm.floyd-steinberg":  "Floyd-Steinberg",
+    "field.algorithm.threshold":        "Threshold",
+    "field.threshold":         "threshold",
+    "field.height":            "height",
+    "field.height.hint":       "(px; width scales)",
+    "field.bc.type":           "type",
+    "field.bc.module":         "module",
+    "field.bc.module.hint":    "(px/bar)",
+    "field.qr.ecc":            "ECC",
+    "field.qr.ecc.l":          "L (low, ~7%)",
+    "field.qr.ecc.m":          "M (medium, ~15%)",
+    "field.qr.ecc.q":          "Q (quartile, ~25%)",
+    "field.qr.ecc.h":          "H (high, ~30%)",
+    "field.qr.module":         "module",
+    "field.qr.module.hint":    "(px per cell)",
+    "msg.loading":             "loading…",
+    "msg.printing":            "printing…",
+    "msg.print.done":          "done — {rows} rows",
+    "msg.print.error":         "error: {error}",
+  },
+};
+
+const I18N_LANG_KEY = "pt700:lang";
+let currentLang = localStorage.getItem(I18N_LANG_KEY) || I18N_DEFAULT_LANG;
+
+function t(key, params) {
+  let s = (STRINGS[currentLang] && STRINGS[currentLang][key])
+       ?? STRINGS[I18N_DEFAULT_LANG][key]
+       ?? key;
+  if (params) for (const [k, v] of Object.entries(params))
+    s = s.replace(`{${k}}`, v);
+  return s;
+}
+
+/* Walk every node carrying data-i18n / data-i18n-attr and populate.
+ * Idempotent — safe to call repeatedly (e.g. after locale change). */
+function applyI18n(root = document) {
+  for (const el of root.querySelectorAll("[data-i18n]")) {
+    el.textContent = t(el.dataset.i18n);
+  }
+  for (const el of root.querySelectorAll("[data-i18n-attr]")) {
+    /* "attr1:key1,attr2:key2" */
+    for (const pair of el.dataset.i18nAttr.split(",")) {
+      const [attr, key] = pair.trim().split(":");
+      if (attr && key) el.setAttribute(attr, t(key));
+    }
+  }
+}
+
+/* When the translation epic ships, fetch /i18n/<lang>.json for any
+ * locale that isn't bundled inline, merge into STRINGS, then call
+ * applyI18n() and any redraw paths that emit user-visible text. */
+async function setLanguage(lang) {
+  if (lang === currentLang) return;
+  if (lang !== I18N_DEFAULT_LANG && !STRINGS[lang]) {
+    try {
+      const r = await fetch(`i18n/${lang}.json`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      STRINGS[lang] = await r.json();
+    } catch (e) {
+      console.warn(`i18n: ${lang} load failed`, e);
+      return;
+    }
+  }
+  currentLang = lang;
+  localStorage.setItem(I18N_LANG_KEY, lang);
+  document.documentElement.lang = lang;
+  applyI18n();
+  /* The bits not driven by data-i18n (props panel labels, log
+   * messages already on screen) need a manual refresh: */
+  if (typeof syncPropsPanel === "function") syncPropsPanel();
+}
 
 /* When the SPA runs outside the device (file://, localhost, etc.),
  * apiHost prefixes every /api/... request so the page can hit a real
@@ -1601,9 +1771,9 @@ async function postPrint() {
   redraw();                  /* restore overlay UI */
   const headers = {
     "Content-Type":   "application/octet-stream",
-    "X-Auto-Cut":     document.getElementById("auto-cut").checked.toString(),
-    "X-Mirror":       document.getElementById("mirror").checked.toString(),
-    "X-Chain":        document.getElementById("chain").checked.toString(),
+    "X-Auto-Cut":     document.getElementById("print-auto-cut").checked.toString(),
+    "X-Mirror":       document.getElementById("print-mirror").checked.toString(),
+    "X-Chain":        document.getElementById("print-chain").checked.toString(),
   };
   const r = await fetch(apiURL("/api/print"), { method: "POST", headers, body });
   const j = await r.json();
@@ -1614,12 +1784,12 @@ async function postPrint() {
 async function doPrint() {
   const btn = document.getElementById("print");
   btn.disabled = true;
-  log("printing…");
+  log(t("msg.printing"));
   try {
     const j = await postPrint();
-    log(`done — ${j.rows} rows`, true);
+    log(t("msg.print.done", { rows: j.rows }), true);
   } catch (e) {
-    log(`error: ${e.message}`, false);
+    log(t("msg.print.error", { error: e.message }), false);
   } finally {
     btn.disabled = false;
     refreshStatus();
@@ -1974,8 +2144,8 @@ function renderLayerList() {
     const li = document.createElement("li");
     li.dataset.id = el.id;
     if (el.id === selectedId) li.classList.add("selected");
-    li.innerHTML = `<span class="grip" title="drag to reorder">⋮⋮</span><span class="type">${el.type}</span><span class="label"></span>`;
-    li.querySelector(".label").textContent = summarise(el);
+    li.innerHTML = `<span class="grip" title="drag to reorder">⋮⋮</span><span class="type">${el.type}</span><span class="summary"></span>`;
+    li.querySelector(".summary").textContent = summarise(el);
     li.addEventListener("click", ev => {
       /* Suppress the click that fires at the end of a drag-drop. */
       if (li._suppressClick) { li._suppressClick = false; return; }
@@ -2065,8 +2235,8 @@ function syncPropsPanel() {
   document.getElementById("props-transform").hidden = !el;
   /* Title reflects the selected element's type so users get a
    * one-glance reminder of what they're editing. */
-  const titles = { text: "Text", image: "Image", barcode: "Barcode", qr: "QR" };
-  document.getElementById("props-title").textContent = el ? (titles[el.type] || "Element") : "Element";
+  document.getElementById("props-title").textContent =
+    t(el ? `props.title.${el.type}` : "panel.element");
   /* Freshly-added elements may not have been measured yet; do a
    * one-shot scratch measure so the size inputs aren't blank on
    * first selection. */
@@ -2093,9 +2263,9 @@ function syncPropsPanel() {
     $fv.classList.toggle("toggled", !!el.flipV);
   }
   if (el && el.type === "text") {
-    document.getElementById("text").value = el.text;
-    document.getElementById("size").value = el.size;
-    document.getElementById("size-val").textContent = el.size + "px";
+    document.getElementById("text-content").value = el.text;
+    document.getElementById("text-size").value = el.size;
+    document.getElementById("text-size-val").textContent = el.size + "px";
     document.getElementById("el-x").value = Math.round(el.x);
     document.getElementById("el-y").value = Math.round(el.y);
     /* Font picker + style toggles. The trigger AND each row in the
@@ -2155,7 +2325,7 @@ function bindPropInput(id, key, parseFn) {
      * snapshot before el[key] is overwritten. */
     if (isFreshPropFocus) { pushUndo(); isFreshPropFocus = false; }
     el[key] = parseFn ? parseFn(e.target.value) : e.target.value;
-    if (id === "size")          document.getElementById("size-val").textContent = el.size + "px";
+    if (id === "text-size")     document.getElementById("text-size-val").textContent = el.size + "px";
     if (id === "img-threshold") document.getElementById("img-threshold-val").textContent = el.threshold;
     /* Anything that affects the image bitmap must invalidate the
      * cached dither so the next redraw rebakes. */
@@ -2173,7 +2343,7 @@ function bindPropInput(id, key, parseFn) {
       el._barcodeCanvas = null;
     /* If the change can affect the layer list's summary text
      * (text content / symbology / type), refresh it. */
-    if (id === "text" || id === "bc-text" || id === "qr-text"
+    if (id === "text-content" || id === "bc-text" || id === "qr-text"
      || id === "bc-sym") renderLayerList();
     redraw();
     /* Type-specific size knobs (font size, dither height, module
@@ -2181,8 +2351,8 @@ function bindPropInput(id, key, parseFn) {
      * unified Size row needs a refresh — but only if those inputs
      * aren't currently focused, to avoid clobbering in-progress
      * typing. */
-    if (id === "size"   || id === "img-h" || id === "bc-h"
-     || id === "bc-size"|| id === "qr-size") {
+    if (id === "text-size" || id === "img-h" || id === "bc-h"
+     || id === "bc-size"   || id === "qr-size") {
       const $w = document.getElementById("el-w");
       const $h = document.getElementById("el-h");
       if (document.activeElement !== $w)
@@ -2192,8 +2362,8 @@ function bindPropInput(id, key, parseFn) {
     }
   });
 }
-bindPropInput("text", "text");
-bindPropInput("size", "size", v => parseInt(v, 10));
+bindPropInput("text-content", "text");
+bindPropInput("text-size", "size", v => parseInt(v, 10));
 bindPropInput("el-x", "x",    v => parseInt(v, 10) || 0);
 bindPropInput("el-y", "y",    v => parseInt(v, 10) || 0);
 bindPropInput("img-algo",      "algorithm");
@@ -2953,6 +3123,15 @@ document.getElementById("api-host-clear").addEventListener("click", () => {
   refreshStatus();
 });
 
+/* Language picker — currently only the inline EN locale is shipped;
+ * additional <option>s appear once translation files arrive in
+ * spa/i18n/<lang>.json. See setLanguage() for the load path. */
+{
+  const $lang = document.getElementById("lang-select");
+  $lang.value = currentLang;
+  $lang.addEventListener("change", e => setLanguage(e.target.value));
+}
+
 /* ----- view switcher (Print / Wi-Fi / Settings) + burger menu ---- */
 
 function showView(name) {
@@ -3082,6 +3261,11 @@ function wifiInit() {
 }
 
 /* ----- boot ---------------------------------------------------- */
+
+/* Translate everything on the page once at startup. Subsequent
+ * locale changes route through setLanguage() which re-runs this. */
+document.documentElement.lang = currentLang;
+applyI18n();
 
 /* Seed one text element + select it so the page isn't empty. */
 elements.push(defaultText());
