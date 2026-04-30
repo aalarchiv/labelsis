@@ -74,6 +74,27 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 }
 .panel, .panel h2, .panel p { overflow-wrap:anywhere; }
 #tpl-panel code, #csv > div { word-break:break-word; overflow-wrap:anywhere; }
+/* Collapsible help block above the CSV editor: shows a one-line
+ * teaser by default, opens to a definition-list grid of all the
+ * available template variables. The "Use variables…" / "Use
+ * variables like {fieldname} …" text swaps based on [open]. */
+.tpl-help { margin:.75rem 0 .5rem; font-size:.85rem; }
+.tpl-help summary { cursor:pointer; list-style:none; outline:none; }
+.tpl-help summary::-webkit-details-marker { display:none; }
+.tpl-help summary code { font-size:.8rem; }
+.tpl-help-toggle { color:var(--accent); text-decoration:underline; }
+.tpl-help[open] .when-closed,
+.tpl-help:not([open]) .when-open { display:none; }
+.tpl-help-body { margin-top:.5rem; }
+.tpl-help-body p { margin:0 0 .5rem; }
+.tpl-vars {
+  display:grid;
+  grid-template-columns:max-content 1fr;
+  gap:.25rem .75rem;
+  margin:0;
+}
+.tpl-vars dt, .tpl-vars dd { margin:0; }
+.tpl-vars dt code { font-size:.8rem; white-space:nowrap; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 /* Inline panel header: the h2 sits next to the label-library
@@ -516,21 +537,30 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
     <details class="panel" id="tpl-panel">
       <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;" data-i18n="panel.tpl">Template &amp; CSV data</summary>
-      <p class="muted" style="margin:.75rem 0 .5rem;">Paste CSV with a header row. Use <code>{column}</code> in the
-      label text above to substitute. Optional <code>$copies</code>
-      column repeats a row N times in batch print. Date helpers:
-      <code>{$dt|YYYY-MM-DD}</code>, <code>{$time|HH:mm}</code>,
-      <code>{$now}</code> (ISO) — work without CSV too. Sequence
-      helpers: <code>{$row}</code> (0-based data-row index, header
-      excluded), <code>{$copy}</code> (0-based copy within the row,
-      varies only when <code>$copies</code> &gt; 1),
-      <code>{$seq}</code> (1-based label number in batch),
-      <code>{$total}</code> (total labels). Append a signed integer
-      offset after a second <code>|</code> to shift any value:
-      <code>{$row|+1}</code> for 1-based row numbers,
-      <code>{$dt|YYYY-MM-DD|+86400}</code> for tomorrow's date
-      (offset is seconds for date helpers). Use <code>\{</code> /
-      <code>\}</code> to write literal braces.</p>
+      <details class="tpl-help">
+        <summary class="muted">CSV data with field names in first row.
+          <span class="tpl-help-toggle when-closed">Use variables…</span>
+          <span class="tpl-help-toggle when-open">Use variables like
+          <code>{fieldname}</code> in the label text to substitute.</span></summary>
+        <div class="muted tpl-help-body">
+          <p>Optional <code>$copies</code> column repeats a row N times in
+          batch print. A signed integer in a second <code>|</code>-segment
+          shifts any numeric value (or seconds, for date helpers).</p>
+          <dl class="tpl-vars">
+            <dt><code>{fieldname}</code></dt>             <dd>CSV column lookup</dd>
+            <dt><code>{$dt|YYYY-MM-DD}</code></dt>        <dd>current date</dd>
+            <dt><code>{$dt|YYYY-MM-DD|+86400}</code></dt> <dd>tomorrow (offset in seconds)</dd>
+            <dt><code>{$time|HH:mm}</code></dt>           <dd>current time</dd>
+            <dt><code>{$now}</code></dt>                  <dd>ISO date+time</dd>
+            <dt><code>{$row}</code></dt>                  <dd>0-based data-row index, header excluded</dd>
+            <dt><code>{$row|+1}</code></dt>               <dd>same +1, i.e. 1-based row number</dd>
+            <dt><code>{$copy}</code></dt>                 <dd>0-based copy index, varies only when <code>$copies</code> &gt; 1</dd>
+            <dt><code>{$seq}</code></dt>                  <dd>1-based label number in batch</dd>
+            <dt><code>{$total}</code></dt>                <dd>total labels in batch</dd>
+            <dt><code>\{</code> <code>\}</code></dt>      <dd>literal braces (escape)</dd>
+          </dl>
+        </div>
+      </details>
       <div id="csv" contenteditable="true" spellcheck="false"
            role="textbox" aria-multiline="true" aria-label="CSV editor"
            data-placeholder="name,$copies&#10;Alice,2&#10;Bob,1"></div>
