@@ -525,7 +525,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <code>{$col}</code> (0-based copy within the row),
       <code>{$seq}</code> (1-based label number),
       <code>{$total}</code> (total labels in batch).</p>
-      <div id="csv" contenteditable="plaintext-only" spellcheck="false"
+      <div id="csv" contenteditable="true" spellcheck="false"
            role="textbox" aria-multiline="true" aria-label="CSV editor"
            data-placeholder="name,$copies&#10;Alice,2&#10;Bob,1"></div>
       <div class="row" style="margin-top:.5rem;">
@@ -2362,40 +2362,92 @@ function csvUpdateEmptyClass() {
 
 /* Normalize the contenteditable's structure so per-line styling
  * (.header on the first <div>, .active on the row driving the
- * preview) keeps lining up with reality. Chromium sometimes leaves
- * orphan text/<br> nodes at the top level — typing into an empty
- * editor lands the first chars as a raw text node before any <div>,
- * which would shift every subsequent row's index by one. We wrap
- * those orphans in a <div> in place rather than rewriting the whole
- * tree, so the user's caret stays where the browser put it. */
+ * preview) keeps lining up with reality. Browsers diverge here:
+ * Chromium leaves orphan text/<br> at the root level, Firefox uses
+ * a single block with <br>s as line separators (no plaintext-only
+ * support), paste can drop anything. Strategy: do all repairs IN
+ * PLACE — never rewrite innerHTML or read innerText (both force
+ * layout / lose the caret). Each repair only touches the broken
+ * nodes, so the fast path on already-clean structure is a quick
+ * walk and the caret survives. */
 function csvNormalize() {
   const csv = document.getElementById("csv");
+
+  // Pass 1: wrap any contiguous run of root-level orphan text/<br>
+  // into a single <div>. Common Chromium artefact when typing into
+  // an empty editor.
   let i = 0;
   while (i < csv.childNodes.length) {
     const n = csv.childNodes[i];
     if (n.nodeType === Node.TEXT_NODE || n.nodeName === "BR") {
-      // Collect the run of contiguous orphans starting at i.
       const group = [n];
       let j = i + 1;
       while (j < csv.childNodes.length) {
         const m = csv.childNodes[j];
         if (m.nodeType === Node.TEXT_NODE || m.nodeName === "BR") {
-          group.push(m);
-          j++;
+          group.push(m); j++;
         } else break;
       }
       const div = document.createElement("div");
-      // Insert the wrapper at the position of the first orphan,
-      // then move the orphan nodes inside it. appendChild on a node
-      // that is already in the DOM moves it (doesn't clone), and
-      // the live NodeList shrinks as we go — so we don't advance i.
       csv.insertBefore(div, n);
       for (const g of group) div.appendChild(g);
-      i++; // Skip past the wrapper we just inserted.
+      i++;
     } else {
       i++;
     }
   }
+
+  // Pass 2: split any child <div> that contains line-break elements
+  // (<br>) or nested block elements into one top-level <div> per
+  // line. Common Firefox artefact: it inserts a single <br> per
+  // pressed Enter inside the existing block instead of splitting.
+  // We MOVE the existing nodes (no clones), so any text-node-anchored
+  // caret keeps its placement.
+  for (let k = 0; k < csv.children.length; ) {
+    const child = csv.children[k];
+    if (!child.querySelector("br, div, p, h1, h2, h3, h4, h5, h6")) { k++; continue; }
+    const segments = csvSplitChildIntoLines(child);
+    const frag = document.createDocumentFragment();
+    for (const seg of segments) frag.appendChild(seg);
+    csv.insertBefore(frag, child);
+    csv.removeChild(child);
+    k += segments.length;
+  }
+}
+
+/* Walk `child`'s descendants depth-first, splitting at each <br>
+ * and at each nested block element. Returns an array of fresh
+ * <div>s (one per line) with the original text/element nodes moved
+ * inside, so any caret anchored to a text node survives. */
+function csvSplitChildIntoLines(child) {
+  const out = [];
+  let cur = document.createElement("div");
+  function flush() {
+    if (!cur.firstChild) cur.appendChild(document.createElement("br"));
+    out.push(cur);
+    cur = document.createElement("div");
+  }
+  function walk(node) {
+    for (const c of Array.from(node.childNodes)) {
+      if (c.nodeName === "BR") {
+        flush();
+      } else if (c.nodeName === "DIV" || c.nodeName === "P"
+              || /^H[1-6]$/.test(c.nodeName)) {
+        if (cur.firstChild) flush();
+        walk(c);
+        if (cur.firstChild) flush();
+      } else {
+        cur.appendChild(c);
+      }
+    }
+  }
+  walk(child);
+  if (cur.firstChild) out.push(cur);
+  if (!out.length) {
+    cur.appendChild(document.createElement("br"));
+    out.push(cur);
+  }
+  return out;
 }
 
 
@@ -3675,10 +3727,33 @@ document.getElementById("print-all").addEventListener("click", doPrintAll);
     redraw();
   }
   csv.addEventListener("input",   () => { csvUpdate(); activateFromCaret(); });
+  /* Without plaintext-only (Firefox doesn't support that value, so
+   * we use contenteditable=true), paste would carry rich HTML in.
+   * Strip everything to plain text before insertion. */
+  csv.addEventListener("paste", ev => {
+    ev.preventDefault();
+    const dt   = ev.clipboardData || window.clipboardData;
+    const text = (dt && dt.getData("text/plain")) || "";
+    if (!text) return;
+    document.execCommand("insertText", false, text);
+  });
+  csv.addEventListener("drop", ev => {
+    /* Same defence for drag-and-drop. */
+    if (ev.dataTransfer && ev.dataTransfer.types && ev.dataTransfer.types.includes("text/html")) {
+      ev.preventDefault();
+      const text = ev.dataTransfer.getData("text/plain");
+      if (text) document.execCommand("insertText", false, text);
+    }
+  });
   /* requestAnimationFrame defers until after the browser has placed
    * the caret at the click point — selection isn't updated yet at
-   * the time the click handler fires synchronously. */
-  csv.addEventListener("click",   () => requestAnimationFrame(activateFromCaret));
+   * the time the click handler fires synchronously. Firefox uses
+   * <br>-separated content inside one big block; csvNormalize
+   * rebuilds the per-line <div>s so activateFromCaret can find the
+   * row index. */
+  csv.addEventListener("click",   () => requestAnimationFrame(() => {
+    csvNormalize(); csvHighlight(); activateFromCaret();
+  }));
   csv.addEventListener("keyup",   (e) => {
     if (/^Arrow|^Page|^Home|^End/.test(e.key)) activateFromCaret();
   });
