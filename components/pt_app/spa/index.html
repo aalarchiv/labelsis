@@ -54,8 +54,14 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
   main { max-width:1280px; }
   #view-print:not([hidden])              { flex-direction:row; align-items:flex-start; }
   #view-print > .col-left  { flex:1; min-width:0; }
-  #view-print > .col-right { flex:0 0 360px; }
+  /* Right column grows with the viewport — clamped so it stays
+   * usable on small desktops (>=320 px) but isn't a thin sliver on
+   * wide ones (up to 480 px). Long inline tokens in help text
+   * break inside this column instead of clipping. */
+  #view-print > .col-right { flex:0 0 clamp(320px, 28%, 480px); min-width:0; }
 }
+.panel, .panel h2, .panel p { overflow-wrap:anywhere; }
+#tpl-panel code { word-break:break-word; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 /* Inline panel header: the h2 sits next to the label-library
