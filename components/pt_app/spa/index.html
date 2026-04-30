@@ -2959,7 +2959,11 @@ function syncPropsPanel() {
   }
   if (el && el.type === "text") {
     document.getElementById("text-content").value = el.text;
-    document.getElementById("text-size").value = el.size;
+    /* Show the effective printed font height (el.size × scaleY) so
+     * the value matches what users measure on the actual label —
+     * not the intrinsic font size before corner-drag scaling. */
+    document.getElementById("text-size").value =
+      Math.max(1, Math.round((el.size || 0) * (el.scaleY ?? 1)));
     document.getElementById("el-x").value = Math.round(el.x);
     document.getElementById("el-y").value = Math.round(el.y);
     /* Font picker + style toggles. The trigger AND each row in the
@@ -3068,7 +3072,27 @@ function bindPropInput(id, key, parseFn) {
   });
 }
 bindPropInput("text-content", "text");
-bindPropInput("text-size", "size", v => Math.max(1, parseInt(v, 10) || 1));
+/* font-px is the EFFECTIVE printed height — el.size × scaleY. When
+ * the user types a new value we set el.size to that and reset the
+ * (corner-drag) scale to 1, so the input reads the same px count
+ * back. Custom handler instead of bindPropInput because we have to
+ * touch three fields at once and refresh the W/H row. */
+document.getElementById("text-size").addEventListener("input", e => {
+  const el = elementById(selectedId);
+  if (!el || el.type !== "text") return;
+  if (isFreshPropFocus) { pushUndo(); isFreshPropFocus = false; }
+  const px = Math.max(1, parseInt(e.target.value, 10) || 1);
+  el.size   = px;
+  el.scaleX = 1;
+  el.scaleY = 1;
+  renderLayerList();
+  redraw();
+  /* refresh the W/H inputs to match the new measured bounds. */
+  const $w = document.getElementById("el-w");
+  const $h = document.getElementById("el-h");
+  if (document.activeElement !== $w) $w.value = Math.max(1, Math.round(el._w || 0));
+  if (document.activeElement !== $h) $h.value = Math.max(1, Math.round(el._h || 0));
+});
 bindPropInput("el-x", "x",    v => parseInt(v, 10) || 0);
 bindPropInput("el-y", "y",    v => parseInt(v, 10) || 0);
 bindPropInput("img-algo",      "algorithm");
