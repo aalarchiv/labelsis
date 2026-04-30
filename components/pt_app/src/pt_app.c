@@ -1,5 +1,5 @@
 /*
- * pt_app — Wi-Fi + HTTP + transport glue. Owns:
+ * pt_app -- Wi-Fi + HTTP + transport glue. Owns:
  *   - NVS-persisted Wi-Fi creds with first-boot fallback to compiled-in
  *   - SoftAP onboarding ("pt700-setup" + setup page) when no creds
  *   - STA bring-up + transport open + mDNS + the HTTP API
@@ -93,7 +93,7 @@ static esp_err_t creds_clear(void)
 #define RESET_POLL_MS  50     /* GPIO sample period */
 
 /* Polls an active-low input. Holding it for RESET_HOLD_MS clears creds
- * and reboots — next boot enters AP-mode onboarding. We sample rather
+ * and reboots -- next boot enters AP-mode onboarding. We sample rather
  * than use an ISR because debounce + duration tracking is simpler in a
  * task, and the work is trivial (20 reads/s, costs ~nothing). */
 static void reset_button_task(void *arg)
@@ -107,7 +107,7 @@ static void reset_button_task(void *arg)
         .intr_type    = GPIO_INTR_DISABLE,
     };
     if (gpio_config(&gc) != ESP_OK) {
-        ESP_LOGW(TAG, "reset: gpio %d config failed — disabling", gpio);
+        ESP_LOGW(TAG, "reset: gpio %d config failed -- disabling", gpio);
         vTaskDelete(NULL);
     }
 
@@ -120,7 +120,7 @@ static void reset_button_task(void *arg)
         } else if (!down) {
             pressed_at = 0;
         } else if ((now - pressed_at) >= pdMS_TO_TICKS(RESET_HOLD_MS)) {
-            ESP_LOGW(TAG, "reset: long press on gpio %d — clearing creds", gpio);
+            ESP_LOGW(TAG, "reset: long press on gpio %d -- clearing creds", gpio);
             creds_clear();
             vTaskDelay(pdMS_TO_TICKS(100));
             esp_restart();
@@ -157,7 +157,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
     (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         /* APSTA onboarding mode brings up the radio without an STA
-         * SSID configured — skip auto-connect when there's nothing
+         * SSID configured -- skip auto-connect when there's nothing
          * to connect to. */
         wifi_config_t cur;
         if (esp_wifi_get_config(WIFI_IF_STA, &cur) == ESP_OK
@@ -243,7 +243,7 @@ static esp_err_t wifi_ap_up(const char *ssid)
     if (wifi_init_once() != ESP_OK) return ESP_FAIL;
 
     /* If wifi_sta_up was called and failed, the radio is already
-     * started in STA mode — stop before switching modes. */
+     * started in STA mode -- stop before switching modes. */
     esp_wifi_stop();
 
     wifi_config_t ap = {
@@ -286,7 +286,7 @@ static void transport_up(const pt_app_config_t *cfg)
             ESP_LOGW(TAG, "transport: PT-* in P-Lite mode (no printer interface)");
             return;
         }
-        ESP_LOGW(TAG, "USB host open failed — falling back to mock");
+        ESP_LOGW(TAG, "USB host open failed -- falling back to mock");
     }
     s_transport      = pt_transport_mock_init(&s_mock);
     s_transport_name = "mock";
@@ -299,7 +299,7 @@ static void transport_up(const pt_app_config_t *cfg)
  * origin (e.g. file://, localhost dev server) hitting a real device
  * over the LAN. Same security posture as before: the API has no auth,
  * anyone reachable on the LAN could already drive it from a same-
- * origin tool — CORS just lets browser pages do it too. */
+ * origin tool -- CORS just lets browser pages do it too. */
 static void cors_headers(httpd_req_t *req)
 {
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin",  "*");
@@ -308,7 +308,7 @@ static void cors_headers(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Access-Control-Max-Age",       "3600");
 }
 
-/* OPTIONS catch-all — answers CORS preflight for any path with the
+/* OPTIONS catch-all -- answers CORS preflight for any path with the
  * shared CORS headers. Browsers fire this before any non-simple
  * request (Content-Type: application/json, custom X-* headers, etc.). */
 static esp_err_t cors_preflight(httpd_req_t *req)
@@ -321,7 +321,7 @@ static esp_err_t cors_preflight(httpd_req_t *req)
 /* Serializes whole pt_session operations across HTTP worker threads.
  * pt_transport already mutexes individual send/recv pairs, but a print
  * is many recvs in a row (wait_print_done loops on status messages
- * looking for phase=printing) — without a higher-level lock, a /api/
+ * looking for phase=printing) -- without a higher-level lock, a /api/
  * status poll fired by the SPA's 3 s timer can slot between two of
  * those recvs and consume the printer's lone phase=printing message,
  * making the print's wait loop time out even though the print is fine.
@@ -357,7 +357,7 @@ static const char *err_kind(pt_err_t e)
 static esp_err_t api_status(httpd_req_t *req)
 {
     cors_headers(req);
-    /* Short wait — a status poll that races with a long print should
+    /* Short wait -- a status poll that races with a long print should
      * fail fast as "busy" rather than holding the connection while the
      * print finishes. */
     if (!SESSION_LOCK(500)) {
@@ -415,7 +415,7 @@ static void hdr_bool(httpd_req_t *req, const char *name, bool *dst)
     else if (strcasecmp(v, "false") == 0 || strcmp(v, "0") == 0) *dst = false;
 }
 
-/* GET /api/info — geometry + identity + non-printable margins. */
+/* GET /api/info -- geometry + identity + non-printable margins. */
 static esp_err_t api_info(httpd_req_t *req)
 {
     cors_headers(req);
@@ -477,15 +477,15 @@ static esp_err_t api_info(httpd_req_t *req)
     return httpd_resp_send(req, body, n);
 }
 
-/* POST /api/feed — advance the tape by `dots` (default 100) without
- * printing. POST /api/cut — issue a single cut at the current head
+/* POST /api/feed -- advance the tape by `dots` (default 100) without
+ * printing. POST /api/cut -- issue a single cut at the current head
  * position. Both build a tiny one-page print job containing a single
  * zero raster row, with the relevant flags set, so the printer's
  * normal feed/cut path runs. */
 static esp_err_t feed_or_cut(httpd_req_t *req, bool do_cut, uint16_t dots)
 {
     cors_headers(req);
-    /* Wait the full session-lock window — feed/cut still go through
+    /* Wait the full session-lock window -- feed/cut still go through
      * pt_session_print_raster (with a one-row zero job), so they need
      * exclusive printer access for the duration. */
     if (!SESSION_LOCK(150000)) {
@@ -539,7 +539,7 @@ static esp_err_t api_feed(httpd_req_t *req)
 }
 
 /* POST /api/print
- * Body  : raw 1-bit raster, n_rows × 16 bytes (the layout
+ * Body  : raw 1-bit raster, n_rows x 16 bytes (the layout
  *         pt_bitmap_to_raster produces).
  * Headers (all optional):
  *   X-Tape-Width-Mm    require this width or fail (default: trust loaded)
@@ -620,7 +620,7 @@ static esp_err_t api_print(httpd_req_t *req)
 
     /* Hold the lock across the entire job (encode + raster send +
      * wait_print_done). Long enough for a 1 m label at PT-P700's
-     * ~30 mm/s — print_timeout_ms (default 120 s) plus margin. */
+     * ~30 mm/s -- print_timeout_ms (default 120 s) plus margin. */
     if (!SESSION_LOCK(150000)) {
         free(buf);
         httpd_resp_set_status(req, "503 Service Unavailable");
@@ -664,7 +664,7 @@ static esp_err_t api_print(httpd_req_t *req)
     return httpd_resp_send(req, rbody, rlen);
 }
 
-/* Single-file SPA embedded via EMBED_TXTFILES in CMakeLists.txt — the
+/* Single-file SPA embedded via EMBED_TXTFILES in CMakeLists.txt -- the
  * label designer. Inline CSS + JS so we don't need LittleFS yet; the
  * file is < 10 KB and lives in flash next to the code. */
 extern const char index_html_start[] asm("_binary_index_html_start");
@@ -813,7 +813,7 @@ static esp_err_t http_up(uint16_t port)
 extern const char setup_html_start[] asm("_binary_setup_html_start");
 extern const char setup_html_end[]   asm("_binary_setup_html_end");
 
-/* Catch-all GET handler — serves the setup page for /, captive-portal
+/* Catch-all GET handler -- serves the setup page for /, captive-portal
  * detection URLs (Apple/Android/Microsoft probes), and any unknown
  * path. With no DNS hijack the popup behaviour is best-effort: probes
  * see non-success HTML and most phones surface a "sign in" notice. */
@@ -826,7 +826,7 @@ static esp_err_t ap_setup_page(httpd_req_t *req)
 }
 
 /* Append `s` (`n` bytes) to the response stream as a JSON string
- * literal — RFC 8259 escaping for ", \, and any byte < 0x20 or >=
+ * literal -- RFC 8259 escaping for ", \, and any byte < 0x20 or >=
  * 0x7f. SSIDs are arbitrary bytes; non-printables become \uXXXX. */
 static void send_json_string(httpd_req_t *req, const uint8_t *s, size_t n)
 {
@@ -843,7 +843,7 @@ static void send_json_string(httpd_req_t *req, const uint8_t *s, size_t n)
     httpd_resp_send_chunk(req, "\"", 1);
 }
 
-/* GET /api/scan — blocking scan on the STA interface (APSTA mode is
+/* GET /api/scan -- blocking scan on the STA interface (APSTA mode is
  * up). Returns up to 30 best-RSSI APs; the page dedupes by SSID. */
 static esp_err_t api_scan(httpd_req_t *req)
 {
@@ -948,7 +948,7 @@ static esp_err_t api_setup(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"ok\":true}");
 
-    ESP_LOGI(TAG, "wifi: creds saved (ssid=%s) — rebooting", ssid);
+    ESP_LOGI(TAG, "wifi: creds saved (ssid=%s) -- rebooting", ssid);
     /* Let the response FIN onto the wire before we drop the AP. */
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
@@ -1038,7 +1038,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         ESP_LOGI(TAG, "wifi: connecting to %s (%s)",
                  ssid, have_stored ? "from NVS" : "from cfg");
         if (wifi_sta_up(ssid, password) != ESP_OK) {
-            ESP_LOGW(TAG, "wifi: STA failed — entering AP onboarding");
+            ESP_LOGW(TAG, "wifi: STA failed -- entering AP onboarding");
             ap_mode = true;
         } else if (!have_stored) {
             if (creds_save(ssid, password) == ESP_OK) {
@@ -1048,7 +1048,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
             }
         }
     } else {
-        ESP_LOGW(TAG, "wifi: no creds — entering AP onboarding");
+        ESP_LOGW(TAG, "wifi: no creds -- entering AP onboarding");
     }
 
     if (ap_mode) {
@@ -1060,7 +1060,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
             ESP_LOGE(TAG, "http: AP server failed");
             return ESP_FAIL;
         }
-        ESP_LOGI(TAG, "ap: %s up — connect and visit http://192.168.4.1/",
+        ESP_LOGI(TAG, "ap: %s up -- connect and visit http://192.168.4.1/",
                  AP_SETUP_SSID);
         /* HTTP server runs forever on its own task; api_setup reboots
          * after it persists the user's chosen creds to NVS. */

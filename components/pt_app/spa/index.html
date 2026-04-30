@@ -48,7 +48,7 @@ nav a:hover { color:var(--fg); }
 .burger span { display:block; width:22px; height:2px; background:var(--fg); margin:4px 0; border-radius:1px; }
 main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-direction:column; gap:1rem; }
 /* view-print holds two column wrappers (col-left, col-right). Each
- * column flows independently as its own flex stack — so a tall
+ * column flows independently as its own flex stack -- so a tall
  * Layers list in col-right doesn't push Props in col-left down,
  * which the previous grid layout did. On narrow viewports both
  * columns stack into one column via natural source order: Design,
@@ -62,9 +62,9 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 #view-print > .col-left,
 #view-print > .col-right { display:flex; flex-direction:column; gap:1rem; }
 /* 2-column layout kicks in at >= 900 px so tablet-landscape
- * (~1024×768, ~1180×820) and small desktops both get the side-by-
+ * (~1024x768, ~1180x820) and small desktops both get the side-by-
  * side view. Below that, columns stack via natural source order:
- * Design → Props → Layers → CSV. */
+ * Design -> Props -> Layers -> CSV. */
 @media (min-width: 900px) {
   main { max-width:1280px; }
   #view-print:not([hidden])              { flex-direction:row; align-items:flex-start; }
@@ -75,7 +75,7 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
    * ~520 px). flex:0 1 lets the basis shrink under pressure
    * (very narrow desktops), while min-width:0 prevents min-content
    * sizing of the textarea from inflating the column. No internal
-   * overflow / resize — the column grows with its content and
+   * overflow / resize -- the column grows with its content and
    * the page itself scrolls if everything together is taller than
    * the viewport. */
   #view-print > .col-right {
@@ -87,8 +87,8 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 #tpl-panel code, #csv > div { word-break:break-word; overflow-wrap:anywhere; }
 /* Collapsible help block above the CSV editor: shows a one-line
  * teaser by default, opens to a definition-list grid of all the
- * available template variables. The "Use variables…" / "Use
- * variables like {fieldname} …" text swaps based on [open]. */
+ * available template variables. The "Use variables..." / "Use
+ * variables like {fieldname} ..." text swaps based on [open]. */
 .tpl-help { margin:.75rem 0 .5rem; font-size:.85rem; }
 .tpl-help summary { cursor:pointer; list-style:none; outline:none; }
 .tpl-help summary::-webkit-details-marker { display:none; }
@@ -113,24 +113,24 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 .panel-header { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.5rem; }
 .panel-header h2 { margin:0; }
 /* display:contents lets the .more-row span participate in the
- * .panel-header flex without forming its own box — children flow
+ * .panel-header flex without forming its own box -- children flow
  * inline. On phone the same rule with display:none collapses the
- * file-op buttons under the ⋯ overflow. */
+ * file-op buttons under the ... overflow. */
 .inline-actions { display:contents; }
 .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
-/* Common row utilities — extracted from repeating inline styles. */
+/* Common row utilities -- extracted from repeating inline styles. */
 .spacer        { flex:1; }
 .compact-input { max-width:90px; }
-/* Vertical spacing between consecutive rows in the props panel —
+/* Vertical spacing between consecutive rows in the props panel --
  * replaces inline margin-bottom:.5rem on every form row. */
 #props-panel .row + .row { margin-top:.5rem; }
 /* Subtle hairline between grouped action rows inside the Label
- * panel — separates "add", "modify", "label library", and "print"
+ * panel -- separates "add", "modify", "label library", and "print"
  * groups visually without a heavy uppercase header per group.
  * Adjacent-sibling combinator: only applies between successive
  * .group-start rows, never above the first one. */
 #view-print .col-left > .panel:first-child > .row.group-start ~ .row.group-start { padding-top:.6rem; border-top:1px solid var(--line); }
-/* Pair rows — fixed 2-column grid so labels and inputs never wrap
+/* Pair rows -- fixed 2-column grid so labels and inputs never wrap
  * onto separate lines for x/y, w/h, rotation+buttons. The first
  * column is the same width as the props-panel label gutter (below)
  * so x/size/rotation/text/etc. all start at the same x position. */
@@ -158,11 +158,11 @@ button:disabled { background:var(--muted); cursor:not-allowed; }
 button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
 button.secondary[aria-pressed="true"], button.secondary.toggled { background:var(--accent); color:var(--bg); }
 /* Lock button: locked (default) shows the padlock in accent colour;
- * unlocked greys out the icon AND swaps to 🔓 — colour + glyph
+ * unlocked greys out the icon AND swaps to unlock -- colour + glyph
  * combine so the state reads at a glance. */
 #aspect-lock                          { background:transparent; color:var(--accent); border-color:var(--accent); }
 #aspect-lock[aria-pressed="false"]    { color:var(--muted);     border-color:var(--muted); opacity:.7; }
-/* Font picker — custom dropdown so each row can render its own
+/* Font picker -- custom dropdown so each row can render its own
  * font preview (left-aligned name, right-aligned charmap sample). */
 .font-picker  { position:relative; flex:1; min-width:0; }
 .font-trigger { width:100%; text-align:left; padding:.5rem; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:4px; cursor:pointer; font:inherit; font-weight:normal; }
@@ -173,7 +173,7 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
 .font-row:hover, .font-row.selected { background:rgba(88,166,255,.12); }
 .font-row .name   { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
 .font-row .sample { color:var(--muted); white-space:nowrap; flex:0 0 auto; }
-/* Icon picker — modal <dialog> with a search field + scrollable
+/* Icon picker -- modal <dialog> with a search field + scrollable
  * grid of all 2078 Bootstrap Icons. Tiles use the bi font directly
  * (no per-icon CSS class). Filter is plain string-contains on the
  * icon name. */
@@ -196,8 +196,8 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
 }
 #icon-picker .footer    { display:flex; justify-content:space-between; align-items:center; gap:.5rem; }
 #icon-picker .count     { color:var(--muted); font-size:.85rem; }
-/* Inline preview in the props panel — shows the chosen icon glyph
- * next to the "change…" button. */
+/* Inline preview in the props panel -- shows the chosen icon glyph
+ * next to the "change..." button. */
 .icon-preview {
   font-family:"bi"; font-size:1.5rem; line-height:1;
   display:inline-flex; align-items:center; justify-content:center;
@@ -210,7 +210,7 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
 #text-bold        { font-weight:700; }
 /* When the auto-extending label grows wider than its column, the
  * viewport gets a horizontal scrollbar so the user can pan to see
- * the right edge — was previously clipping silently with
+ * the right edge -- was previously clipping silently with
  * overflow:hidden. Vertical stays hidden because the canvas height
  * is fixed at HEAD_PX + 2*PAD. */
 .canvas-viewport { position:relative; overflow-x:auto; overflow-y:hidden; max-width:100%; touch-action:none; border:1px solid var(--line); border-radius:4px; background:#fff; }
@@ -219,7 +219,7 @@ canvas { display:block; image-rendering:pixelated; background:#fff; }
 #zoom-reset { position:absolute; right:.5rem; bottom:.5rem; z-index:5; }
 .status-grid { display:grid; grid-template-columns:auto 1fr; gap:.25rem .75rem; font-size:.85rem; }
 .status-grid .k { color:var(--muted); }
-/* License list in the About panel — name on its own line, license
+/* License list in the About panel -- name on its own line, license
  * line indented under it in muted colour. */
 .about-licenses     { margin:.5rem 0 0; font-size:.85rem; }
 .about-licenses dt  { font-weight:600; }
@@ -242,7 +242,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 /* CSV editor: a single contenteditable div where each line renders
  * as its own child <div>. The first child is bold (header), the
  * line containing the caret / last clicked is highlighted (active
- * row driving the preview). Edits go straight into the model — no
+ * row driving the preview). Edits go straight into the model -- no
  * separate parsed-row list to keep in sync. plaintext-only keeps
  * pasted rich text out and gives one-div-per-line behaviour for
  * free in Chromium-based browsers. */
@@ -279,9 +279,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #el-list li.drop-above { box-shadow:inset 0 2px 0 0 var(--accent); }
 #el-list li.drop-below { box-shadow:inset 0 -2px 0 0 var(--accent); }
 /* Greyed when the element has no meaningful content yet (empty
- * text / blank barcode / blank QR) — won't print anything visible.
+ * text / blank barcode / blank QR) -- won't print anything visible.
  * The .err class flags barcode/QR strings the encoder rejected
- * AND broken image loads — print is blocked while any element has
+ * AND broken image loads -- print is blocked while any element has
  * either set. Both cues are subtle but readable so the user
  * spots forgotten / invalid layers in a busy list. */
 #el-list li.empty   { opacity:.55; }
@@ -302,7 +302,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
    * users to the status view) but should appear in the burger
    * dropdown on phone. */
   nav.open a.burger-only { display:flex; }
-  /* WCAG 2.5.5 / Apple HIG / Material recommend ≥44 px touch targets;
+  /* WCAG 2.5.5 / Apple HIG / Material recommend >=44 px touch targets;
    * bump button + input padding here so phone users can hit them.
    * Desktop keeps the tighter sizes for visual density. */
   button { padding:.75rem 1rem; min-height:44px; }
@@ -310,14 +310,14 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   #el-list li { padding:.7rem .5rem; }
   #el-list .grip { padding:.5rem .35rem; font-size:1.2rem; }
   /* Phone toolbar collapse: hide the secondary edit cluster + the
-   * label library row by default, expose them via the ⋯ button.
+   * label library row by default, expose them via the ... button.
    * Reduces the print panel from 4 rows to 1 row on phone width. */
   .phone-only { display:inline-flex; }
   .more-actions { display:none; }
   .more-row { display:none; }
   body.show-more .more-actions { display:contents; }
   body.show-more .more-row     { display:flex; }
-  /* Checkbox tap targets — labels wrapping a checkbox get bumped
+  /* Checkbox tap targets -- labels wrapping a checkbox get bumped
    * to the WCAG 44 px minimum so the whole label is hittable. Uses
    * :has() so the rule only fires on labels that actually contain
    * a checkbox (not text-input labels). */
@@ -770,7 +770,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
  * Every user-visible string lives in STRINGS[lang] keyed by a
  * dotted path (e.g. "btn.print"). t(key, params?) reads from the
  * current lang, falls back to "en", then to the key itself if the
- * string is missing — so adding new strings without translations
+ * string is missing -- so adding new strings without translations
  * still renders something legible.
  *
  * HTML markup uses data-i18n="key" on the element whose textContent
@@ -924,7 +924,7 @@ function t(key, params) {
 }
 
 /* Walk every node carrying data-i18n / data-i18n-attr and populate.
- * Idempotent — safe to call repeatedly (e.g. after locale change). */
+ * Idempotent -- safe to call repeatedly (e.g. after locale change). */
 function applyI18n(root = document) {
   for (const el of root.querySelectorAll("[data-i18n]")) {
     el.textContent = t(el.dataset.i18n);
@@ -940,7 +940,7 @@ function applyI18n(root = document) {
 
 /* Apply a language. Loads i18n/<lang>.json on demand if the strings
  * for the target locale aren't already in STRINGS. Safe to call with
- * the current locale — happens at boot to lazy-load whatever locale
+ * the current locale -- happens at boot to lazy-load whatever locale
  * the user picked in a previous session. */
 async function setLanguage(lang) {
   if (lang !== I18N_DEFAULT_LANG && !STRINGS[lang]) {
@@ -950,7 +950,7 @@ async function setLanguage(lang) {
       STRINGS[lang] = await r.json();
     } catch (e) {
       console.warn(`i18n: ${lang} load failed`, e);
-      /* Fall through so we still render EN — better than blank UI. */
+      /* Fall through so we still render EN -- better than blank UI. */
     }
   }
   if (lang !== currentLang) {
@@ -999,9 +999,9 @@ async function refreshStatus() {
 }
 
 /* /api/info carries per-device identity (vid/pid/serial/product/
- * manufacturer/firmware) and tape geometry. We fetch it lazily —
+ * manufacturer/firmware) and tape geometry. We fetch it lazily --
  * once at boot, and again whenever the user opens the Status view
- * — since it doesn't change between prints. */
+ * -- since it doesn't change between prints. */
 async function refreshDeviceInfo() {
   try {
     const r = await fetch(apiURL("/api/info"));
@@ -1043,9 +1043,9 @@ const TEXT_COLORS = {
   0x02: "other",   0xFF: "incompatible",
 };
 /* RGB triples for the ID lookup, used by the on-canvas "colors"
- * preview. Closely-matched physical-tape approximations — these
+ * preview. Closely-matched physical-tape approximations -- these
  * never go to the printer, only to the CRT. Missing IDs fall back
- * to the swatchMap → white/black so colour mode still produces
+ * to the swatchMap -> white/black so colour mode still produces
  * something legible for tapes we haven't catalogued yet. */
 const TAPE_COLOR_RGB = {
   0x01: [255,255,255], 0x02: [200,200,200], 0x03: [228,232,235],
@@ -1100,7 +1100,7 @@ function renderStatus(j) {
   const g = document.getElementById("status");
   g.innerHTML = "";
 
-  /* Connection block — always shown, even if /api/status failed. */
+  /* Connection block -- always shown, even if /api/status failed. */
   g.innerHTML += `<span class="k">API host</span><span>${escapeHtml(apiHostLabel())}</span>`;
 
   if (!j) {
@@ -1160,17 +1160,17 @@ const PAD     = 24;           /* extra canvas margin so selection
                                  the print area without being clipped.
                                  Also doubles as the band that holds
                                  the on-screen rulers. Only applied
-                                 for the on-screen redraw — packRaster
+                                 for the on-screen redraw -- packRaster
                                  uses an unpadded redraw(true). */
 const PX_PER_MM = 180 / 25.4; /* PT-* print head is 180 dpi          */
 const mmToPx = mm => mm * PX_PER_MM;
-/* Soft cap on auto-extending label width — protects against
+/* Soft cap on auto-extending label width -- protects against
  * sluggishness from a stray element dragged off-canvas. 2500 px
- * ≈ 353 mm of tape, far past anything realistic. Beyond this,
+ * ~ 353 mm of tape, far past anything realistic. Beyond this,
  * redraw clamps printW and shows an overflow banner. */
 const PRINT_W_MAX = 2500;
 
-/* Canvas options — persisted to localStorage. Pure UI state, never
+/* Canvas options -- persisted to localStorage. Pure UI state, never
  * sent to the printer. */
 const CANVAS_OPTS_KEY = "pt700:canvasOpts";
 const CANVAS_OPTS_DEFAULT = {
@@ -1205,18 +1205,18 @@ function defaultText() {
 }
 
 /* Font list for the picker. Stick to families that exist (or have
- * sane fallbacks) on Windows / macOS / Linux out of the box — no
+ * sane fallbacks) on Windows / macOS / Linux out of the box -- no
  * webfont fetch since the firmware can't reach the internet. */
 const FONTS = [
   "sans-serif", "serif", "monospace", "system-ui",
   "Arial", "Helvetica", "Verdana", "Tahoma", "Trebuchet MS",
   "Georgia", "Times New Roman", "Courier New", "Impact", "Comic Sans MS",
 ];
-/* Sample in the picker — covers German umlauts, euro, a digit,
+/* Sample in the picker -- covers German umlauts, euro, a digit,
  * accented Latin. Quick visual hint of each font's charmap. */
 const FONT_SAMPLE = "Äö€0à";
 
-/* CSS font-family value — quote multi-word names so canvas ctx.font
+/* CSS font-family value -- quote multi-word names so canvas ctx.font
  * doesn't choke. Generic fallbacks (sans-serif etc.) are bare. */
 function fontFamilyCSS(family) {
   if (!family) return "sans-serif";
@@ -1240,11 +1240,11 @@ function elementById(id) {
 /* Render text into the canvas context and populate _w/_h on the
  * element for hit-testing later. The text value is run through
  * substitute() so {col} / {$dt} / etc. work in the live preview. */
-/* All drawElement helpers render in the element's *local* space —
+/* All drawElement helpers render in the element's *local* space --
  * origin at (0, 0). drawElement() applies the centre-pivot
  * translate + rotate once before dispatching, so each helper just
  * paints from the origin. _w/_h are written by measure*() helpers
- * BEFORE the transform — drawElement needs them to compute the
+ * BEFORE the transform -- drawElement needs them to compute the
  * pivot, so they can't be set during the paint step. */
 
 function measureText(ctx, el) {
@@ -1281,13 +1281,13 @@ function drawText(ctx, el) {
  *
  * Port of niimblue/src/utils/post_process.ts (MIT) with the
  * algorithms named consistently. We pre-dither once when the source,
- * algorithm, threshold, or size changes — then drawImage() just
+ * algorithm, threshold, or size changes -- then drawImage() just
  * blits the cached ImageData. Dragging stays cheap.
  *
  * Algorithms:
- *   threshold       — straight luminance > N → black/white
- *   floyd-steinberg — error-diffuses to right + down-3 neighbours
- *   atkinson        — original Mac dither, gentler error spread
+ *   threshold       -- straight luminance > N -> black/white
+ *   floyd-steinberg -- error-diffuses to right + down-3 neighbours
+ *   atkinson        -- original Mac dither, gentler error spread
  */
 
 function ditherImage(srcImageData, algorithm, threshold) {
@@ -1341,7 +1341,7 @@ function ditherImage(srcImageData, algorithm, threshold) {
 
   /* Output: black pixels (ink) are fully opaque, white pixels are
    * fully transparent. Lets the blend modes (AND/OR/XOR/NOT) act on
-   * ink only — opaque-white pixels were short-circuiting multiply
+   * ink only -- opaque-white pixels were short-circuiting multiply
    * and breaking lighter / xor. */
   for (let i = 0; i < w * h; i++) {
     const v = gray[i] < 128 ? 0 : 255;
@@ -1354,7 +1354,7 @@ function ditherImage(srcImageData, algorithm, threshold) {
 
 /* Re-rasterise the source <img> at the current target height and run
  * dither(). Cached as a *canvas* (not ImageData) so drawElement's
- * translate/rotate transforms apply — putImageData would ignore the
+ * translate/rotate transforms apply -- putImageData would ignore the
  * transform and render at absolute pixels. Call after src /
  * algorithm / threshold / h changes. */
 function imageRebake(el) {
@@ -1387,12 +1387,12 @@ function drawImage(ctx, el) {
     ctx.drawImage(el._dithered, 0, 0);
     return;
   }
-  /* Broken image — show an obvious "missing" placeholder rather
-   * than a 0×0 hole or a featureless grey box. The label that
+  /* Broken image -- show an obvious "missing" placeholder rather
+   * than a 0x0 hole or a featureless grey box. The label that
    * eventually goes to print would be silently blank otherwise.
    * The placeholder is rendered as a hatched grey rect with
    * "image?" overlaid; _baseW/_baseH come from measureImage's
-   * fallback (60 × el.h). */
+   * fallback (60 x el.h). */
   const w = el._baseW || 60, h = el._baseH || (el.h | 0) || 24;
   ctx.fillStyle = "#fdd";
   ctx.fillRect(0, 0, w, h);
@@ -1413,11 +1413,11 @@ function drawImage(ctx, el) {
 /* barcodes: Code128B + EAN13
  *
  * Ported from niimblue/src/utils/barcode.ts (MIT). Two transcription
- * typos in the upstream source — ASCII 36 ('$') and 41 (')') had 'h'
- * characters in the bit pattern — are corrected here to '1'.
+ * typos in the upstream source -- ASCII 36 ('$') and 41 (')') had 'h'
+ * characters in the bit pattern -- are corrected here to '1'.
  *
  * Patterns are 11 modules each (stop is 13). 1 = black bar, 0 = white
- * bar. Module width is 1 canvas pixel = 1 print dot at 180 dpi → ~0.14
+ * bar. Module width is 1 canvas pixel = 1 print dot at 180 dpi -> ~0.14
  * mm per module, sufficient for typical barcode scanners.
  *
  * Code128 indexing:
@@ -1509,7 +1509,7 @@ function ean13(data) {
 
 /* Pre-bake the barcode bit pattern to a 1-bit (black-on-white)
  * scratch canvas so drawElement can drawImage it with image-
- * smoothing off — guarantees crisp pixel-perfect output, no
+ * smoothing off -- guarantees crisp pixel-perfect output, no
  * anti-aliasing artefacts even when overlapping or rotated. The
  * cache is invalidated when text/symbology/h/size change. */
 function bakeBarcode(el) {
@@ -1520,7 +1520,7 @@ function bakeBarcode(el) {
   const c  = document.createElement("canvas");
   c.width = w; c.height = h;
   const cctx = c.getContext("2d");
-  /* Skip the white background fill — keep gaps transparent so the
+  /* Skip the white background fill -- keep gaps transparent so the
    * blend modes act on ink only (see ditherImage's matching note). */
   cctx.fillStyle = "#000";
   for (let i = 0; i < el._barcodeBits.length; i++) {
@@ -1562,7 +1562,7 @@ function drawBarcode(ctx, el) {
  * public API targets a DOM container, so we instantiate against a
  * detached div to extract the internal QR matrix (._oQRCode), which
  * exposes getModuleCount() + isDark(r,c). Cached on the element
- * until text/ecc changes — drag stays cheap. */
+ * until text/ecc changes -- drag stays cheap. */
 function qrRebake(el) {
   if (typeof QRCode === "undefined") {
     el._qrError = "qrcode.min.js not loaded";
@@ -1586,7 +1586,7 @@ function qrRebake(el) {
   }
 }
 
-/* Pre-bake the QR matrix onto a 1-bit scratch canvas — same trick
+/* Pre-bake the QR matrix onto a 1-bit scratch canvas -- same trick
  * as the barcode path. Cache invalidates when text/ecc/size change. */
 function bakeQR(el) {
   if (!el._qr) return;
@@ -1596,7 +1596,7 @@ function bakeQR(el) {
   const c  = document.createElement("canvas");
   c.width = px; c.height = px;
   const cctx = c.getContext("2d");
-  /* No white background — leave non-module pixels transparent so
+  /* No white background -- leave non-module pixels transparent so
    * blend modes work correctly (matches barcode/image/rect). */
   cctx.fillStyle = "#000";
   for (let r = 0; r < n; r++) {
@@ -1678,20 +1678,20 @@ function measureRect(_ctx, el) {
 }
 
 /* Atari ST / GEM-style fill patterns. Each entry paints into a tile
- * sized 8 × `m` square, where `m` is the rect's "module" — px per
- * pattern unit. m=1 is the densest 8×8 tile; m=4 makes everything
- * four times chunkier (32×32 tile). Same idea as bc-size and
- * qr-size — chunky modules read better at small print scales /
+ * sized 8 x `m` square, where `m` is the rect's "module" -- px per
+ * pattern unit. m=1 is the densest 8x8 tile; m=4 makes everything
+ * four times chunkier (32x32 tile). Same idea as bc-size and
+ * qr-size -- chunky modules read better at small print scales /
  * larger viewing distance.
  *
- * IMPORTANT: tiles paint INK ONLY — non-ink pixels stay alpha=0
+ * IMPORTANT: tiles paint INK ONLY -- non-ink pixels stay alpha=0
  * transparent. That's what makes the blend modes (AND/OR/XOR/NOT)
  * act on actual ink only. */
 const RECT_PATTERN_TILES = {
   solid: (t, m) => { t.fillStyle = "#000"; t.fillRect(0, 0, 8 * m, 8 * m); },
   hatch: (t, m) => {
     t.fillStyle = "#000";
-    /* 45° down-right diagonal, m px wide, every 4 modules. */
+    /* 45 deg down-right diagonal, m px wide, every 4 modules. */
     for (let i = 0; i < 8; i++) {
       t.fillRect(i * m, i * m, m, m);
       t.fillRect(((i + 4) % 8) * m, i * m, m, m);
@@ -1727,7 +1727,7 @@ const RECT_PATTERN_TILES = {
     t.fillRect(0 * m, 4 * m, m, m); t.fillRect(2 * m, 6 * m, m, m);
     t.fillRect(4 * m, 4 * m, m, m); t.fillRect(6 * m, 6 * m, m, m);
   },
-  /* Empty tile — fully transparent. Useful when rect is just a
+  /* Empty tile -- fully transparent. Useful when rect is just a
    * positional/sizing reference and shouldn't paint anything. */
   none: (_t, _m) => {},
 };
@@ -1762,7 +1762,7 @@ function drawRect(ctx, el) {
  *
  * A single Bootstrap-Icons glyph rendered through canvas's font
  * subsystem. The element stores the icon NAME (e.g., "alarm-fill")
- * — the codepoint is looked up at render time from the lazily-
+ * -- the codepoint is looked up at render time from the lazily-
  * fetched bootstrap-icons.json. icon.size controls the glyph height
  * in print-px the same way as text.size; corner-drag scaling still
  * works. Because the glyph paints solid black through fillStyle, it
@@ -1776,7 +1776,7 @@ function drawRect(ctx, el) {
  * lookup is unfiltered so an element saved with an icon outside
  * the current range still draws correctly.
  *
- * Bootstrap Icons lives in U+F000–U+F8FF (private-use area). To
+ * Bootstrap Icons lives in U+F000-U+F8FF (private-use area). To
  * trim the picker to a curated subset, drop ranges in here:
  *
  *   const ICON_RANGES = [[0xF100, 0xF1FF]];   // ~256 icons
@@ -1786,7 +1786,7 @@ function drawRect(ctx, el) {
  * Or pick by family with a name regex via ICON_NAME_FILTER below.
  */
 const ICON_RANGES      = [];    /* empty = all icons */
-const ICON_NAME_FILTER = null;  /* RegExp | null — additional name */
+const ICON_NAME_FILTER = null;  /* RegExp | null -- additional name */
                                 /* match (e.g. /-fill$/ for the   */
                                 /* filled variants only)          */
 
@@ -1873,7 +1873,7 @@ function drawIcon(ctx, el) {
 
 /* Measure first (writes _w/_h), then translate to the element's
  * centre, rotate, translate back to origin, paint. Centre-pivot is
- * the natural "rotate in place" UX — and crucially it makes
+ * the natural "rotate in place" UX -- and crucially it makes
  * rotation reversible: bumping rotation back to 0 returns the
  * element to exactly where it started, no drift. */
 function measureElement(ctx, el) {
@@ -1893,22 +1893,22 @@ function measureElement(ctx, el) {
   el._h = el._baseH * sY;
 }
 
-/* Binary blend modes — pixels are either INK (text colour, opaque)
+/* Binary blend modes -- pixels are either INK (text colour, opaque)
  * or TRANSPARENT (tape colour shines through). Each mode is a
  * Boolean operation on the ink masks of the new layer (B) and the
  * canvas content drawn so far (A):
  *
- *   OR (default)  — ink ∈ A ∪ B. Source-over stack.
- *   AND           — ink ∈ A ∩ B. Implemented with destination-in
+ *   OR (default)  -- ink in A union B. Source-over stack.
+ *   AND           -- ink in A and B. Implemented with destination-in
  *                   inside a clip rect over the element's bounding
  *                   box, so pixels OUTSIDE the box are preserved
  *                   (destination-in is a global op without the
  *                   clip and would clear them).
- *   XOR           — ink ∈ A △ B (symmetric difference). Canvas's
+ *   XOR           -- ink in A ^ B (symmetric difference). Canvas's
  *                   "xor" composite. Overlapping ink cancels.
- *   NOT           — ink ∈ A \ B. destination-out: this layer's
+ *   NOT           -- ink in A \ B. destination-out: this layer's
  *                   ink REMOVES ink from what's below. Useful for
- *                   "white text on a black bar" — punch the text
+ *                   "white text on a black bar" -- punch the text
  *                   through the bar so the tape shines through. */
 const COMPOSITE_MAP = {
   and: "destination-in",
@@ -1923,7 +1923,7 @@ function drawElement(ctx, el) {
   /* Pixel-perfect output: never let the browser interpolate
    * pre-baked bitmaps (image / QR / barcode caches). With smoothing
    * off, drawImage at integer translate is an exact pixel copy and
-   * 90°/180°/270° rotations are lossless; arbitrary angles are
+   * 90 deg/180 deg/270 deg rotations are lossless; arbitrary angles are
    * stair-stepped but still 1-bit, no gradient artefacts that the
    * print threshold would render as inconsistent dithering. */
   ctx.imageSmoothingEnabled = false;
@@ -1935,14 +1935,14 @@ function drawElement(ctx, el) {
   if (rot) ctx.rotate(rot);
   /* Flip + non-uniform scale about the element centre, all rolled
    * into one ctx.scale call. Applied AFTER rotate so the flip /
-   * stretch happen in the rotated frame — matches Figma / Inkscape
-   * conventions. Inner draw uses base coords (0..baseW × 0..baseH)
-   * which the scale projects to (0..visW × 0..visH) in the parent. */
+   * stretch happen in the rotated frame -- matches Figma / Inkscape
+   * conventions. Inner draw uses base coords (0..baseW x 0..baseH)
+   * which the scale projects to (0..visW x 0..visH) in the parent. */
   ctx.scale((el.flipH ? -1 : 1) * sX, (el.flipV ? -1 : 1) * sY);
   ctx.translate(-baseW / 2, -baseH / 2);
 
   const op = el.composite || "or";
-  /* AND uses destination-in, which is a GLOBAL op — without a clip
+  /* AND uses destination-in, which is a GLOBAL op -- without a clip
    * it would clear pixels outside this element's bounding box too.
    * Restrict it to the element's local rect. */
   if (op === "and" && baseW > 0 && baseH > 0) {
@@ -1986,7 +1986,7 @@ function elementBounds(el) {
 }
 
 /* Walk back-to-front so the topmost (last-drawn) element wins ties.
- * Hit-test happens in element-local space — translate the click to
+ * Hit-test happens in element-local space -- translate the click to
  * the element's centre, inverse-rotate, then test against the
  * centred rect (-w/2..w/2, -h/2..h/2). */
 function hitTest(x, y) {
@@ -2010,7 +2010,7 @@ function hitTest(x, y) {
  * visual handle so they're easy to grab on touch. */
 /* Hit radius is bigger on coarse pointers (touch) so the small
  * mid-edge bars and corner squares are reachable with a fingertip
- * even at 1× zoom. matchMedia is read once at startup. */
+ * even at 1x zoom. matchMedia is read once at startup. */
 const HANDLE_HIT = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ? 14 : 10;
 function hitHandle(el, x, y) {
   if (!el) return null;
@@ -2046,7 +2046,7 @@ function hitHandle(el, x, y) {
  * qr.size) defines the bake / render quality at scale=1; scaleX and
  * scaleY are pure transform multipliers applied in drawElement.
  *
- * Bounds: 0.05× to 50× — enough range for ant-text to billboard,
+ * Bounds: 0.05x to 50x -- enough range for ant-text to billboard,
  * tight enough that a cursor near the centre can't shrink to zero. */
 function clampScale(s) {
   if (!Number.isFinite(s)) return 1;
@@ -2085,7 +2085,7 @@ function toggleAspectLock() {
 function redraw(forPrint = false) {
   /* Persist the in-progress design after every mutation. saveSession
    * is debounced so dragging / typing doesn't spam localStorage. The
-   * print path bypasses persistence — it builds a tight raster on a
+   * print path bypasses persistence -- it builds a tight raster on a
    * different canvas and shouldn't trigger an autosave. */
   if (!forPrint) saveSession();
   const c    = document.getElementById("preview");
@@ -2121,8 +2121,8 @@ function redraw(forPrint = false) {
   }
 
   if (forPrint) {
-    /* Tight canvas, no padding — packRaster reads this directly so
-     * the printed bitmap stays exactly head-height × printW. */
+    /* Tight canvas, no padding -- packRaster reads this directly so
+     * the printed bitmap stays exactly head-height x printW. */
     c.width  = printW;
     c.height = HEAD_PX;
     ctx.fillStyle = "#fff";
@@ -2134,7 +2134,7 @@ function redraw(forPrint = false) {
   /* On-screen redraw: pad on all sides so resize/rotate handles
    * stay inside the canvas bitmap when an element sits flush at
    * the edge, and so we have a band for rulers. The print area
-   * is still printW × HEAD_PX, just offset by (PAD, PAD) inside
+   * is still printW x HEAD_PX, just offset by (PAD, PAD) inside
    * the larger canvas. */
   c.width  = printW + 2 * PAD;
   c.height = HEAD_PX + 2 * PAD;
@@ -2159,7 +2159,7 @@ function redraw(forPrint = false) {
 
   ctx.restore();
 
-  /* "Colors" preview — replace b/w pixels in the printable strip
+  /* "Colors" preview -- replace b/w pixels in the printable strip
    * (the head-pin area only, NOT the non-printable tape margins)
    * with the printer's reported tape + text colours. Pure UI; the
    * print raster is unaffected (postPrint runs redraw(true)).
@@ -2189,7 +2189,7 @@ function redraw(forPrint = false) {
   /* Overflow banner: an element somewhere is past PRINT_W_MAX, so
    * we clamped printW to keep the canvas usable. Paint a flag at
    * the right edge so the user knows the label is being truncated
-   * — printing beyond the cap would just produce a blank tape
+   * -- printing beyond the cap would just produce a blank tape
    * since elements past it aren't rendered. */
   if (overflow) {
     ctx.save();
@@ -2204,17 +2204,17 @@ function redraw(forPrint = false) {
     ctx.restore();
   }
 
-  /* Run AFTER the measure pass — barcode/QR errors are populated
+  /* Run AFTER the measure pass -- barcode/QR errors are populated
    * inside drawElement(), so reading them at the start of redraw
    * would always be one frame stale. */
   if (!forPrint) refreshPrintButtons();
 }
 
-/* Re-colour the on-screen *printable* strip — i.e. only the
+/* Re-colour the on-screen *printable* strip -- i.e. only the
  * head-pin window between the top and bottom non-printable
  * margins. Reads/writes happen in canvas-absolute coordinates so
  * the current transform doesn't matter. Skips when printer info
- * or colour mappings are missing — falls back to leaving the
+ * or colour mappings are missing -- falls back to leaving the
  * b/w preview alone. */
 function applyTapeColors(ctx, printW, marginPx, printPx) {
   if (!printer || !printer.ok) return;
@@ -2346,7 +2346,7 @@ function drawRulers(ctx, printW, headH) {
   ctx.fillStyle   = "#57606a";
   ctx.lineWidth   = 1;
 
-  /* Horizontal ruler — ticks. mm=0 is at element-x = oxPx,
+  /* Horizontal ruler -- ticks. mm=0 is at element-x = oxPx,
    * which maps to canvas-x = PAD + oxPx. */
   ctx.beginPath();
   const mmFromH = Math.floor(-oxPx / step) - 1;
@@ -2361,7 +2361,7 @@ function drawRulers(ctx, printW, headH) {
   }
   ctx.stroke();
 
-  /* Horizontal ruler — labels (every 5 mm). */
+  /* Horizontal ruler -- labels (every 5 mm). */
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (let mm = mmFromH - (mmFromH % 5); mm <= mmToH; mm += 5) {
@@ -2370,7 +2370,7 @@ function drawRulers(ctx, printW, headH) {
     ctx.fillText(String(mm), Math.round(cx), 7);
   }
 
-  /* Vertical ruler — ticks. */
+  /* Vertical ruler -- ticks. */
   ctx.beginPath();
   const mmFromV = Math.floor(-oyPx / step) - 1;
   const mmToV   = Math.ceil((headH - oyPx) / step) + 1;
@@ -2384,7 +2384,7 @@ function drawRulers(ctx, printW, headH) {
   }
   ctx.stroke();
 
-  /* Vertical ruler — labels (every 5 mm). */
+  /* Vertical ruler -- labels (every 5 mm). */
   ctx.textAlign = "right";
   for (let mm = mmFromV - (mmFromV % 5); mm <= mmToV; mm += 5) {
     const cy = PAD + mm * step + oyPx;
@@ -2416,7 +2416,7 @@ function drawSelectionChrome(ctx, el) {
     projectLocal(el,  w/2,  h/2),
     projectLocal(el, -w/2,  h/2),
   ];
-  /* Mid-edge anchors — top, right, bottom, left. Drag these for
+  /* Mid-edge anchors -- top, right, bottom, left. Drag these for
    * single-axis (or aspect-locked uniform) scaling. */
   const edges = [
     projectLocal(el,  0,   -h/2),  /* top    */
@@ -2454,7 +2454,7 @@ function drawSelectionChrome(ctx, el) {
     ctx.fillRect(x - HANDLE_VIS/2, y - HANDLE_VIS/2, HANDLE_VIS, HANDLE_VIS);
     ctx.strokeRect(x - HANDLE_VIS/2, y - HANDLE_VIS/2, HANDLE_VIS, HANDLE_VIS);
   }
-  /* Mid-edge squares — slightly narrower in the perpendicular axis
+  /* Mid-edge squares -- slightly narrower in the perpendicular axis
    * so they read as "stretch this side". */
   const E_LONG = HANDLE_VIS, E_SHORT = HANDLE_VIS - 2;
   /* top + bottom are wide-but-short; left + right are tall-but-narrow. */
@@ -2483,7 +2483,7 @@ function packRaster(canvas) {
       const i = (y * w + x) * 4;
       /* Ink only when the pixel is BOTH opaque AND below the
        * luminance threshold. Transparent pixels (alpha < 128) are
-       * "tape shows through" and must NOT print as ink — XOR/NOT/AND
+       * "tape shows through" and must NOT print as ink -- XOR/NOT/AND
        * blend modes can produce alpha=0 holes whose RGB is whatever
        * was last painted (often 0,0,0,0 by canvas default). */
       if (data[i+3] < 128) continue;
@@ -2533,14 +2533,14 @@ function log(msg, ok) {
   el.className = ok === undefined ? "" : (ok ? "kv-ok" : "kv-err");
 }
 
-/* template engine — vanilla port of niimblue's CSV templating
+/* template engine -- vanilla port of niimblue's CSV templating
  * (refs/niimblue/src/utils/canvas_preprocess.ts, MIT). Supports
  * {column} substitution and a $copies column for per-row repeat count.
  * Date helpers and richer formats can land later. */
 
 let csvData = { headers: [], data: [] };
 let csvCurrentRow = 0;
-/* When true, the canvas previews the "header view" — every
+/* When true, the canvas previews the "header view" -- every
  * placeholder in element text renders as the raw variable name
  * (so users see {name}/{$row} etc. in their layout positions).
  * Header is also part of prev/next cycling. */
@@ -2590,7 +2590,7 @@ function parseCSV(text) {
       headers.forEach((h, i) => o[h] = (r[i] !== undefined ? r[i] : ""));
       return o;
     });
-  /* Surface unclosed-quote bugs — the parser otherwise silently
+  /* Surface unclosed-quote bugs -- the parser otherwise silently
    * swallows everything after a stray `"` into one mega-field. */
   return { headers, data, warning: inQuote ? "unclosed_quote" : null };
 }
@@ -2657,8 +2657,8 @@ function substitute(tpl, row, ctx) {
 }
 
 /* Date format spec: parts may contain a token-style format string
- * (YYYY-MM-DD …) and/or a signed-integer second offset. Order
- * doesn't matter — we sniff each part for the integer pattern.  */
+ * (YYYY-MM-DD ...) and/or a signed-integer second offset. Order
+ * doesn't matter -- we sniff each part for the integer pattern.  */
 function parseDateParts(parts) {
   let fmt = null, offsetSec = 0;
   for (const p of parts) {
@@ -2703,7 +2703,7 @@ function csvRender() {
   }
 
   /* prev/next walks by row, but the indicator and "Print all" button
-   * count actual labels — a row with $copies=5 advances the displayed
+   * count actual labels -- a row with $copies=5 advances the displayed
    * number by 5, not 1. Matches what doPrintAll() actually emits. */
   const info = document.getElementById("tpl-rowinfo");
   const allBtn = document.getElementById("print-all");
@@ -2729,7 +2729,7 @@ function csvRender() {
 }
 
 /* Paint .header on the first child line and .active on the line
- * driving the canvas preview. Pure class flipping — never rewrites
+ * driving the canvas preview. Pure class flipping -- never rewrites
  * children, so the user's caret/selection survives. */
 function csvHighlight() {
   const csv = document.getElementById("csv");
@@ -2749,7 +2749,7 @@ function csvText() {
   if (!csv.firstChild) return "";
   /* Fast path: canonical "one <div> per line" structure (true after
    * csvSetText / csvNormalize). Walk the children and join their
-   * textContent — works even when the panel is inside a closed
+   * textContent -- works even when the panel is inside a closed
    * <details>, where innerText would return "". */
   let canonical = true;
   for (const n of csv.childNodes) {
@@ -2792,7 +2792,7 @@ function csvUpdateEmptyClass() {
  * Chromium leaves orphan text/<br> at the root level, Firefox uses
  * a single block with <br>s as line separators (no plaintext-only
  * support), paste can drop anything. Strategy: do all repairs IN
- * PLACE — never rewrite innerHTML or read innerText (both force
+ * PLACE -- never rewrite innerHTML or read innerText (both force
  * layout / lose the caret). Each repair only touches the broken
  * nodes, so the fast path on already-clean structure is a quick
  * walk and the caret survives. */
@@ -2882,12 +2882,12 @@ function escapeHtml(s) {
 }
 
 function csvUpdate() {
-  /* Don't normalize structure during typing — mutating the editor's
+  /* Don't normalize structure during typing -- mutating the editor's
    * DOM mid-keystroke disrupts Firefox's caret tracking and produces
    * the "every char on a new line" symptom. innerText reads the
    * canonical text correctly even from a messy tree, so the parsed
    * model stays in sync with what the user is typing. Structure
-   * cleanup happens on click / blur via csvNormalize() — at that
+   * cleanup happens on click / blur via csvNormalize() -- at that
    * point the editor isn't mid-keystroke, so the caret survives. */
   csvUpdateEmptyClass();
   const text = csvText();
@@ -2902,7 +2902,7 @@ function csvUpdate() {
 }
 
 /* Step the active row in either direction. Cycle order is
- * header → data 0 → data 1 → … → data N-1 → header → … */
+ * header -> data 0 -> data 1 -> ... -> data N-1 -> header -> ... */
 function csvCycle(dir) {
   const n = csvData.data.length;
   if (!n && !csvData.headers.length) return;
@@ -2926,7 +2926,7 @@ function csvCycle(dir) {
  * tape-eating runaway. Any larger value clamps to this. */
 const COPIES_MAX = 1000;
 /* Above this many TOTAL labels in a batch, doPrintAll asks for an
- * explicit confirmation before kicking off — at ~5 s/print on real
+ * explicit confirmation before kicking off -- at ~5 s/print on real
  * hardware that's a 10-minute job, so the user should know what
  * they're starting. */
 const BATCH_CONFIRM_THRESHOLD = 10;
@@ -2948,7 +2948,7 @@ async function doPrintAll() {
   }
   printingInProgress = true;
   refreshPrintButtons();
-  /* Header preview must NOT be printed — it's a layout aid only.
+  /* Header preview must NOT be printed -- it's a layout aid only.
    * Force-clear it for the duration of the batch and remember to
    * restore the user's preview selection when we're done. */
   const wasHeader = csvShowHeader;
@@ -3005,7 +3005,7 @@ function snapshot() {
 /* Replace the live elements[] with a fresh deserialised set. Re-
  * creates the Image object for image elements from the stored data
  * URL; QR / barcode caches are regenerated lazily on first draw. */
-/* Default field values per element type — same as the constructors
+/* Default field values per element type -- same as the constructors
  * the + buttons use, minus the runtime-specific bits (id, src, etc).
  * applyElementDefaults merges saved data on top so older sessions
  * pick up any fields added later in the schema. Saved values always
@@ -3041,7 +3041,7 @@ function restoreFromJSON(json) {
   const arr = JSON.parse(json);
   elements = [];
   for (const data of arr) {
-    /* Drop unknown types defensively — saved labels from a future
+    /* Drop unknown types defensively -- saved labels from a future
      * schema with new element kinds shouldn't crash the older
      * codebase trying to render them. */
     if (!data || !["text", "image", "barcode", "qr", "rect"].includes(data.type)) continue;
@@ -3066,7 +3066,7 @@ function restoreFromJSON(json) {
  *
  * Stacks of JSON snapshots. pushUndo() captures the current state
  * BEFORE a change; redo stack is cleared on every fresh edit. We
- * cap the stack at 100 entries — typical labels are <10 KB stripped,
+ * cap the stack at 100 entries -- typical labels are <10 KB stripped,
  * so worst case ~1 MB sits in memory. */
 const UNDO_CAP = 100;
 let undoStack = [];
@@ -3124,7 +3124,7 @@ function refreshPrintButtons() {
  *
  * Auto-save the in-progress design + a few UI knobs to localStorage
  * so a page reload (or a fresh visit later) drops the user back into
- * the same setup. Separate from the explicit label library — the
+ * the same setup. Separate from the explicit label library -- the
  * library is for named saves, this is the live working state. */
 const SESSION_KEY = "pt700:session";
 let sessionLoading = false;       /* suppress save during restore */
@@ -3154,7 +3154,7 @@ function saveSession() {
         },
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(data));
-    } catch (e) { /* quota / serialization errors — silent */ }
+    } catch (e) { /* quota / serialization errors -- silent */ }
   }, 300);
 }
 
@@ -3296,7 +3296,7 @@ function duplicateSelected() {
   selectElement(copy.id);
 }
 
-/* Property panel ↔ selected element. Inputs read/write the
+/* Property panel <-> selected element. Inputs read/write the
  * currently-selected element; if nothing's selected they're
  * inert (the props-empty hint shows instead of the form). */
 function selectElement(id) {
@@ -3309,7 +3309,7 @@ function selectElement(id) {
 }
 
 /* Layer list lives below the canvas/print controls. Rows show in
- * the same order as `elements[]` — first row = bottom layer. Drag
+ * the same order as `elements[]` -- first row = bottom layer. Drag
  * a row above/below another to reorder; click selects. */
 function summarise(el) {
   if (el.type === "text")    return el.text || "(empty)";
@@ -3329,7 +3329,7 @@ function renderLayerList() {
   const ul = document.getElementById("el-list");
   ul.innerHTML = "";
   /* Iterate back-to-front so the topmost (last-drawn) element sits
-   * at the top of the list — natural top-down ordering, same as
+   * at the top of the list -- natural top-down ordering, same as
    * Photoshop / Figma / Inkscape. The drag-reorder logic below
    * flips the splice index to match. */
   for (let i = elements.length - 1; i >= 0; i--) {
@@ -3338,7 +3338,7 @@ function renderLayerList() {
     li.dataset.id = el.id;
     if (el.id === selectedId) li.classList.add("selected");
     /* Visual flags: empty text / barcode / qr -> grey-out so the
-     * user sees a forgotten layer; render error or broken image →
+     * user sees a forgotten layer; render error or broken image ->
      * red border (matches Print-disable trigger). */
     const isText  = el.type === "text"    || el.type === "barcode" || el.type === "qr";
     const empty   = isText && !(el.text || "").trim();
@@ -3470,8 +3470,8 @@ function syncPropsPanel() {
   }
   if (el && el.type === "text") {
     document.getElementById("text-content").value = el.text;
-    /* Show the effective printed font height (el.size × scaleY) so
-     * the value matches what users measure on the actual label —
+    /* Show the effective printed font height (el.size x scaleY) so
+     * the value matches what users measure on the actual label --
      * not the intrinsic font size before corner-drag scaling. */
     document.getElementById("text-size").value =
       Math.max(1, Math.round((el.size || 0) * (el.scaleY ?? 1)));
@@ -3514,7 +3514,7 @@ function syncPropsPanel() {
     document.getElementById("img-algo").value      = el.algorithm;
     document.getElementById("img-threshold").value = el.threshold;
     document.getElementById("img-threshold-val").textContent = el.threshold;
-    /* Effective printed dither height = intrinsic h × scaleY. */
+    /* Effective printed dither height = intrinsic h x scaleY. */
     document.getElementById("img-h").value =
       Math.max(1, Math.round((el.h || 0) * (el.scaleY ?? 1)));
     document.getElementById("img-x").value = Math.round(el.x);
@@ -3522,8 +3522,8 @@ function syncPropsPanel() {
   } else if (el && el.type === "barcode") {
     document.getElementById("bc-text").value = el.text;
     document.getElementById("bc-sym").value  = el.symbology;
-    /* Effective printed barcode height = intrinsic h × scaleY,
-     * module width = intrinsic size × scaleX. */
+    /* Effective printed barcode height = intrinsic h x scaleY,
+     * module width = intrinsic size x scaleX. */
     document.getElementById("bc-h").value =
       Math.max(1, Math.round((el.h || 0) * (el.scaleY ?? 1)));
     document.getElementById("bc-size").value =
@@ -3533,7 +3533,7 @@ function syncPropsPanel() {
   } else if (el && el.type === "qr") {
     document.getElementById("qr-text").value = el.text;
     document.getElementById("qr-ecc").value  = el.ecc;
-    /* Effective printed QR module width = intrinsic size × scaleX
+    /* Effective printed QR module width = intrinsic size x scaleX
      * (QR is square so scaleX should always equal scaleY). */
     document.getElementById("qr-size").value =
       Math.max(1, Math.round((el.size || 1) * (el.scaleX ?? 1)));
@@ -3541,7 +3541,7 @@ function syncPropsPanel() {
     document.getElementById("qr-y").value    = Math.round(el.y);
   } else if (el && el.type === "rect") {
     document.getElementById("rect-pattern").value = el.pattern || "solid";
-    /* Effective printed pattern module = intrinsic module × scaleX. */
+    /* Effective printed pattern module = intrinsic module x scaleX. */
     document.getElementById("rect-module").value =
       Math.max(1, Math.round((el.module || 1) * (el.scaleX ?? 1)));
     document.getElementById("rect-x").value       = Math.round(el.x);
@@ -3591,7 +3591,7 @@ function bindPropInput(id, key, parseFn) {
     redraw();
     /* Type-specific size knobs (font size, dither height, module
      * px) feed into baseW/baseH, so the visible w/h shown in the
-     * unified Size row needs a refresh — but only if those inputs
+     * unified Size row needs a refresh -- but only if those inputs
      * aren't currently focused, to avoid clobbering in-progress
      * typing. */
     if (id === "text-size" || id === "img-h" || id === "bc-h"
@@ -3606,7 +3606,7 @@ function bindPropInput(id, key, parseFn) {
   });
 }
 bindPropInput("text-content", "text");
-/* font-px is the EFFECTIVE printed height — el.size × scaleY. When
+/* font-px is the EFFECTIVE printed height -- el.size x scaleY. When
  * the user types a new value we set el.size to that and reset the
  * (corner-drag) scale to 1, so the input reads the same px count
  * back. Custom handler instead of bindPropInput because we have to
@@ -3648,7 +3648,7 @@ bindPropInput("icon-x",        "x",         v => parseInt(v, 10) || 0);
 bindPropInput("icon-y",        "y",         v => parseInt(v, 10) || 0);
 
 /* Dimension inputs that should read the EFFECTIVE printed size
- * (intrinsic × scale). Editing one sets the intrinsic field to the
+ * (intrinsic x scale). Editing one sets the intrinsic field to the
  * typed value AND resets scaleX = scaleY = 1, so the next read
  * matches what was just typed. Same pattern as text-size; factored
  * so QR / barcode / image / rect all share one helper. */
@@ -3798,7 +3798,7 @@ document.getElementById("flip-v").addEventListener("click", () => flipBy("v"));
     const ctx = document.getElementById("ctx-menu");
     if (ctx && !ctx.hidden) ctx.hidden = true;
     /* Close the template-help <details> if the caret is in the CSV
-     * editor — Esc-while-editing means "I just want my keystroke
+     * editor -- Esc-while-editing means "I just want my keystroke
      * focus back, not the help open". Doesn't blur the editor. */
     const help = document.querySelector(".tpl-help");
     const csv  = document.getElementById("csv");
@@ -3865,7 +3865,7 @@ document.getElementById("add-barcode").addEventListener("click", () => {
     h: 60,
     symbology: "code128b",
     text: "ABC123",
-    size: 2,   /* default 2 px/module — readable on most scanners,
+    size: 2,   /* default 2 px/module -- readable on most scanners,
                 * scales up to 6 for shelf-distance scanning */
   };
   elements.push(el);
@@ -3896,7 +3896,7 @@ document.getElementById("add-rect").addEventListener("click", () => {
 
 document.getElementById("add-icon").addEventListener("click", () => {
   /* Pre-fetch the catalog so the picker is ready by the time the
-   * user clicks "change…". The element's first draw also kicks
+   * user clicks "change...". The element's first draw also kicks
    * a load if needed. */
   loadIconCatalog();
   pushUndo();
@@ -3960,7 +3960,7 @@ document.getElementById("lib-save").addEventListener("click", () => {
   input.select();
 });
 
-/* Icon picker dialog. Opens from the props-icon "change…" button.
+/* Icon picker dialog. Opens from the props-icon "change..." button.
  * The grid is rendered once on first open (post-catalog-fetch) and
  * filtered by the search input on every keystroke. Clicking a tile
  * commits the choice and closes the dialog. */
@@ -3970,7 +3970,7 @@ document.getElementById("lib-save").addEventListener("click", () => {
   const grid   = document.getElementById("icon-grid");
   const count  = document.getElementById("icon-count");
   const cancel = document.getElementById("icon-cancel");
-  let pending  = false;     /* already opening — coalesce double clicks */
+  let pending  = false;     /* already opening -- coalesce double clicks */
 
   function renderGrid(filter) {
     if (!ICON_NAMES_LIST) return;
@@ -4056,9 +4056,9 @@ document.getElementById("lib-select").addEventListener("change", e => {
 /* Pointer-event drag on the canvas. Convert client coords to canvas
  * coords (CSS scaling) so it works on retina + zoomed pages. */
 const canvas = document.getElementById("preview");
-let drag   = null;   /* { id, dxFromCenter, dyFromCenter } — element drag */
-let resize = null;   /* { id, startDist, startVal }       — corner drag  */
-let rotor  = null;   /* { id, startAngle, startRot }      — rotate drag  */
+let drag   = null;   /* { id, dxFromCenter, dyFromCenter } -- element drag */
+let resize = null;   /* { id, startDist, startVal }       -- corner drag  */
+let rotor  = null;   /* { id, startAngle, startRot }      -- rotate drag  */
 
 /* Zoom + pan state. Applied to the canvas via CSS transform; the
  * canvas's own pixel buffer never changes resolution, so output
@@ -4080,7 +4080,7 @@ function evtToCanvas(ev) {
   /* Subtract PAD because the on-screen canvas has a PAD-wide gutter
    * around the printable area but elements live in unpadded
    * print-pixel space. Negative results mean the pointer is over
-   * the gutter — that's fine, hit tests just won't match. */
+   * the gutter -- that's fine, hit tests just won't match. */
   const r = canvas.getBoundingClientRect();
   return {
     x: (ev.clientX - r.left) * (canvas.width  / r.width)  - PAD,
@@ -4337,7 +4337,7 @@ document.getElementById("zoom-reset").addEventListener("click", () => {
   applyTransform();
 });
 
-/* Right-click also opens the context menu — no long-press wait. */
+/* Right-click also opens the context menu -- no long-press wait. */
 canvas.addEventListener("contextmenu", ev => {
   const p = evtToCanvas(ev);
   const hit = hitTest(p.x, p.y);
@@ -4443,7 +4443,7 @@ document.addEventListener("keydown", ev => {
 /* Group consecutive arrow-key actions into a single undo entry by
  * only pushing once per ~800 ms keystroke run. Otherwise nudging
  * an element 20 pixels via 20 arrow presses would consume 20 undo
- * slots — annoying. */
+ * slots -- annoying. */
 let kbdLastTime = 0;
 function kbdUndoTick() {
   const now = Date.now();
@@ -4451,7 +4451,7 @@ function kbdUndoTick() {
   kbdLastTime = now;
 }
 
-/* Uniform scale via keyboard, regardless of aspectLocked — matches
+/* Uniform scale via keyboard, regardless of aspectLocked -- matches
  * the corner-handle drag behaviour. */
 function kbdScaleBy(factor) {
   const el = elementById(selectedId);
@@ -4463,7 +4463,7 @@ function kbdScaleBy(factor) {
 }
 
 /* Track "fresh focus" so the first input event after a focus into
- * a property field pushes an undo entry — but tabbing through
+ * a property field pushes an undo entry -- but tabbing through
  * fields without editing doesn't pollute the stack. */
 let isFreshPropFocus = false;
 document.getElementById("props-panel").addEventListener("focusin", ev => {
@@ -4476,7 +4476,7 @@ document.getElementById("props-panel").addEventListener("focusout", () => {
 });
 document.getElementById("print").addEventListener("click", doPrint);
 document.getElementById("print-all").addEventListener("click", doPrintAll);
-/* The contenteditable IS the rows list — typing updates the parsed
+/* The contenteditable IS the rows list -- typing updates the parsed
  * model (csvData) and re-paints .header / .active classes. Click to
  * position the caret in a row also activates it (drives the canvas
  * preview without rebuilding the editor's DOM). */
@@ -4526,7 +4526,7 @@ document.getElementById("print-all").addEventListener("click", doPrintAll);
     }
   });
   /* requestAnimationFrame defers until after the browser has placed
-   * the caret at the click point — selection isn't updated yet at
+   * the caret at the click point -- selection isn't updated yet at
    * the time the click handler fires synchronously. Firefox uses
    * <br>-separated content inside one big block; csvNormalize
    * rebuilds the per-line <div>s so activateFromCaret can find the
@@ -4538,7 +4538,7 @@ document.getElementById("print-all").addEventListener("click", doPrintAll);
     if (/^Arrow|^Page|^Home|^End/.test(e.key)) activateFromCaret();
   });
   /* Tidy structure once typing has stopped (focus moves elsewhere)
-   * — Firefox in particular leaves <br>-separated content inside one
+   * -- Firefox in particular leaves <br>-separated content inside one
    * big block while the user types, and the per-line highlight only
    * works once we've split it back out into <div>s. */
   csv.addEventListener("blur",    () => { csvNormalize(); csvHighlight(); });
@@ -4547,7 +4547,7 @@ document.getElementById("print-all").addEventListener("click", doPrintAll);
 document.getElementById("tpl-prev").addEventListener("click", () => csvCycle(-1));
 document.getElementById("tpl-next").addEventListener("click", () => csvCycle(+1));
 
-/* CSV import/export — file <-> contenteditable round-trip. */
+/* CSV import/export -- file <-> contenteditable round-trip. */
 document.getElementById("csv-import").addEventListener("click", () => {
   document.getElementById("csv-file").click();
 });
@@ -4627,7 +4627,7 @@ document.getElementById("csv-clear").addEventListener("click", () => {
   });
 })();
 
-/* Settings tab — API host. */
+/* Settings tab -- API host. */
 document.getElementById("api-host").value = apiHost;
 function settingsLog(msg, ok) {
   const el = document.getElementById("settings-log");
@@ -4650,7 +4650,7 @@ document.getElementById("api-host-clear").addEventListener("click", () => {
   refreshStatus();
 });
 
-/* Language picker — currently only the inline EN locale is shipped;
+/* Language picker -- currently only the inline EN locale is shipped;
  * additional <option>s appear once translation files arrive in
  * spa/i18n/<lang>.json. See setLanguage() for the load path. */
 {
@@ -4673,7 +4673,7 @@ function showView(name) {
   document.querySelectorAll("nav a").forEach(a => {
     a.classList.toggle("active", a.dataset.view === name);
   });
-  /* The h1 chevron rotates while the status view is showing — same
+  /* The h1 chevron rotates while the status view is showing -- same
    * affordance as before, just driven from the central switcher. */
   document.getElementById("title").classList.toggle("expanded", name === "status");
   document.getElementById("nav").classList.remove("open");
@@ -4696,7 +4696,7 @@ document.getElementById("burger").addEventListener("click", () => {
 });
 
 /* h1 doubles as the connection indicator (green/red dot via CSS) and
- * a shortcut to the Printer status view — same effect as picking
+ * a shortcut to the Printer status view -- same effect as picking
  * "Printer" from the nav / burger menu. Click again to toggle back
  * to the previously-selected view. */
 document.getElementById("title").addEventListener("click", () => {
@@ -4704,7 +4704,7 @@ document.getElementById("title").addEventListener("click", () => {
   showView(isStatus ? (lastNonStatusView || "print") : "status");
 });
 
-/* Phone-only "⋯" toggle that reveals the secondary toolbar
+/* Phone-only "..." toggle that reveals the secondary toolbar
  * actions (duplicate/delete/undo/redo) and the label library row.
  * No-op on desktop where the CSS .phone-only rule keeps the button
  * hidden and the rows always visible. */
@@ -4829,7 +4829,7 @@ refreshDeviceInfo();
 /* Poll every 3 s. Status changes (cover open, tape change, error
  * clears) need to surface fast enough to feel live; 3 s is a few
  * dozen requests/min, well within what the printer + ESP can handle.
- * /api/info polled at 1/10 the rate — identity rarely changes. */
+ * /api/info polled at 1/10 the rate -- identity rarely changes. */
 setInterval(refreshStatus, 3000);
 setInterval(refreshDeviceInfo, 30000);
 redraw();

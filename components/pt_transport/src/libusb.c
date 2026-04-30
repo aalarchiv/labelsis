@@ -1,5 +1,5 @@
 /*
- * pt_transport_libusb — Linux/macOS userspace pt_transport_t, built on
+ * pt_transport_libusb -- Linux/macOS userspace pt_transport_t, built on
  * libusb-1.0. See pt_transport_libusb.h.
  *
  * Compiled only when host CMake detects libusb-1.0 via pkg-config; the
@@ -128,7 +128,7 @@ pt_transport_libusb_t *pt_transport_libusb_open(void)
                                &u->intf, &u->ep_in, &u->ep_out) != 0)
         goto close_fail;
 
-    /* Linux's usblp grabs PRINTER-class devices by default — detach so
+    /* Linux's usblp grabs PRINTER-class devices by default -- detach so
      * we can claim. Save the fact for reattachment in close(). */
     if (libusb_kernel_driver_active(u->handle, u->intf) == 1) {
         if (libusb_detach_kernel_driver(u->handle, u->intf) == 0)

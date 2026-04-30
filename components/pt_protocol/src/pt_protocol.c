@@ -1,5 +1,5 @@
 /*
- * pt_protocol — encoder and decoder for the Brother PT-H500/P700/E500
+ * pt_protocol -- encoder and decoder for the Brother PT-H500/P700/E500
  * raster command set. Pure C, no I/O.
  *
  * All byte layouts come from refs/brother/cv_pth500p700e500_eng_raster_111.pdf
@@ -12,10 +12,10 @@
 
 /* tape geom */
 
-/* SDM p. 20 TZe table — left margin pins | print area pins | right pins
+/* SDM p. 20 TZe table -- left margin pins | print area pins | right pins
  * for the H500/P700/E500 (128-pin head). The printer reports the tape
  * width via the status byte 10 as 4 / 6 / 9 / 12 / 18 / 24 (rounded up
- * for the 3.5 mm tape — SDM table (3), p. 27). */
+ * for the 3.5 mm tape -- SDM table (3), p. 27). */
 pt_err_t pt_tape_geometry_tze(uint8_t width_mm, pt_tape_geometry_t *out)
 {
     if (!out) return PT_ERR_INVALID_ARG;
@@ -24,7 +24,7 @@ pt_err_t pt_tape_geometry_tze(uint8_t width_mm, pt_tape_geometry_t *out)
     static const struct {
         uint8_t w, left, print, right, tape_dots;
     } table[] = {
-        {  4, 52,  24, 52,  24 },  /* 3.5 mm tape — status reports w=4   */
+        {  4, 52,  24, 52,  24 },  /* 3.5 mm tape -- status reports w=4   */
         {  6, 48,  32, 48,  42 },
         {  9, 39,  50, 39,  64 },
         { 12, 29,  70, 29,  84 },
@@ -111,7 +111,7 @@ int pt_encode_print_info(uint8_t *buf, size_t cap, const pt_print_info_t *info)
     if (!buf || !info) return PT_ERR_INVALID_ARG;
     if (cap < 13) return PT_ERR_BUF_TOO_SMALL;
 
-    /* {n1} valid-flags bitfield (SDM §4 ESC i z, p. 32). */
+    /* {n1} valid-flags bitfield (SDM sec4 ESC i z, p. 32). */
     uint8_t valid = 0;
     if (info->valid_kind)        valid |= 0x02;  /* PI_KIND    */
     if (info->valid_width)       valid |= 0x04;  /* PI_WIDTH   */
@@ -186,7 +186,7 @@ int pt_encode_raster_row(uint8_t *buf, size_t cap,
     if (!buf || !row) return PT_ERR_INVALID_ARG;
     if (row_len > 0xffff) return PT_ERR_INVALID_ARG;
     if (cap < 3 + row_len) return PT_ERR_BUF_TOO_SMALL;
-    /* Opcode 0x47 ('G'), not 0x67 ('g') as the SDM v1.11 §3 table states.
+    /* Opcode 0x47 ('G'), not 0x67 ('g') as the SDM v1.11 sec3 table states.
      * Both refs/printer-driver-ptouch (CUPS) and refs/ptouch-770 emit 0x47
      * and print successfully on real hardware (PT-H500/P700/E500); the
      * SDM appears to have a typo on this single byte. */
@@ -223,7 +223,7 @@ int pt_encode_print_last(uint8_t *buf, size_t cap)
 
 /* packbits */
 
-/* PackBits encoder per SDM §4 M (p. 35). Strict-SDM: a run of 2 equal
+/* PackBits encoder per SDM sec4 M (p. 35). Strict-SDM: a run of 2 equal
  * bytes encodes as a repeat code (matching the SDM example). Raw chunks
  * extend until either input ends or the next byte equals its successor
  * (i.e. a new repeat starts). Max chunk size 128 (signed-byte count limit).
@@ -231,7 +231,7 @@ int pt_encode_print_last(uint8_t *buf, size_t cap)
  * If the compressed stream for a 16-byte input exceeds 16 bytes, falls
  * back to the SDM-documented raw 17-byte form: 0x0F + 16 raw bytes.
  *
- * NB: refs/ptouch-770 makes different (also-spec-valid) choices — see
+ * NB: refs/ptouch-770 makes different (also-spec-valid) choices -- see
  * bd memory "pt700 PACKBITS DIVERGENCE". */
 int pt_packbits_encode(uint8_t *out, size_t cap,
                        const uint8_t *in, size_t in_len)

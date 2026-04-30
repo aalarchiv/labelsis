@@ -1,13 +1,13 @@
 /*
- * pt_send — Linux CLI: print a .pbm onto a USB-connected PT-* via
+ * pt_send -- Linux CLI: print a .pbm onto a USB-connected PT-* via
  *           libusb + pt_session.
  *
  * The user's existing .pbm fixtures under refs/ptouch-770/ are laid
  * out in the ptouch-770 convention: PBM "width" = number of raster
  * lines (feed direction), PBM "height" = number of pin positions
  * (cross-tape direction). The printer firmware applies the
- * left/right margin internally — the host always sends 128 pin bits
- * per raster row regardless of tape width — so this CLI pads or
+ * left/right margin internally -- the host always sends 128 pin bits
+ * per raster row regardless of tape width -- so this CLI pads or
  * truncates the PBM's height to exactly 128 pins and emits raw
  * raster rows without margin offset, mirroring ptouch-770.
  *
@@ -38,7 +38,7 @@ static const char *USAGE =
     "Options:\n"
     "  --no-cut             disable auto-cut at end of job (use for tiny\n"
     "                       labels that might otherwise jam in the cutter)\n"
-    "  --chain              chain printing — skip the trailing feed+cut so\n"
+    "  --chain              chain printing -- skip the trailing feed+cut so\n"
     "                       the NEXT job continues directly on this tape\n"
     "                       (saves the ~25 mm leader the printer normally\n"
     "                       wastes between cuts). Implies --no-cut: on\n"
@@ -48,7 +48,7 @@ static const char *USAGE =
     "                       the strip is released.\n"
     "  --mirror             mirror-print (for transparent tape backside)\n"
     "  --no-compression     send raster rows raw (no PackBits)\n"
-    "  --margin=DOTS        leading margin in dots (default 14 ≈ 2 mm)\n"
+    "  --margin=DOTS        leading margin in dots (default 14 ~ 2 mm)\n"
     "  --width=MM           require this tape width (default: trust loaded tape)\n"
     "  --fit                scale the PBM (nearest-neighbour, preserving\n"
     "                       aspect ratio) so its height matches the loaded\n"
@@ -86,7 +86,7 @@ static int read_int_token(FILE *f)
 }
 
 /* Load a P4 (binary) PBM. PBM convention: width = pixels per row,
- * height = rows. We don't transpose — pad_to_128_pins below interprets
+ * height = rows. We don't transpose -- pad_to_128_pins below interprets
  * PBM "height" as the pin direction, matching ptouch-770. */
 static int pbm_load(const char *path, pbm_t *out)
 {
@@ -121,12 +121,12 @@ static int pbm_load(const char *path, pbm_t *out)
     return 0;
 }
 
-/* Build a (HEAD_PINS × raster_lines) buffer in the layout
- * pt_bitmap_to_raster_no_margin() consumes — but since we want to skip
+/* Build a (HEAD_PINS x raster_lines) buffer in the layout
+ * pt_bitmap_to_raster_no_margin() consumes -- but since we want to skip
  * margin offsets entirely (printer applies them), we produce 128 raster
  * rows of 16 bytes each directly here.
  *
- * Output: raster_lines × 16 bytes. For each raster line l (0..w-1):
+ * Output: raster_lines x 16 bytes. For each raster line l (0..w-1):
  *   pin p (0..127): set if PBM pixel (col=l, row=p) is set in src,
  *                   centred when src->height < 128.
  */
@@ -162,7 +162,7 @@ static uint8_t *render_to_raster_rows(const pbm_t *src, size_t *out_rows)
 /* scale */
 
 /* Nearest-neighbour scale of a 1-bit PBM. Cheap and good enough at
- * typical label scales — bilinear/dither would be nicer but needs
+ * typical label scales -- bilinear/dither would be nicer but needs
  * a grayscale intermediate and a redither pass; not worth the code
  * for the common case ("scale 200-px logo down to 70-px tape"). */
 static int pbm_scale(const pbm_t *src, int new_w, int new_h, pbm_t *out)
@@ -365,7 +365,7 @@ int main(int argc, char **argv)
                 return 1;
             }
             fprintf(stderr,
-                    "pt_send: --fit: scaling %d×%d → %d×%d for %u mm tape "
+                    "pt_send: --fit: scaling %dx%d -> %dx%d for %u mm tape "
                     "(%u print pins)\n",
                     pbm.width, pbm.height, scaled.width, scaled.height,
                     st.media_width_mm, g.print_pins);
@@ -379,10 +379,10 @@ int main(int argc, char **argv)
                     "PBM for full coverage.\n",
                     pbm.height, st.media_width_mm, g.print_pins, g.print_pins);
         }
-        /* The cutter struggles with very short labels — they can be
+        /* The cutter struggles with very short labels -- they can be
          * pushed back into the printer body and jam. ~30 mm is the
          * empirical safe minimum. PBM "width" is the feed-direction
-         * dimension; at 180 dpi each pixel = 25.4/180 ≈ 0.141 mm. */
+         * dimension; at 180 dpi each pixel = 25.4/180 ~ 0.141 mm. */
         double label_mm = pbm.width * 25.4 / 180.0;
         if (label_mm < 30.0 && opts.auto_cut) {
             fprintf(stderr,
@@ -402,7 +402,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    fprintf(stderr, "pt_send: rendering %d × %d PBM as %zu raster rows\n",
+    fprintf(stderr, "pt_send: rendering %d x %d PBM as %zu raster rows\n",
             pbm.width, pbm.height, n_rows);
     free(pbm.bytes);
 

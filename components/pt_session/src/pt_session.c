@@ -1,5 +1,5 @@
 /*
- * pt_session — orchestrates SDM §5.1 concurrent printing flow over an
+ * pt_session -- orchestrates SDM sec5.1 concurrent printing flow over an
  * abstract pt_transport_t. See pt_session.h.
  */
 
@@ -16,10 +16,10 @@ void pt_session_options_default(pt_session_options_t *o)
     o->no_chain_print    = true;
     o->mirror_print      = false;
     o->special_tape      = false;
-    o->margin_dots       = 14;       /* ≈ 2 mm @ 180 dpi */
+    o->margin_dots       = 14;       /* ~ 2 mm @ 180 dpi */
     o->recover_always_on = true;
     o->status_timeout_ms = 5000;
-    o->print_timeout_ms  = 120000;  /* 2 min — tolerates a 1 m label + cooling */
+    o->print_timeout_ms  = 120000;  /* 2 min -- tolerates a 1 m label + cooling */
     o->on_status         = NULL;
     o->on_status_user    = NULL;
     o->on_event          = NULL;
@@ -36,7 +36,7 @@ static pt_err_t send_all(pt_transport_t *t, const uint8_t *buf, size_t len)
 
 /* Read exactly 32 bytes of status into `out` within ~timeout_ms total.
  * Accumulates across multiple recv() calls so that a libusb short-read
- * (rare in practice — 32-byte status fits in one bulk packet — but
+ * (rare in practice -- 32-byte status fits in one bulk packet -- but
  * defensible) doesn't lose the partial bytes already pulled. */
 static pt_err_t recv_status(pt_transport_t *t, pt_status_t *out,
                             uint32_t timeout_ms)
@@ -101,14 +101,14 @@ static pt_err_t send_row(pt_transport_t *t,
  *
  *   - After Ctrl-Z the printer pushes ONE status message
  *     (status_type=phase-change, phase=printing) and then goes silent
- *     for the rest of the job — does NOT push the "printing-done" or
- *     trailing "phase-change → editing" that SDM §5.1 diagrams.
+ *     for the rest of the job -- does NOT push the "printing-done" or
+ *     trailing "phase-change -> editing" that SDM sec5.1 diagrams.
  *   - Does NOT respond to ESC i S sent after Ctrl-Z (verified: 24 polls
  *     over 2 min, zero replies).
  *   - Errors the printer DOES surface (cover-open / overheat / cutter-
  *     jam mid-print) come as unsolicited STATUS_ERROR_OCCURRED messages
- *     within the print window — we still want to catch them.
- *   - "No tape inside cartridge" is hardware-invisible — the cartridge-
+ *     within the print window -- we still want to catch them.
+ *   - "No tape inside cartridge" is hardware-invisible -- the cartridge-
  *     presence sensor doesn't detect tape-remaining. Print silently
  *     fails; user sees that visually.
  *
@@ -163,7 +163,7 @@ static pt_err_t wait_print_done(pt_transport_t *t,
     if (opts->on_event)
         opts->on_event("estimated print time elapsed", opts->on_event_user);
     /* Saw phase=printing means printer accepted the job; declare success.
-     * Never saw phase=printing → something's wrong upstream. */
+     * Never saw phase=printing -> something's wrong upstream. */
     return seen_printing ? PT_OK : PT_ERR_TIMEOUT;
 }
 
@@ -210,7 +210,7 @@ pt_err_t pt_session_print_raster(pt_transport_t *t,
     n = pt_encode_switch_mode(buf, sizeof buf, PT_CMD_MODE_RASTER);
     if ((err = send_all(t, buf, (size_t)n)) != PT_OK) return err;
 
-    /* 3. Status check — read media, surface any pre-existing errors. */
+    /* 3. Status check -- read media, surface any pre-existing errors. */
     pt_status_t st;
     if ((err = pt_session_query_status(t, &st, opts)) != PT_OK) return err;
     pt_err_t pre = map_errors(&st);

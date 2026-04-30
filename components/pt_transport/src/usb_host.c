@@ -1,8 +1,8 @@
 /*
- * pt_transport_usb_host — esp-idf USB Host backend for pt_transport_t.
+ * pt_transport_usb_host -- esp-idf USB Host backend for pt_transport_t.
  * See pt_transport_usb_host.h for the API.
  *
- * Target-only — the host CMake build does not list this file. Compiles
+ * Target-only -- the host CMake build does not list this file. Compiles
  * for both ESP32-S2 and ESP32-S3 (identical USB-OTG controller).
  */
 
@@ -29,7 +29,7 @@ static const uint16_t PT_PIDS[] = {
 /* Same VID, different firmware mode: when the side slider is in P-Lite
  * position the PT-* enumerates as USB Mass Storage (a virtual disk
  * containing Brother's "P-touch Editor Lite") with one of these PIDs
- * and exposes no printer-class interface — see the research notes in
+ * and exposes no printer-class interface -- see the research notes in
  * the SDM (mode 3 = P-touch Template) and ptouch-esp32 prior art. We
  * can't drive prints in that state, but flagging it lets the SPA show
  * the user a useful "slide to E or hold the PLite button" hint
@@ -185,13 +185,13 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
              * SPA can render a specific hint instead of generic
              * "unavailable". An attempted SCSI BOT auto-unstick (in
              * git history through commit 44c732f) sent the documented
-             * magic bytes but did not actually trigger the EL→E flip
-             * on real hardware — re-evaluate when we have a USB
+             * magic bytes but did not actually trigger the EL->E flip
+             * on real hardware -- re-evaluate when we have a USB
              * packet capture from Brother's tool. */
             if (desc->idVendor == PT_VID) {
                 for (size_t i = 0; i < sizeof PT_PIDS_PLITE / sizeof PT_PIDS_PLITE[0]; i++) {
                     if (desc->idProduct == PT_PIDS_PLITE[i]) {
-                        ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) — "
+                        ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) -- "
                                       "slide to E or hold PLite button 2s",
                                  desc->idProduct);
                         s_plite_seen = true;
@@ -229,7 +229,7 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
                  u->intf_num, u->ep_in_addr, u->ep_out_addr);
         xSemaphoreGive(u->device_ready);
     } else if (msg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
-        /* Device disconnected. We don't auto-recover — the caller can
+        /* Device disconnected. We don't auto-recover -- the caller can
          * detect via send/recv failures and re-open. */
         if (u->dev_hdl == msg->dev_gone.dev_hdl) {
             if (u->interface_claimed) {
@@ -265,7 +265,7 @@ static int usb_send(void *ctx, const uint8_t *data, size_t len)
 
     int rc = -1;
     if (usb_host_transfer_submit(u->xfer_out) == ESP_OK) {
-        /* OUT transfers complete quickly — give them a generous timeout
+        /* OUT transfers complete quickly -- give them a generous timeout
          * but not unbounded. If something is wrong with the bus a stall
          * here is better than a hang. */
         if (xSemaphoreTake(u->xfer_out_done, pdMS_TO_TICKS(5000)) == pdTRUE
@@ -308,7 +308,7 @@ static int usb_recv(void *ctx, uint8_t *out, size_t cap,
 
     /* esp-idf v5.5: usb_transfer_t::timeout_ms isn't honoured yet, so
      * we time out at the semaphore level. If the wait expires the
-     * transfer is still pending — halt + flush + clear cancels it,
+     * transfer is still pending -- halt + flush + clear cancels it,
      * which causes the callback to fire so we can resync. */
     if (xSemaphoreTake(u->xfer_in_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
         usb_host_endpoint_halt(u->dev_hdl, u->ep_in_addr);

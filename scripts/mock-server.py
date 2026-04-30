@@ -9,7 +9,7 @@ even owning the device.
 Usage:
     python3 scripts/mock-server.py [--port 8080] [--bind 127.0.0.1]
 
-Then visit http://localhost:8080/ — same-origin, so no API host
+Then visit http://localhost:8080/ -- same-origin, so no API host
 config is needed in the SPA's Settings tab.
 
 Edit STATE / TAPES / SCAN below to simulate different printer
@@ -29,7 +29,7 @@ SPA_DIR = os.path.normpath(os.path.join(
     "..", "components", "pt_app", "spa",
 ))
 
-# Mutable state — adjust to simulate different printer conditions.
+# Mutable state -- adjust to simulate different printer conditions.
 # `transport` controls what the SPA's title-bar dot shows: "usb_host"
 # is green ("real" printer attached), "mock" / "plite" are red.
 STATE = {
@@ -47,7 +47,7 @@ STATE = {
     # USB identity surfaced via /api/info so the SPA Status view can
     # show what's plugged in. These mirror what the firmware will
     # eventually report from real string descriptors (pt700-... bd
-    # issue) — for now mock values matching a real PT-P700 in
+    # issue) -- for now mock values matching a real PT-P700 in
     # printer mode (E slider position).
     "vid":            0x04F9,      # Brother
     "pid":            0x2061,      # PT-P700 (E mode)
@@ -82,7 +82,7 @@ CORS = {
     "Access-Control-Max-Age":       "3600",
 }
 
-# Headers the firmware accepts on /api/print — log them for fidelity.
+# Headers the firmware accepts on /api/print -- log them for fidelity.
 PRINT_HEADERS = (
     "X-Auto-Cut", "X-Mirror", "X-Chain", "X-No-Compression",
     "X-Margin-Dots", "X-Tape-Width-Mm",

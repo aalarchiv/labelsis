@@ -4,7 +4,7 @@
 
 #include "pt_app.h"
 
-/* Real Wi-Fi creds, gitignored — copy main/wifi_credentials.example.h
+/* Real Wi-Fi creds, gitignored -- copy main/wifi_credentials.example.h
  * to main/wifi_credentials.h and fill in your SSID + password. Falls
  * back to placeholder values when absent so CI / sandbox builds still
  * succeed (they just won't associate). */

@@ -1,5 +1,5 @@
 /*
- * pt_transport_mock — virtual PT-P700 state machine backing the
+ * pt_transport_mock -- virtual PT-P700 state machine backing the
  * pt_transport_t interface. See pt_transport_mock.h.
  */
 
@@ -67,14 +67,14 @@ static int parse_one(pt_transport_mock_t *m, const uint8_t *p, size_t n)
     uint8_t op = p[0];
     if (op == 0x00) return 1;          /* NULL invalidate filler */
 
-    if (op == 0x1b) {                  /* ESC … */
+    if (op == 0x1b) {                  /* ESC ... */
         if (n < 2) return 0;
         uint8_t op2 = p[1];
         if (op2 == 0x40) return 2;     /* ESC @ init */
         if (op2 != 0x69) return -1;
         if (n < 3) return 0;
         switch (p[2]) {
-        case 'S':                      /* ESC i S — status request */
+        case 'S':                      /* ESC i S -- status request */
             emit_status(m, PT_STATUS_REPLY, PT_PHASE_EDITING);
             return 3;
         case 'a':                      /* ESC i a {n} */
