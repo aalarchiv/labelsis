@@ -90,6 +90,21 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
  * combine so the state reads at a glance. */
 #aspect-lock                          { background:transparent; color:var(--accent); border-color:var(--accent); }
 #aspect-lock[aria-pressed="false"]    { color:var(--muted);     border-color:var(--muted); opacity:.7; }
+/* Font picker — custom dropdown so each row can render its own
+ * font preview (left-aligned name, right-aligned charmap sample). */
+.font-picker  { position:relative; flex:1; min-width:0; }
+.font-trigger { width:100%; text-align:left; padding:.5rem; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:4px; cursor:pointer; font:inherit; font-weight:normal; }
+.font-trigger::after { content:" ▾"; color:var(--muted); float:right; }
+.font-list    { display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; max-height:280px; overflow-y:auto; background:var(--panel); border:1px solid var(--line); border-radius:4px; box-shadow:0 4px 16px rgba(0,0,0,.25); z-index:50; padding:.25rem; }
+.font-list.open { display:block; }
+.font-row     { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; padding:.5rem .75rem; cursor:pointer; border:0; background:transparent; color:var(--fg); width:100%; text-align:left; font:inherit; border-radius:3px; }
+.font-row:hover, .font-row.selected { background:rgba(88,166,255,.12); }
+.font-row .name   { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
+.font-row .sample { color:var(--muted); white-space:nowrap; flex:0 0 auto; }
+/* Text style toggles render their own state in the glyph (B in
+ * bold, I in italic, etc.) so users can preview without trying. */
+.text-style       { min-width:38px; text-align:center; padding:.5rem .6rem; }
+#text-bold        { font-weight:700; }
 .canvas-viewport { position:relative; overflow:hidden; max-width:100%; touch-action:none; border:1px solid var(--line); border-radius:4px; background:#fff; }
 canvas { display:block; image-rendering:pixelated; background:#fff; }
 #el-list .grip { touch-action:none; }
@@ -245,10 +260,24 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <input id="text" type="text" placeholder='Type text — use {column} for CSV substitution'>
         </div>
         <div class="row" style="margin-bottom:.5rem">
+          <label>font</label>
+          <div class="font-picker">
+            <button id="font-trigger" class="font-trigger" type="button"
+                    aria-haspopup="listbox" aria-expanded="false">sans-serif</button>
+            <div id="font-list" class="font-list" role="listbox"></div>
+          </div>
+        </div>
+        <div class="row" style="margin-bottom:.5rem">
+          <label>style</label>
+          <button id="text-bold"      class="secondary text-style" type="button" aria-pressed="false" title="bold (Ctrl+B)">B</button>
+          <button id="text-italic"    class="secondary text-style" type="button" aria-pressed="false" title="italic (Ctrl+I)"><i>I</i></button>
+          <button id="text-underline" class="secondary text-style" type="button" aria-pressed="false" title="underline (Ctrl+U)"><u>U</u></button>
+          <button id="text-strike"    class="secondary text-style" type="button" aria-pressed="false" title="strikethrough"><s>S</s></button>
+        </div>
+        <div class="row" style="margin-bottom:.5rem">
           <label>font px</label>
           <input id="size" type="range" min="20" max="120" value="80">
           <span id="size-val" class="dim">80px</span>
-          <span class="muted">(base size; w/h scales on top)</span>
         </div>
         <div class="row pair">
           <label>x</label>
@@ -586,7 +615,38 @@ let nextId    = 1;
 function defaultText() {
   return { id: nextId++, type: "text", x: 14, y: 0, rotation: 0, composite: "and",
            scaleX: 1, scaleY: 1, aspectLocked: true,
-           text: "hello", size: 80 };
+           text: "hello", size: 80,
+           fontFamily: "sans-serif",
+           bold: false, italic: false, underline: false, strike: false };
+}
+
+/* Font list for the picker. Stick to families that exist (or have
+ * sane fallbacks) on Windows / macOS / Linux out of the box — no
+ * webfont fetch since the firmware can't reach the internet. */
+const FONTS = [
+  "sans-serif", "serif", "monospace", "system-ui",
+  "Arial", "Helvetica", "Verdana", "Tahoma", "Trebuchet MS",
+  "Georgia", "Times New Roman", "Courier New", "Impact", "Comic Sans MS",
+];
+/* Sample in the picker — covers German umlauts, euro, a digit,
+ * accented Latin. Quick visual hint of each font's charmap. */
+const FONT_SAMPLE = "Äö€0à";
+
+/* CSS font-family value — quote multi-word names so canvas ctx.font
+ * doesn't choke. Generic fallbacks (sans-serif etc.) are bare. */
+function fontFamilyCSS(family) {
+  if (!family) return "sans-serif";
+  return /^[a-zA-Z-]+$/.test(family) ? family : `"${family}"`;
+}
+
+/* Compose the canvas ctx.font shorthand for a text element. */
+function textFontShorthand(el) {
+  const parts = [];
+  if (el.italic) parts.push("italic");
+  if (el.bold)   parts.push("bold");
+  parts.push(`${el.size | 0}px`);
+  parts.push(fontFamilyCSS(el.fontFamily));
+  return parts.join(" ");
 }
 
 function elementById(id) {
@@ -605,7 +665,7 @@ function elementById(id) {
 
 function measureText(ctx, el) {
   const value = substitute(el.text, csvData.data[csvCurrentRow] || {});
-  ctx.font = `${el.size}px sans-serif`;
+  ctx.font = textFontShorthand(el);
   el._renderedText = value;
   el._w = Math.ceil(ctx.measureText(value).width);
   /* approximate height: descent + ascent ~ size; pad a bit so
@@ -614,11 +674,21 @@ function measureText(ctx, el) {
 }
 
 function drawText(ctx, el) {
-  ctx.font = `${el.size}px sans-serif`;
+  ctx.font = textFontShorthand(el);
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   ctx.fillStyle = "#000";
-  ctx.fillText(el._renderedText ?? el.text, 0, 0);
+  const value = el._renderedText ?? el.text;
+  ctx.fillText(value, 0, 0);
+  /* Canvas fillText doesn't honour CSS text-decoration, so manually
+   * draw underline / strikethrough as a thin black bar. Position
+   * relative to el.size since textBaseline is "top". */
+  if (el.underline || el.strike) {
+    const w = Math.ceil(ctx.measureText(value).width);
+    const t = Math.max(1, Math.round(el.size / 16));
+    if (el.underline) ctx.fillRect(0, el.size,        w, t);
+    if (el.strike)    ctx.fillRect(0, el.size * 0.6,  w, t);
+  }
 }
 
 /* --- image element + dithering -----------------------------------
@@ -2015,6 +2085,24 @@ function syncPropsPanel() {
     document.getElementById("size-val").textContent = el.size + "px";
     document.getElementById("el-x").value = Math.round(el.x);
     document.getElementById("el-y").value = Math.round(el.y);
+    /* Font picker + style toggles. */
+    const family = el.fontFamily || "sans-serif";
+    const $trigger = document.getElementById("font-trigger");
+    $trigger.textContent      = family;
+    $trigger.style.fontFamily = fontFamilyCSS(family);
+    for (const r of document.querySelectorAll(".font-row")) {
+      r.classList.toggle("selected", r.dataset.font === family);
+    }
+    for (const [id, key] of [
+      ["text-bold",      "bold"],
+      ["text-italic",    "italic"],
+      ["text-underline", "underline"],
+      ["text-strike",    "strike"],
+    ]) {
+      const $b = document.getElementById(id);
+      $b.setAttribute("aria-pressed", el[key] ? "true" : "false");
+      $b.classList.toggle("toggled", !!el[key]);
+    }
   } else if (el && el.type === "image") {
     document.getElementById("img-algo").value      = el.algorithm;
     document.getElementById("img-threshold").value = el.threshold;
@@ -2162,6 +2250,81 @@ function flipBy(axis) {
 }
 document.getElementById("flip-h").addEventListener("click", () => flipBy("h"));
 document.getElementById("flip-v").addEventListener("click", () => flipBy("v"));
+
+/* ---- font picker + bold/italic/underline/strike ---------------- */
+(function wireTextStyle() {
+  const $trigger = document.getElementById("font-trigger");
+  const $list    = document.getElementById("font-list");
+
+  /* Build the picker's row list once. Each row renders its own font
+   * for the name + sample, so the user gets a true preview. */
+  for (const f of FONTS) {
+    const row = document.createElement("button");
+    row.type        = "button";
+    row.className   = "font-row";
+    row.dataset.font = f;
+    row.style.fontFamily = fontFamilyCSS(f);
+    row.innerHTML   = `<span class="name"></span><span class="sample"></span>`;
+    row.querySelector(".name").textContent   = f;
+    row.querySelector(".sample").textContent = FONT_SAMPLE;
+    row.addEventListener("click", () => {
+      selectFont(f);
+      closeFontList();
+    });
+    $list.appendChild(row);
+  }
+
+  function openFontList() {
+    $list.classList.add("open");
+    $trigger.setAttribute("aria-expanded", "true");
+    /* Scroll the currently-selected row into view. */
+    const sel = $list.querySelector(".font-row.selected");
+    if (sel) sel.scrollIntoView({ block: "nearest" });
+  }
+  function closeFontList() {
+    $list.classList.remove("open");
+    $trigger.setAttribute("aria-expanded", "false");
+  }
+
+  $trigger.addEventListener("click", e => {
+    e.stopPropagation();
+    if ($list.classList.contains("open")) closeFontList();
+    else                                  openFontList();
+  });
+  document.addEventListener("click", e => {
+    if (!e.target.closest(".font-picker")) closeFontList();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") closeFontList();
+  });
+
+  function selectFont(family) {
+    const el = elementById(selectedId);
+    if (!el || el.type !== "text") return;
+    pushUndo();
+    el.fontFamily = family;
+    syncPropsPanel();
+    redraw();
+  }
+
+  /* Each B / I / U / S button toggles the matching boolean field
+   * on the selected text element. */
+  for (const [id, key] of [
+    ["text-bold",      "bold"],
+    ["text-italic",    "italic"],
+    ["text-underline", "underline"],
+    ["text-strike",    "strike"],
+  ]) {
+    document.getElementById(id).addEventListener("click", () => {
+      const el = elementById(selectedId);
+      if (!el || el.type !== "text") return;
+      pushUndo();
+      el[key] = !el[key];
+      syncPropsPanel();
+      redraw();
+    });
+  }
+})();
 
 function rightmostX() {
   let r = 14;
