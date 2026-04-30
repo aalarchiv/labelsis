@@ -38,9 +38,11 @@ button { background:var(--accent); color:#fff; border:0; border-radius:4px; padd
 button:disabled { background:var(--muted); cursor:not-allowed; }
 button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
 button.secondary[aria-pressed="true"], button.secondary.toggled { background:var(--accent); color:var(--bg); }
-/* Lock button: the icon (🔒/🔓) carries state, not the chrome —
- * leave it in the default look in both positions. */
-#aspect-lock, #aspect-lock[aria-pressed="true"] { background:transparent; color:var(--accent); }
+/* Lock button: locked (default) shows the padlock in accent colour;
+ * unlocked greys out the icon AND swaps to 🔓 — colour + glyph
+ * combine so the state reads at a glance. */
+#aspect-lock                          { background:transparent; color:var(--accent); border-color:var(--accent); }
+#aspect-lock[aria-pressed="false"]    { color:var(--muted);     border-color:var(--muted); opacity:.7; }
 .canvas-viewport { position:relative; overflow:hidden; max-width:100%; touch-action:none; border:1px solid var(--line); border-radius:4px; background:#fff; }
 canvas { display:block; image-rendering:pixelated; background:#fff; }
 #el-list .grip { touch-action:none; }
@@ -2302,6 +2304,13 @@ canvas.addEventListener("pointerdown", ev => {
       }
       if (sel.flipH) lx = -lx;
       if (sel.flipV) ly = -ly;
+      /* Mid-edge handles are non-uniform by intent: pulling one
+       * implies "stretch this axis only". On first actual motion,
+       * auto-clear aspectLocked. Deferring to pointermove avoids
+       * silently changing state when the user just taps the handle
+       * without moving. */
+      const isMidEdge = (handle === "t" || handle === "r"
+                     || handle === "b" || handle === "l");
       resize = {
         id:        sel.id,
         handle,
@@ -2310,6 +2319,7 @@ canvas.addEventListener("pointerdown", ev => {
         startLX:   Math.abs(lx) || 1,
         startLY:   Math.abs(ly) || 1,
         startD:    Math.hypot(lx, ly) || 1,
+        pendingUnlock: isMidEdge && sel.aspectLocked !== false,
       };
     }
     canvas.setPointerCapture(ev.pointerId);
@@ -2372,6 +2382,11 @@ canvas.addEventListener("pointermove", ev => {
       }
       if (el.flipH) lx = -lx;
       if (el.flipV) ly = -ly;
+      /* First real movement on a mid-edge handle: auto-unlock. */
+      if (resize.pendingUnlock) {
+        el.aspectLocked = false;
+        resize.pendingUnlock = false;
+      }
       const ratioX = Math.abs(lx) / resize.startLX;
       const ratioY = Math.abs(ly) / resize.startLY;
       const ratioD = Math.hypot(lx, ly) / resize.startD;
