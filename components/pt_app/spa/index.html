@@ -1802,6 +1802,11 @@ function toggleAspectLock() {
  * The current overlay colors threshold-to-white anyway, but this
  * keeps the print path robust to future palette changes. */
 function redraw(forPrint = false) {
+  /* Persist the in-progress design after every mutation. saveSession
+   * is debounced so dragging / typing doesn't spam localStorage. The
+   * print path bypasses persistence — it builds a tight raster on a
+   * different canvas and shouldn't trigger an autosave. */
+  if (!forPrint) saveSession();
   const c    = document.getElementById("preview");
   const ctx  = c.getContext("2d");
   const tape = printer && printer.ok ? TAPES[printer.media_width_mm] : TAPES[24];
@@ -2419,7 +2424,24 @@ function csvHighlight() {
 function csvText() {
   const csv = document.getElementById("csv");
   if (!csv.firstChild) return "";
-  return csv.innerText.replace(/\r\n/g, "\n").replace(/\n$/, "");
+  /* Fast path: canonical "one <div> per line" structure (true after
+   * csvSetText / csvNormalize). Walk the children and join their
+   * textContent — works even when the panel is inside a closed
+   * <details>, where innerText would return "". */
+  let canonical = true;
+  for (const n of csv.childNodes) {
+    if (n.nodeType !== Node.ELEMENT_NODE || n.tagName !== "DIV")        { canonical = false; break; }
+    if (n.querySelector("div, p, h1, h2, h3, h4, h5, h6"))               { canonical = false; break; }
+    const brs = n.querySelectorAll("br");
+    if (brs.length > 1)                                                  { canonical = false; break; }
+    if (brs.length === 1 && n.textContent !== "")                        { canonical = false; break; }
+  }
+  if (canonical) {
+    return Array.from(csv.children).map(c => c.textContent).join("\n");
+  }
+  /* Fall back to innerText for messy structure (Firefox mid-typing
+   * with <br>-separated content inside one div). */
+  return (csv.innerText || "").replace(/\r\n/g, "\n").replace(/\n$/, "");
 }
 
 function csvSetText(text) {
@@ -2553,6 +2575,7 @@ function csvUpdate() {
   if (!csvData.data.length) csvShowHeader = csvData.headers.length > 0;
   csvRender();
   redraw();
+  saveSession();
 }
 
 /* Step the active row in either direction. Cycle order is
@@ -2692,6 +2715,81 @@ function redo() {
 function refreshUndoButtons() {
   document.getElementById("undo").disabled = !undoStack.length;
   document.getElementById("redo").disabled = !redoStack.length;
+}
+
+/* --- session persistence -----------------------------------------
+ *
+ * Auto-save the in-progress design + a few UI knobs to localStorage
+ * so a page reload (or a fresh visit later) drops the user back into
+ * the same setup. Separate from the explicit label library — the
+ * library is for named saves, this is the live working state. */
+const SESSION_KEY = "pt700:session";
+let sessionLoading = false;       /* suppress save during restore */
+let sessionSaveTimer = null;
+
+function saveSession() {
+  if (sessionLoading) return;
+  /* Debounce: lots of mutations (drag, slider, typing) fire redraw
+   * back-to-back; coalesce them into one localStorage write. */
+  if (sessionSaveTimer) return;
+  sessionSaveTimer = setTimeout(() => {
+    sessionSaveTimer = null;
+    try {
+      const data = {
+        elements:    elements.map(stripCached),
+        nextId,
+        selectedId,
+        currentLabelName,
+        csvText:     csvText(),
+        csvCurrentRow,
+        csvShowHeader,
+        view:        document.querySelector("nav a.active")?.dataset.view || "print",
+        printOpts: {
+          autoCut: document.getElementById("print-auto-cut").checked,
+          mirror:  document.getElementById("print-mirror").checked,
+          chain:   document.getElementById("print-chain").checked,
+        },
+      };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+    } catch (e) { /* quota / serialization errors — silent */ }
+  }, 300);
+}
+
+function loadSession() {
+  let raw;
+  try { raw = localStorage.getItem(SESSION_KEY); } catch { return false; }
+  if (!raw) return false;
+  let data;
+  try { data = JSON.parse(raw); } catch { return false; }
+  if (!data || !Array.isArray(data.elements) || !data.elements.length) return false;
+  sessionLoading = true;
+  try {
+    restoreFromJSON(JSON.stringify(data.elements));
+    if (Number.isFinite(data.nextId))     nextId = Math.max(nextId, data.nextId);
+    if (Number.isFinite(data.selectedId)) selectedId = data.selectedId;
+    if (typeof data.currentLabelName === "string") currentLabelName = data.currentLabelName;
+    if (typeof data.csvText === "string") {
+      csvSetText(data.csvText);
+      csvUpdate();
+    }
+    if (Number.isFinite(data.csvCurrentRow)) csvCurrentRow = data.csvCurrentRow;
+    if (typeof data.csvShowHeader === "boolean") csvShowHeader = data.csvShowHeader;
+    if (data.printOpts) {
+      const opts = data.printOpts;
+      if (typeof opts.autoCut === "boolean") document.getElementById("print-auto-cut").checked = opts.autoCut;
+      if (typeof opts.mirror  === "boolean") document.getElementById("print-mirror").checked   = opts.mirror;
+      if (typeof opts.chain   === "boolean") document.getElementById("print-chain").checked    = opts.chain;
+    }
+    if (typeof data.view === "string") showView(data.view);
+    syncPropsPanel();
+    renderLayerList();
+    csvRender();
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
+    sessionLoading = false;
+  }
 }
 
 /* --- label library: localStorage-backed save/load -----------------
@@ -4054,6 +4152,7 @@ function showView(name) {
   /* Refresh device identity (vid/pid/serial/...) every time the
    * Status view opens so a printer hot-plug shows up promptly. */
   if (name === "status") refreshDeviceInfo();
+  saveSession();
 }
 document.querySelectorAll("nav a").forEach(a => {
   a.addEventListener("click", e => { e.preventDefault(); showView(a.dataset.view); });
@@ -4178,11 +4277,20 @@ function wifiInit() {
  * the user has to touch anything. */
 setLanguage(currentLang);
 
-/* Seed one text element + select it so the page isn't empty. */
-elements.push(defaultText());
-selectElement(elements[0].id);
+/* Try to restore the previous session. If nothing stored / corrupt /
+ * empty, fall back to seeding a single default text element so the
+ * canvas isn't blank. */
+if (!loadSession()) {
+  elements.push(defaultText());
+  selectElement(elements[0].id);
+}
 libRefresh();
 refreshUndoButtons();
+
+/* Persist print options when the user toggles them. */
+for (const id of ["print-auto-cut", "print-mirror", "print-chain"]) {
+  document.getElementById(id).addEventListener("change", saveSession);
+}
 
 refreshStatus();
 refreshDeviceInfo();
