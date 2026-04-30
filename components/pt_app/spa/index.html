@@ -3003,25 +3003,36 @@ function syncPropsPanel() {
     document.getElementById("img-algo").value      = el.algorithm;
     document.getElementById("img-threshold").value = el.threshold;
     document.getElementById("img-threshold-val").textContent = el.threshold;
-    document.getElementById("img-h").value = el.h;
+    /* Effective printed dither height = intrinsic h × scaleY. */
+    document.getElementById("img-h").value =
+      Math.max(1, Math.round((el.h || 0) * (el.scaleY ?? 1)));
     document.getElementById("img-x").value = Math.round(el.x);
     document.getElementById("img-y").value = Math.round(el.y);
   } else if (el && el.type === "barcode") {
     document.getElementById("bc-text").value = el.text;
     document.getElementById("bc-sym").value  = el.symbology;
-    document.getElementById("bc-h").value    = el.h;
-    document.getElementById("bc-size").value = el.size || 1;
+    /* Effective printed barcode height = intrinsic h × scaleY,
+     * module width = intrinsic size × scaleX. */
+    document.getElementById("bc-h").value =
+      Math.max(1, Math.round((el.h || 0) * (el.scaleY ?? 1)));
+    document.getElementById("bc-size").value =
+      Math.max(1, Math.round((el.size || 1) * (el.scaleX ?? 1)));
     document.getElementById("bc-x").value    = Math.round(el.x);
     document.getElementById("bc-y").value    = Math.round(el.y);
   } else if (el && el.type === "qr") {
     document.getElementById("qr-text").value = el.text;
     document.getElementById("qr-ecc").value  = el.ecc;
-    document.getElementById("qr-size").value = el.size;
+    /* Effective printed QR module width = intrinsic size × scaleX
+     * (QR is square so scaleX should always equal scaleY). */
+    document.getElementById("qr-size").value =
+      Math.max(1, Math.round((el.size || 1) * (el.scaleX ?? 1)));
     document.getElementById("qr-x").value    = Math.round(el.x);
     document.getElementById("qr-y").value    = Math.round(el.y);
   } else if (el && el.type === "rect") {
     document.getElementById("rect-pattern").value = el.pattern || "solid";
-    document.getElementById("rect-module").value  = el.module  || 1;
+    /* Effective printed pattern module = intrinsic module × scaleX. */
+    document.getElementById("rect-module").value =
+      Math.max(1, Math.round((el.module || 1) * (el.scaleX ?? 1)));
     document.getElementById("rect-x").value       = Math.round(el.x);
     document.getElementById("rect-y").value       = Math.round(el.y);
   }
@@ -3097,24 +3108,54 @@ bindPropInput("el-x", "x",    v => parseInt(v, 10) || 0);
 bindPropInput("el-y", "y",    v => parseInt(v, 10) || 0);
 bindPropInput("img-algo",      "algorithm");
 bindPropInput("img-threshold", "threshold", v => parseInt(v, 10));
-bindPropInput("img-h",         "h",         v => Math.max(8, Math.min(128, parseInt(v, 10) || 8)));
 bindPropInput("img-x",         "x",         v => parseInt(v, 10) || 0);
 bindPropInput("img-y",         "y",         v => parseInt(v, 10) || 0);
 bindPropInput("bc-text",       "text");
 bindPropInput("bc-sym",        "symbology");
-bindPropInput("bc-h",          "h",         v => Math.max(16, Math.min(128, parseInt(v, 10) || 16)));
-bindPropInput("bc-size",       "size",      v => Math.max(1, Math.min(6, parseInt(v, 10) || 1)));
 bindPropInput("bc-x",          "x",         v => parseInt(v, 10) || 0);
 bindPropInput("bc-y",          "y",         v => parseInt(v, 10) || 0);
 bindPropInput("qr-text",       "text");
 bindPropInput("qr-ecc",        "ecc");
-bindPropInput("qr-size",       "size",      v => Math.max(1, Math.min(6, parseInt(v, 10) || 1)));
 bindPropInput("qr-x",          "x",         v => parseInt(v, 10) || 0);
 bindPropInput("qr-y",          "y",         v => parseInt(v, 10) || 0);
 bindPropInput("rect-pattern",  "pattern");
-bindPropInput("rect-module",   "module",    v => Math.max(1, Math.min(8, parseInt(v, 10) || 1)));
 bindPropInput("rect-x",        "x",         v => parseInt(v, 10) || 0);
 bindPropInput("rect-y",        "y",         v => parseInt(v, 10) || 0);
+
+/* Dimension inputs that should read the EFFECTIVE printed size
+ * (intrinsic × scale). Editing one sets the intrinsic field to the
+ * typed value AND resets scaleX = scaleY = 1, so the next read
+ * matches what was just typed. Same pattern as text-size; factored
+ * so QR / barcode / image / rect all share one helper. */
+function bindDimensionInput(id, type, key, parse) {
+  document.getElementById(id).addEventListener("input", e => {
+    const el = elementById(selectedId);
+    if (!el || el.type !== type) return;
+    if (isFreshPropFocus) { pushUndo(); isFreshPropFocus = false; }
+    const v = parse(e.target.value);
+    if (!Number.isFinite(v)) return;
+    el[key]   = v;
+    el.scaleX = 1;
+    el.scaleY = 1;
+    /* Type-specific cache invalidation so the next redraw rebakes
+     * the bitmap at the new module / height. */
+    if (type === "image")   el._dithered     = null;
+    if (type === "qr")      el._qrCanvas     = null;
+    if (type === "barcode") el._barcodeCanvas = null;
+    renderLayerList();
+    redraw();
+    /* W/H row reflects new measured bounds. */
+    const $w = document.getElementById("el-w");
+    const $h = document.getElementById("el-h");
+    if (document.activeElement !== $w) $w.value = Math.max(1, Math.round(el._w || 0));
+    if (document.activeElement !== $h) $h.value = Math.max(1, Math.round(el._h || 0));
+  });
+}
+bindDimensionInput("img-h",       "image",   "h",      v => Math.max(8,  Math.min(128, parseInt(v, 10) || 8)));
+bindDimensionInput("bc-h",        "barcode", "h",      v => Math.max(16, Math.min(128, parseInt(v, 10) || 16)));
+bindDimensionInput("bc-size",     "barcode", "size",   v => Math.max(1,  Math.min(6,   parseInt(v, 10) || 1)));
+bindDimensionInput("qr-size",     "qr",      "size",   v => Math.max(1,  Math.min(6,   parseInt(v, 10) || 1)));
+bindDimensionInput("rect-module", "rect",    "module", v => Math.max(1,  Math.min(8,   parseInt(v, 10) || 1)));
 bindPropInput("el-composite", "composite");
 bindPropInput("el-rotation",  "rotation",   v => {
   /* Normalise to (-180, 180] so the input doesn't drift. */
