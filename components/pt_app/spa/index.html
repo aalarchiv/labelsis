@@ -1742,31 +1742,27 @@ function redraw(forPrint = false) {
 
   for (const el of elements) drawElement(ctx, el);
 
-  /* Non-printable tape margins (UI hint only — NOT sent to printer). */
+  ctx.restore();
+
+  /* "Colors" preview — replace b/w pixels in the printable strip
+   * (the head-pin area only, NOT the non-printable tape margins)
+   * with the printer's reported tape + text colours. Pure UI; the
+   * print raster is unaffected (postPrint runs redraw(true)).
+   * Run before the margin tints / centre guides / chrome so those
+   * UI hints stay in their original colours afterwards and the
+   * user can still see where the printable area is. */
+  if (canvasOpts.showColors) applyTapeColors(ctx, printW, marginPx, printPx);
+
+  /* Margin tints + centre guides + selection chrome on top of any
+   * colour remap so they stay legible regardless of tape colour. */
+  ctx.save();
+  ctx.translate(PAD, PAD);
   if (marginPx) {
     ctx.fillStyle = "rgba(255,80,80,.18)";
     ctx.fillRect(0, 0, printW, marginPx);
     ctx.fillRect(0, marginPx + printPx, printW, marginPx);
   }
-
-  /* Centre guides for fold-marked labels — above elements so they
-   * show through. Colour remap happens after this so the dotted
-   * red guides flatten to text/tape; chrome is drawn afterward
-   * to avoid being recoloured. */
   if (canvasOpts.showCenter) drawCenterGuides(ctx, printW, HEAD_PX);
-
-  ctx.restore();
-
-  /* "Colors" preview — replace b/w pixels in the print area with
-   * the printer's reported tape + text colours. Pure UI; the print
-   * raster is unaffected (postPrint() runs redraw(true)). */
-  if (canvasOpts.showColors) applyTapeColors(ctx, printW);
-
-  /* Selection chrome painted on top of the colour remap so the
-   * blue handles + bounding box stay legible regardless of tape
-   * colour. */
-  ctx.save();
-  ctx.translate(PAD, PAD);
   const sel = elementById(selectedId);
   if (sel) drawSelectionChrome(ctx, sel);
   ctx.restore();
@@ -1776,18 +1772,21 @@ function redraw(forPrint = false) {
   if (canvasOpts.showRulers) drawRulers(ctx, printW, HEAD_PX);
 }
 
-/* Re-colour the on-screen print area by thresholding each pixel
- * against grey and replacing it with the printer's tape colour
- * (light pixels) or text colour (dark pixels). Reads/writes
- * happen in canvas-absolute coordinates so the current transform
- * doesn't matter. Skips when printer info is missing — falls back
- * to leaving the b/w preview alone. */
-function applyTapeColors(ctx, printW) {
+/* Re-colour the on-screen *printable* strip — i.e. only the
+ * head-pin window between the top and bottom non-printable
+ * margins. Reads/writes happen in canvas-absolute coordinates so
+ * the current transform doesn't matter. Skips when printer info
+ * or colour mappings are missing — falls back to leaving the
+ * b/w preview alone. */
+function applyTapeColors(ctx, printW, marginPx, printPx) {
   if (!printer || !printer.ok) return;
   const tape = TAPE_COLOR_RGB[printer.tape_color_id];
   const text = TEXT_COLOR_RGB[printer.text_color_id];
   if (!tape || !text) return;
-  const img = ctx.getImageData(PAD, PAD, printW, HEAD_PX);
+  const top  = PAD + (marginPx || 0);
+  const h    = printPx || HEAD_PX;
+  if (h <= 0) return;
+  const img = ctx.getImageData(PAD, top, printW, h);
   const px  = img.data;
   for (let i = 0; i < px.length; i += 4) {
     const lum = (px[i] + px[i+1] + px[i+2]) / 3;
@@ -1798,7 +1797,7 @@ function applyTapeColors(ctx, printW) {
     /* Alpha left as-is; canvas was opaque white before the
      * remap so every pixel is 255 already. */
   }
-  ctx.putImageData(img, PAD, PAD);
+  ctx.putImageData(img, PAD, top);
 }
 
 function drawGrid(ctx, w, h) {
