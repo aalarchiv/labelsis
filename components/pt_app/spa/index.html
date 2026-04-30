@@ -1264,10 +1264,29 @@ function measureImage(_ctx, el) {
 function drawImage(ctx, el) {
   if (el._dithered) {
     ctx.drawImage(el._dithered, 0, 0);
-  } else {
-    ctx.fillStyle = "#ddd";
-    ctx.fillRect(0, 0, el._baseW || 0, el._baseH || 0);
+    return;
   }
+  /* Broken image — show an obvious "missing" placeholder rather
+   * than a 0×0 hole or a featureless grey box. The label that
+   * eventually goes to print would be silently blank otherwise.
+   * The placeholder is rendered as a hatched grey rect with
+   * "image?" overlaid; _baseW/_baseH come from measureImage's
+   * fallback (60 × el.h). */
+  const w = el._baseW || 60, h = el._baseH || (el.h | 0) || 24;
+  ctx.fillStyle = "#fdd";
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "#900";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+  ctx.beginPath();
+  ctx.moveTo(0, 0); ctx.lineTo(w, h);
+  ctx.moveTo(w, 0); ctx.lineTo(0, h);
+  ctx.stroke();
+  ctx.fillStyle = "#900";
+  ctx.font = `${Math.max(8, Math.min(14, h - 4))}px sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  ctx.fillText(el._loadError ? "image?" : "image…", w / 2, h / 2);
 }
 
 /* --- barcodes: Code128B + EAN13 ----------------------------------
@@ -2279,7 +2298,9 @@ function parseCSV(text) {
       headers.forEach((h, i) => o[h] = (r[i] !== undefined ? r[i] : ""));
       return o;
     });
-  return { headers, data };
+  /* Surface unclosed-quote bugs — the parser otherwise silently
+   * swallows everything after a stray `"` into one mega-field. */
+  return { headers, data, warning: inQuote ? "unclosed_quote" : null };
 }
 
 /* Template substitution. {column} pulls from the active CSV row;
@@ -2375,9 +2396,19 @@ function formatDate(d, fmt) {
 
 function csvRender() {
   const cols = csvData.headers.filter(h => h && !h.startsWith("$"));
-  document.getElementById("tpl-cols").textContent = cols.length
+  const $cols = document.getElementById("tpl-cols");
+  $cols.textContent = cols.length
     ? `columns: ${cols.map(c => "{" + c + "}").join("  ")}`
     : "no data";
+  /* Surface parser warnings inline next to the column list. The
+   * unclosed-quote case otherwise swallows the rest of the file
+   * into one giant field with no signal to the user. */
+  if (csvData.warning === "unclosed_quote") {
+    $cols.textContent += "  ⚠ unclosed quote";
+    $cols.classList.add("kv-err");
+  } else {
+    $cols.classList.remove("kv-err");
+  }
 
   /* prev/next walks by row, but the indicator and "Print all" button
    * count actual labels — a row with $copies=5 advances the displayed
@@ -2599,9 +2630,30 @@ function csvCycle(dir) {
   redraw();
 }
 
+/* Hard cap on per-row $copies to keep a typo from kicking off a
+ * tape-eating runaway. Any larger value clamps to this. */
+const COPIES_MAX = 1000;
+/* Above this many TOTAL labels in a batch, doPrintAll asks for an
+ * explicit confirmation before kicking off — at ~5 s/print on real
+ * hardware that's a 10-minute job, so the user should know what
+ * they're starting. */
+const BATCH_CONFIRM_THRESHOLD = 10;
+
 async function doPrintAll() {
   const btn       = document.getElementById("print-all");
   const printBtn  = document.getElementById("print");
+  /* Compute the total label count up front so we can confirm the
+   * job size and clamp pathological $copies values before asking. */
+  const copiesPerRow = csvData.data.map(r => {
+    const n = parseInt(r["$copies"], 10);
+    if (!Number.isFinite(n) || n < 1) return 1;
+    return Math.min(n, COPIES_MAX);
+  });
+  const total = copiesPerRow.reduce((s, n) => s + n, 0);
+  if (!total) return;
+  if (total > BATCH_CONFIRM_THRESHOLD) {
+    if (!confirm(`Print ${total} labels in this batch?`)) return;
+  }
   btn.disabled = printBtn.disabled = true;
   /* Header preview must NOT be printed — it's a layout aid only.
    * Force-clear it for the duration of the batch and remember to
@@ -2609,13 +2661,11 @@ async function doPrintAll() {
   const wasHeader = csvShowHeader;
   csvShowHeader = false;
   let ok = 0, fail = 0;
-  const total = csvData.data.reduce((s, r) =>
-      s + Math.max(1, parseInt(r["$copies"], 10) || 1), 0);
   let seq = 1;
   try {
     for (let i = 0; i < csvData.data.length; i++) {
       csvCurrentRow = i;
-      const copies = Math.max(1, parseInt(csvData.data[i]["$copies"], 10) || 1);
+      const copies = copiesPerRow[i];
       for (let j = 0; j < copies; j++) {
         /* Per-copy ctx so $row/$col/$seq/$total expand correctly
          * inside text elements. cleared in the finally clause. */
@@ -2669,7 +2719,8 @@ function restoreFromJSON(json) {
     nextId = Math.max(nextId, el.id + 1);
     if (el.type === "image" && el.src) {
       const img = new Image();
-      img.onload = () => { el._dithered = null; redraw(); };
+      img.onload  = () => { el._dithered = null; el._loadError = false; redraw(); };
+      img.onerror = () => { el._loadError = true; redraw(); };
       img.src = el.src;
       el._img = img;
     }
@@ -3358,7 +3409,25 @@ document.getElementById("flip-v").addEventListener("click", () => flipBy("v"));
     if (!e.target.closest(".font-picker")) closeFontList();
   });
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") closeFontList();
+    if (e.key !== "Escape") return;
+    closeFontList();
+    /* Close burger menu (phone nav) if it's open. */
+    const nav = document.getElementById("nav");
+    if (nav.classList.contains("open")) {
+      nav.classList.remove("open");
+      document.getElementById("burger").setAttribute("aria-expanded", "false");
+    }
+    /* Close the right-click context menu if it's open. */
+    const ctx = document.getElementById("ctx-menu");
+    if (ctx && !ctx.hidden) ctx.hidden = true;
+    /* Close the template-help <details> if the caret is in the CSV
+     * editor — Esc-while-editing means "I just want my keystroke
+     * focus back, not the help open". Doesn't blur the editor. */
+    const help = document.querySelector(".tpl-help");
+    const csv  = document.getElementById("csv");
+    if (help && help.open && document.activeElement === csv) {
+      help.open = false;
+    }
   });
 
   function selectFont(family) {
