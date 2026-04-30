@@ -579,6 +579,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <label for="lang-select" data-i18n="field.lang">UI language</label>
         <select id="lang-select">
           <option value="en">English</option>
+          <option value="de">Deutsch</option>
         </select>
       </div>
       <p class="muted" style="margin-top:.5rem;" data-i18n="panel.language.help">Additional locales load on demand from i18n/{lang}.json. New translations get added to the dropdown by extending the STRINGS table or shipping a JSON file.</p>
@@ -741,11 +742,11 @@ function applyI18n(root = document) {
   }
 }
 
-/* When the translation epic ships, fetch /i18n/<lang>.json for any
- * locale that isn't bundled inline, merge into STRINGS, then call
- * applyI18n() and any redraw paths that emit user-visible text. */
+/* Apply a language. Loads i18n/<lang>.json on demand if the strings
+ * for the target locale aren't already in STRINGS. Safe to call with
+ * the current locale — happens at boot to lazy-load whatever locale
+ * the user picked in a previous session. */
 async function setLanguage(lang) {
-  if (lang === currentLang) return;
   if (lang !== I18N_DEFAULT_LANG && !STRINGS[lang]) {
     try {
       const r = await fetch(`i18n/${lang}.json`);
@@ -753,11 +754,13 @@ async function setLanguage(lang) {
       STRINGS[lang] = await r.json();
     } catch (e) {
       console.warn(`i18n: ${lang} load failed`, e);
-      return;
+      /* Fall through so we still render EN — better than blank UI. */
     }
   }
-  currentLang = lang;
-  localStorage.setItem(I18N_LANG_KEY, lang);
+  if (lang !== currentLang) {
+    currentLang = lang;
+    localStorage.setItem(I18N_LANG_KEY, lang);
+  }
   document.documentElement.lang = lang;
   applyI18n();
   /* The bits not driven by data-i18n (props panel labels, log
@@ -2363,7 +2366,9 @@ function libRefresh() {
   const lib = libRead();
   const sel = document.getElementById("lib-select");
   const wasValue = sel.value;
-  sel.innerHTML = '<option value="">— load saved label —</option>';
+  /* Re-emit data-i18n on the placeholder so a later language
+   * change still finds it during applyI18n's DOM walk. */
+  sel.innerHTML = `<option value="" data-i18n="lib.option.placeholder">${t("lib.option.placeholder")}</option>`;
   for (const name of Object.keys(lib).sort()) {
     const opt = document.createElement("option");
     opt.value = opt.textContent = name;
@@ -3640,10 +3645,11 @@ function wifiInit() {
 
 /* ----- boot ---------------------------------------------------- */
 
-/* Translate everything on the page once at startup. Subsequent
- * locale changes route through setLanguage() which re-runs this. */
-document.documentElement.lang = currentLang;
-applyI18n();
+/* Translate everything on the page once at startup. setLanguage()
+ * lazy-loads the JSON file for any non-default locale persisted
+ * from a previous session, so the UI flips to that locale before
+ * the user has to touch anything. */
+setLanguage(currentLang);
 
 /* Seed one text element + select it so the page isn't empty. */
 elements.push(defaultText());

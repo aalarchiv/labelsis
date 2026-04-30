@@ -150,6 +150,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send_file(os.path.join(SPA_DIR, "setup.html"), "text/html")
             return
 
+        if path.startswith("/i18n/") and path.endswith(".json"):
+            # Whitelist filename to a single segment so the path can't
+            # walk out of SPA_DIR. The SPA only ever asks for files
+            # like i18n/de.json, never anything fancier.
+            name = os.path.basename(path)
+            if "/" in name or "\\" in name or name.startswith("."):
+                self.send_error(404, "not found")
+                return
+            self._send_file(os.path.join(SPA_DIR, "i18n", name), "application/json")
+            return
+
         if path == "/api/status":
             self._send_json(200, {**STATE, "ok": True})
             return
