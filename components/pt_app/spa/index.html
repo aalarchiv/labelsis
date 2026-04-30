@@ -46,7 +46,8 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 /* :not([hidden]) keeps the higher-specificity ID rule from
  * overriding the user-agent [hidden]{display:none} when the view
  * switcher hides this section. */
-#view-print:not([hidden])              { display:flex; flex-direction:column; gap:1rem; }
+#view-print:not([hidden]),
+#view-settings:not([hidden]) { display:flex; flex-direction:column; gap:1rem; }
 #view-print > .col-left,
 #view-print > .col-right { display:flex; flex-direction:column; gap:1rem; }
 @media (min-width: 1024px) {
@@ -144,6 +145,34 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #ctx-menu button { display:block; width:100%; text-align:left; background:transparent; color:var(--fg); padding:.5rem .75rem; border-radius:3px; font-weight:normal; }
 #ctx-menu button:hover { background:rgba(88,166,255,.12); }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
+/* CSV editor: textarea sits on top with transparent text + caret;
+ * the <pre> behind it mirrors the content with per-line styling
+ * (header bold, active row highlighted). The two MUST share font,
+ * padding, border, line-height, and box-sizing for the overlay to
+ * line up exactly with the user's caret. */
+.csv-edit { position:relative; }
+.csv-edit textarea, .csv-edit pre {
+  margin:0; box-sizing:border-box; width:100%;
+  border:1px solid var(--line); border-radius:4px;
+  padding:.5rem;
+  font:.85rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+  white-space:pre-wrap; word-wrap:break-word; overflow-wrap:break-word;
+  tab-size:4;
+}
+.csv-edit textarea {
+  position:relative; z-index:1;
+  background:transparent; color:transparent; caret-color:var(--fg);
+  resize:vertical;
+}
+.csv-edit pre {
+  position:absolute; inset:0; z-index:0;
+  background:var(--bg); color:var(--fg);
+  pointer-events:none; overflow:hidden;
+}
+.csv-line          { display:block; }
+.csv-line.header   { font-weight:700; }
+.csv-line.active   { background:rgba(88,166,255,.18); border-radius:2px; }
+.csv-edit textarea:focus { outline:2px solid var(--accent); outline-offset:0; }
 /* When there's no log message, collapse the line so it doesn't
  * leave dead space at the bottom of the Label panel. */
 #log:empty { display:none; }
@@ -438,9 +467,16 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       label text above to substitute. Optional <code>$copies</code>
       column repeats a row N times in batch print. Date helpers:
       <code>{$dt|YYYY-MM-DD}</code>, <code>{$time|HH:mm}</code>,
-      <code>{$now}</code> (ISO) — work without CSV too.</p>
-      <textarea id="csv" rows="6" placeholder="name,$copies&#10;Alice,2&#10;Bob,1"
-                style="width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.5rem; font:.85rem ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical;"></textarea>
+      <code>{$now}</code> (ISO) — work without CSV too. Sequence
+      helpers: <code>{$row}</code> (0-based row index),
+      <code>{$col}</code> (0-based copy within the row),
+      <code>{$seq}</code> (1-based label number),
+      <code>{$total}</code> (total labels in batch).</p>
+      <div class="csv-edit">
+        <pre id="csv-overlay" aria-hidden="true"></pre>
+        <textarea id="csv" rows="6" placeholder="name,$copies&#10;Alice,2&#10;Bob,1"
+                  spellcheck="false"></textarea>
+      </div>
       <div class="row" style="margin-top:.5rem;">
         <span class="muted" id="tpl-cols">no data</span>
       </div>
@@ -878,7 +914,9 @@ function elementById(id) {
  * pivot, so they can't be set during the paint step. */
 
 function measureText(ctx, el) {
-  const value = substitute(el.text, csvData.data[csvCurrentRow] || {});
+  const pc = previewCtx();
+  const row = pc.headerMode ? {} : (csvData.data[csvCurrentRow] || {});
+  const value = substitute(el.text, row, pc);
   ctx.font = textFontShorthand(el);
   el._renderedText = value;
   el._w = Math.ceil(ctx.measureText(value).width);
@@ -1840,6 +1878,27 @@ function log(msg, ok) {
 
 let csvData = { headers: [], data: [] };
 let csvCurrentRow = 0;
+/* When true, the canvas previews the "header view" — every
+ * placeholder in element text renders as the raw variable name
+ * (so users see {name}/{$row} etc. in their layout positions).
+ * Header is also part of prev/next cycling. */
+let csvShowHeader = false;
+
+/* Build the context object substitute() needs for the current
+ * preview state. Used by drawText/measureText. doPrintAll sets
+ * csvBatchCtx so per-copy iterations override $row/$col/$seq. */
+let csvBatchCtx = null;
+function previewCtx() {
+  if (csvBatchCtx) return csvBatchCtx;
+  if (!csvData.data.length) {
+    return { row: 0, col: 0, seq: 1, total: 1, headerMode: csvShowHeader };
+  }
+  const times = csvData.data.map(r => Math.max(1, parseInt(r["$copies"], 10) || 1));
+  const total = times.reduce((s, t) => s + t, 0);
+  const r     = csvShowHeader ? 0 : csvCurrentRow;
+  const seq   = csvShowHeader ? 1 : (times.slice(0, r).reduce((s, t) => s + t, 0) + 1);
+  return { row: r, col: 0, seq, total, headerMode: csvShowHeader };
+}
 
 function parseCSV(text) {
   const rows = [];
@@ -1874,18 +1933,33 @@ function parseCSV(text) {
 
 /* {col} for CSV cell, optional |format. Special keys $dt/$now/$time
  * substitute the current date/time; format string accepts YYYY MM DD
- * HH mm ss tokens (zero-padded). Examples:
+ * HH mm ss tokens (zero-padded). Sequence keys $row/$col/$seq/$total
+ * pull from ctx.
+ *
  *   {name}                   - column lookup
  *   {$dt|YYYY-MM-DD}         - 2026-04-28
  *   {$time|HH:mm}            - 14:32
  *   {$now}                   - 2026-04-28T14:32:07.123Z (ISO)
- */
-function substitute(tpl, row) {
+ *   {$row}                   - 0-based row index in CSV data
+ *   {$col}                   - 0-based copy index within the current row
+ *   {$seq}                   - 1-based label number in the batch
+ *   {$total}                 - total labels in the batch
+ *
+ * In header-preview mode (`ctx.headerMode`) every placeholder
+ * resolves to its raw key name so the canvas shows the layout
+ * with variable identifiers in place of values. */
+function substitute(tpl, row, ctx) {
+  ctx = ctx || {};
   return tpl.replace(/\{\s*([\w$]+)\s*(?:\|\s*([^}]+?)\s*)?\}/g, (m, key, fmt) => {
+    if (ctx.headerMode) return key;
     if (key === "$dt" || key === "$now")
       return fmt ? formatDate(new Date(), fmt) : new Date().toISOString();
     if (key === "$time")
       return formatDate(new Date(), fmt || "HH:mm:ss");
+    if (key === "$row")   return String(ctx.row   ?? 0);
+    if (key === "$col")   return String(ctx.col   ?? 0);
+    if (key === "$seq")   return String(ctx.seq   ?? 1);
+    if (key === "$total") return String(ctx.total ?? 1);
     if (row && row[key] !== undefined) return String(row[key]);
     return m;
   });
@@ -1913,7 +1987,10 @@ function csvRender() {
    * number by 5, not 1. Matches what doPrintAll() actually emits. */
   const info = document.getElementById("tpl-rowinfo");
   const allBtn = document.getElementById("print-all");
-  if (csvData.data.length) {
+  if (csvShowHeader && csvData.headers.length) {
+    info.textContent = "header (preview)";
+    allBtn.hidden = !csvData.data.length;
+  } else if (csvData.data.length) {
     const times = csvData.data.map(r => Math.max(1, parseInt(r["$copies"], 10) || 1));
     const total = times.reduce((s, t) => s + t, 0);
     const start = times.slice(0, csvCurrentRow).reduce((s, t) => s + t, 0) + 1;
@@ -1928,12 +2005,86 @@ function csvRender() {
     allBtn.textContent = "Print all rows";
     allBtn.hidden = true;
   }
+  csvOverlayRender();
+}
+
+/* Mirror the textarea content into the absolutely-positioned <pre>
+ * with per-line spans so we can style the header line bold and the
+ * active row's background. Called whenever the textarea content,
+ * csvCurrentRow, or csvShowHeader changes. */
+function csvOverlayRender() {
+  const ta      = document.getElementById("csv");
+  const overlay = document.getElementById("csv-overlay");
+  const text    = ta.value;
+  const lines   = text.split("\n");
+  /* Active line index in the textarea: 0 = header, 1..N = data rows.
+   * If there's no data, we still highlight the header when active. */
+  const activeLine = csvShowHeader ? 0 : (csvCurrentRow + 1);
+  const html = lines.map((line, i) => {
+    const cls = ["csv-line"];
+    if (i === 0)          cls.push("header");
+    if (i === activeLine) cls.push("active");
+    /* Empty line still needs height — emit a zero-width-space so
+     * the line renders at the same height as a non-empty line. */
+    const safe = line === "" ? "​" : escapeHtml(line);
+    return `<span class="${cls.join(" ")}">${safe}</span>`;
+  }).join("\n");
+  /* Trailing newline so the user's caret on a new empty line
+   * positions correctly against the overlay. */
+  overlay.innerHTML = html + "\n";
+}
+
+function escapeHtml(s) {
+  return s.replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
 }
 
 function csvUpdate() {
   const text = document.getElementById("csv").value;
   csvData = text.trim() ? parseCSV(text) : { headers: [], data: [] };
   if (csvCurrentRow >= csvData.data.length) csvCurrentRow = 0;
+  /* If there's no data, header preview is the only meaningful
+   * state; auto-pick it so the canvas shows variable names. */
+  if (!csvData.data.length) csvShowHeader = csvData.headers.length > 0;
+  csvRender();
+  redraw();
+}
+
+/* Step the active row in either direction. Cycle order is
+ * header → data 0 → data 1 → … → data N-1 → header → … */
+function csvCycle(dir) {
+  const n = csvData.data.length;
+  if (!n && !csvData.headers.length) return;
+  if (csvShowHeader) {
+    csvShowHeader = false;
+    csvCurrentRow = dir > 0 ? 0 : Math.max(0, n - 1);
+    if (!n) csvShowHeader = true;        /* nothing else to land on */
+  } else {
+    const next = csvCurrentRow + dir;
+    if (next < 0 || next >= n) {
+      csvShowHeader = true;
+    } else {
+      csvCurrentRow = next;
+    }
+  }
+  csvRender();
+  redraw();
+}
+
+/* Click inside the textarea sets the active row to whatever line
+ * the caret landed on. Line 0 = header, lines 1..N = data rows. */
+function csvActivateFromCaret() {
+  const ta = document.getElementById("csv");
+  const before = ta.value.slice(0, ta.selectionStart);
+  const lineIdx = before.split("\n").length - 1;
+  const n = csvData.data.length;
+  if (lineIdx === 0 && csvData.headers.length) {
+    csvShowHeader = true;
+  } else if (n) {
+    csvShowHeader = false;
+    csvCurrentRow = Math.min(Math.max(0, lineIdx - 1), n - 1);
+  } else {
+    return;
+  }
   csvRender();
   redraw();
 }
@@ -1942,26 +2093,40 @@ async function doPrintAll() {
   const btn       = document.getElementById("print-all");
   const printBtn  = document.getElementById("print");
   btn.disabled = printBtn.disabled = true;
+  /* Header preview must NOT be printed — it's a layout aid only.
+   * Force-clear it for the duration of the batch and remember to
+   * restore the user's preview selection when we're done. */
+  const wasHeader = csvShowHeader;
+  csvShowHeader = false;
   let ok = 0, fail = 0;
   const total = csvData.data.reduce((s, r) =>
       s + Math.max(1, parseInt(r["$copies"], 10) || 1), 0);
+  let seq = 1;
   try {
     for (let i = 0; i < csvData.data.length; i++) {
-      csvCurrentRow = i; csvRender(); redraw();
+      csvCurrentRow = i;
       const copies = Math.max(1, parseInt(csvData.data[i]["$copies"], 10) || 1);
       for (let j = 0; j < copies; j++) {
-        log(`row ${i+1}/${csvData.data.length} copy ${j+1}/${copies}  (total ${ok+fail+1}/${total})`);
+        /* Per-copy ctx so $row/$col/$seq/$total expand correctly
+         * inside text elements. cleared in the finally clause. */
+        csvBatchCtx = { row: i, col: j, seq, total, headerMode: false };
+        csvRender(); redraw();
+        log(`row ${i+1}/${csvData.data.length} copy ${j+1}/${copies}  (total ${seq}/${total})`);
         try { await postPrint(); ok++; }
         catch (e) {
           fail++;
           log(`row ${i+1}: ${e.message}`, false);
           if (!confirm(`row ${i+1} failed: ${e.message}\n\ncontinue with remaining rows?`)) throw e;
         }
+        seq++;
       }
     }
     log(`batch done — ${ok} printed${fail ? `, ${fail} failed` : ""}`, !fail);
   } catch (e) { /* already logged */ }
   finally {
+    csvBatchCtx = null;
+    csvShowHeader = wasHeader;
+    csvRender(); redraw();
     btn.disabled = printBtn.disabled = false;
     refreshStatus();
   }
@@ -3048,17 +3213,28 @@ document.getElementById("props-panel").addEventListener("focusout", () => {
 });
 document.getElementById("print").addEventListener("click", doPrint);
 document.getElementById("print-all").addEventListener("click", doPrintAll);
-document.getElementById("csv").addEventListener("input", csvUpdate);
-document.getElementById("tpl-prev").addEventListener("click", () => {
-  if (!csvData.data.length) return;
-  csvCurrentRow = (csvCurrentRow - 1 + csvData.data.length) % csvData.data.length;
-  csvRender(); redraw();
-});
-document.getElementById("tpl-next").addEventListener("click", () => {
-  if (!csvData.data.length) return;
-  csvCurrentRow = (csvCurrentRow + 1) % csvData.data.length;
-  csvRender(); redraw();
-});
+/* The textarea drives both the model (parseCSV → csvData) AND the
+ * styled overlay; both rebuild on input. Click-to-activate moves
+ * the highlighted row + canvas preview to whatever line the caret
+ * is on. Scroll the overlay along with the textarea so long inputs
+ * stay aligned. */
+{
+  const $ta = document.getElementById("csv");
+  $ta.addEventListener("input", csvUpdate);
+  $ta.addEventListener("click", csvActivateFromCaret);
+  $ta.addEventListener("keyup", e => {
+    /* Caret-moving keys: re-evaluate the active line. */
+    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"].includes(e.key))
+      csvActivateFromCaret();
+  });
+  $ta.addEventListener("scroll", () => {
+    const ov = document.getElementById("csv-overlay");
+    ov.scrollTop  = $ta.scrollTop;
+    ov.scrollLeft = $ta.scrollLeft;
+  });
+}
+document.getElementById("tpl-prev").addEventListener("click", () => csvCycle(-1));
+document.getElementById("tpl-next").addEventListener("click", () => csvCycle(+1));
 
 /* CSV import/export — file <-> textarea round-trip. */
 document.getElementById("csv-import").addEventListener("click", () => {
