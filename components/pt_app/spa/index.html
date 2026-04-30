@@ -385,8 +385,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </div>
         <div class="row">
           <label data-i18n="field.font-px">font px</label>
-          <input id="text-size" type="range" min="20" max="120" value="80">
-          <span id="text-size-val" class="dim">80px</span>
+          <input id="text-size" type="number" min="1" max="500" step="1" value="80" class="compact-input">
         </div>
         <div class="row pair">
           <label data-i18n="field.x">x</label>
@@ -2961,7 +2960,6 @@ function syncPropsPanel() {
   if (el && el.type === "text") {
     document.getElementById("text-content").value = el.text;
     document.getElementById("text-size").value = el.size;
-    document.getElementById("text-size-val").textContent = el.size + "px";
     document.getElementById("el-x").value = Math.round(el.x);
     document.getElementById("el-y").value = Math.round(el.y);
     /* Font picker + style toggles. The trigger AND each row in the
@@ -3033,7 +3031,6 @@ function bindPropInput(id, key, parseFn) {
      * snapshot before el[key] is overwritten. */
     if (isFreshPropFocus) { pushUndo(); isFreshPropFocus = false; }
     el[key] = parseFn ? parseFn(e.target.value) : e.target.value;
-    if (id === "text-size")     document.getElementById("text-size-val").textContent = el.size + "px";
     if (id === "img-threshold") document.getElementById("img-threshold-val").textContent = el.threshold;
     /* Anything that affects the image bitmap must invalidate the
      * cached dither so the next redraw rebakes. */
@@ -3071,7 +3068,7 @@ function bindPropInput(id, key, parseFn) {
   });
 }
 bindPropInput("text-content", "text");
-bindPropInput("text-size", "size", v => parseInt(v, 10));
+bindPropInput("text-size", "size", v => Math.max(1, parseInt(v, 10) || 1));
 bindPropInput("el-x", "x",    v => parseInt(v, 10) || 0);
 bindPropInput("el-y", "y",    v => parseInt(v, 10) || 0);
 bindPropInput("img-algo",      "algorithm");
