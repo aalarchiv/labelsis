@@ -288,6 +288,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <input  id="image-file"  type="file" accept="image/*" hidden>
         <button id="add-qr"      class="secondary" type="button" data-i18n="btn.add.qr">+ QR</button>
         <button id="add-barcode" class="secondary" type="button" data-i18n="btn.add.barcode">+ barcode</button>
+        <button id="add-rect"    class="secondary" type="button" data-i18n="btn.add.rect">+ rect</button>
         <span class="spacer"></span>
         <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows" data-i18n-attr="title:btn.more" title="show more actions">⋯</button>
       </div>
@@ -394,6 +395,20 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <input id="bc-x" type="number">
           <label data-i18n="field.y">y</label>
           <input id="bc-y" type="number">
+        </div>
+      </div>
+
+      <div id="props-rect" hidden>
+        <div class="row">
+          <label data-i18n="field.fill">fill</label>
+          <input id="rect-fill" type="color" value="#000000">
+          <span class="spacer"></span>
+        </div>
+        <div class="row pair">
+          <label data-i18n="field.x">x</label>
+          <input id="rect-x" type="number">
+          <label data-i18n="field.y">y</label>
+          <input id="rect-y" type="number">
         </div>
       </div>
 
@@ -624,6 +639,8 @@ const STRINGS = {
     "props.title.image":       "Image",
     "props.title.barcode":     "Barcode",
     "props.title.qr":          "QR",
+    "props.title.rect":        "Rectangle",
+    "field.fill":              "fill",
     "lib.option.placeholder":  "— load saved label —",
     "lib.btn.save":            "save as…",
     "lib.btn.update":          "update",
@@ -633,6 +650,7 @@ const STRINGS = {
     "btn.add.image":           "+ image",
     "btn.add.qr":              "+ QR",
     "btn.add.barcode":         "+ barcode",
+    "btn.add.rect":            "+ rect",
     "btn.duplicate":           "duplicate",
     "btn.delete":              "delete",
     "btn.undo":                "undo",
@@ -1276,6 +1294,29 @@ function drawQR(ctx, el) {
   if (el._qrCanvas) ctx.drawImage(el._qrCanvas, 0, 0);
 }
 
+/* --- filled rectangle element ------------------------------------
+ *
+ * Solid fill of the element's box. Useful as a colour block, a
+ * separator bar between text rows, an inverted-text background
+ * (combined with composite=NOT), etc. el.fill is any valid CSS
+ * colour; for thermal printing the bitmap is thresholded to b/w
+ * after rasterisation, so darker fills print solid black. */
+function defaultRect() {
+  return { id: nextId++, type: "rect", x: 14, y: 32, rotation: 0, composite: "and",
+           scaleX: 1, scaleY: 1, aspectLocked: true,
+           w: 80, h: 40, fill: "#000000" };
+}
+
+function measureRect(_ctx, el) {
+  el._w = Math.max(1, el.w | 0);
+  el._h = Math.max(1, el.h | 0);
+}
+
+function drawRect(ctx, el) {
+  ctx.fillStyle = el.fill || "#000";
+  ctx.fillRect(0, 0, el._baseW || 0, el._baseH || 0);
+}
+
 /* Measure first (writes _w/_h), then translate to the element's
  * centre, rotate, translate back to origin, paint. Centre-pivot is
  * the natural "rotate in place" UX — and crucially it makes
@@ -1286,6 +1327,7 @@ function measureElement(ctx, el) {
   if (el.type === "image")   measureImage(ctx, el);
   if (el.type === "barcode") measureBarcode(ctx, el);
   if (el.type === "qr")      measureQR(ctx, el);
+  if (el.type === "rect")    measureRect(ctx, el);
   /* Type-specific measure writes intrinsic size to _w/_h. Save those
    * as base, then apply scale to get the visible bounds the rest of
    * the code (hit-test, bounds, handles) operates on. */
@@ -1361,6 +1403,7 @@ function drawElement(ctx, el) {
     if (el.type === "image")   drawImage(sctx, el);
     if (el.type === "barcode") drawBarcode(sctx, el);
     if (el.type === "qr")      drawQR(sctx, el);
+    if (el.type === "rect")    drawRect(sctx, el);
     const data = sctx.getImageData(0, 0, baseW, baseH);
     for (let i = 0; i < data.data.length; i += 4) {
       data.data[i]     = 255 - data.data[i];
@@ -1374,6 +1417,7 @@ function drawElement(ctx, el) {
     if (el.type === "image")   drawImage(ctx, el);
     if (el.type === "barcode") drawBarcode(ctx, el);
     if (el.type === "qr")      drawQR(ctx, el);
+    if (el.type === "rect")    drawRect(ctx, el);
   }
   ctx.restore();
 }
@@ -2330,6 +2374,7 @@ function summarise(el) {
   }
   if (el.type === "barcode") return el.text;
   if (el.type === "qr")      return el.text;
+  if (el.type === "rect")    return `${el.w}×${el.h} ${el.fill || "#000"}`;
   return "";
 }
 
@@ -2428,6 +2473,7 @@ function syncPropsPanel() {
   document.getElementById("props-image").hidden     = !el || el.type !== "image";
   document.getElementById("props-barcode").hidden   = !el || el.type !== "barcode";
   document.getElementById("props-qr").hidden        = !el || el.type !== "qr";
+  document.getElementById("props-rect").hidden      = !el || el.type !== "rect";
   document.getElementById("props-transform").hidden = !el;
   /* Title reflects the selected element's type so users get a
    * one-glance reminder of what they're editing. */
@@ -2517,6 +2563,10 @@ function syncPropsPanel() {
     document.getElementById("qr-size").value = el.size;
     document.getElementById("qr-x").value    = Math.round(el.x);
     document.getElementById("qr-y").value    = Math.round(el.y);
+  } else if (el && el.type === "rect") {
+    document.getElementById("rect-fill").value = el.fill || "#000000";
+    document.getElementById("rect-x").value    = Math.round(el.x);
+    document.getElementById("rect-y").value    = Math.round(el.y);
   }
 }
 
@@ -2585,6 +2635,9 @@ bindPropInput("qr-ecc",        "ecc");
 bindPropInput("qr-size",       "size",      v => Math.max(1, Math.min(6, parseInt(v, 10) || 1)));
 bindPropInput("qr-x",          "x",         v => parseInt(v, 10) || 0);
 bindPropInput("qr-y",          "y",         v => parseInt(v, 10) || 0);
+bindPropInput("rect-fill",     "fill");
+bindPropInput("rect-x",        "x",         v => parseInt(v, 10) || 0);
+bindPropInput("rect-y",        "y",         v => parseInt(v, 10) || 0);
 bindPropInput("el-composite", "composite");
 bindPropInput("el-rotation",  "rotation",   v => {
   /* Normalise to (-180, 180] so the input doesn't drift. */
@@ -2767,6 +2820,14 @@ document.getElementById("add-qr").addEventListener("click", () => {
     ecc: "M",
     size: 3,
   };
+  elements.push(el);
+  selectElement(el.id);
+});
+
+document.getElementById("add-rect").addEventListener("click", () => {
+  pushUndo();
+  const el = defaultRect();
+  el.x = rightmostX();
   elements.push(el);
   selectElement(el.id);
 });
