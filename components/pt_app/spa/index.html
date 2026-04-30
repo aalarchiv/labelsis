@@ -73,7 +73,7 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
   }
 }
 .panel, .panel h2, .panel p { overflow-wrap:anywhere; }
-#tpl-panel code, .csv-edit textarea, .csv-edit pre { word-break:break-word; overflow-wrap:anywhere; }
+#tpl-panel code, #csv, .csv-rows li { word-break:break-word; overflow-wrap:anywhere; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 /* Inline panel header: the h2 sits next to the label-library
@@ -164,34 +164,35 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #ctx-menu button { display:block; width:100%; text-align:left; background:transparent; color:var(--fg); padding:.5rem .75rem; border-radius:3px; font-weight:normal; }
 #ctx-menu button:hover { background:rgba(88,166,255,.12); }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
-/* CSV editor: textarea sits on top with transparent text + caret;
- * the <pre> behind it mirrors the content with per-line styling
- * (header bold, active row highlighted). The two MUST share font,
- * padding, border, line-height, and box-sizing for the overlay to
- * line up exactly with the user's caret. */
-.csv-edit { position:relative; }
-.csv-edit textarea, .csv-edit pre {
-  margin:0; box-sizing:border-box; width:100%;
-  border:1px solid var(--line); border-radius:4px;
-  padding:.5rem;
-  font:.85rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
-  white-space:pre-wrap; word-wrap:break-word; overflow-wrap:break-word;
-  tab-size:4;
-}
-.csv-edit textarea {
-  position:relative; z-index:1;
-  background:transparent; color:transparent; caret-color:var(--fg);
-  resize:vertical;
-}
-.csv-edit pre {
-  position:absolute; inset:0; z-index:0;
+/* CSV editor: a plain textarea + a clickable row list. Header row
+ * appears bold in the list, the active row gets the accent
+ * background. Edits to the textarea re-parse and rebuild the list;
+ * clicking a row in the list activates it (drives the canvas
+ * preview without touching the textarea). Avoids the alignment
+ * fragility of the previous transparent-textarea + overlay-pre
+ * approach. */
+#csv {
+  width:100%; box-sizing:border-box; padding:.5rem;
   background:var(--bg); color:var(--fg);
-  pointer-events:none; overflow:hidden;
+  border:1px solid var(--line); border-radius:4px;
+  font:.85rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+  resize:vertical; tab-size:4;
 }
-.csv-line          { display:block; }
-.csv-line.header   { font-weight:700; }
-.csv-line.active   { background:rgba(88,166,255,.18); border-radius:2px; }
-.csv-edit textarea:focus { outline:2px solid var(--accent); outline-offset:0; }
+.csv-rows {
+  list-style:none; padding:0; margin:.5rem 0 0;
+  display:flex; flex-direction:column; gap:.15rem;
+  font:.85rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+  max-height:240px; overflow:auto;
+}
+.csv-rows li {
+  padding:.25rem .5rem; border-radius:3px;
+  cursor:pointer; user-select:none;
+  white-space:pre; overflow:hidden; text-overflow:ellipsis;
+  background:var(--bg); border:1px solid var(--line);
+}
+.csv-rows li.header  { font-weight:700; }
+.csv-rows li.active  { background:rgba(88,166,255,.18); border-color:var(--accent); }
+.csv-rows li:hover   { border-color:var(--accent); }
 /* When there's no log message, collapse the line so it doesn't
  * leave dead space at the bottom of the Label panel. */
 #log:empty { display:none; }
@@ -507,11 +508,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <code>{$col}</code> (0-based copy within the row),
       <code>{$seq}</code> (1-based label number),
       <code>{$total}</code> (total labels in batch).</p>
-      <div class="csv-edit">
-        <pre id="csv-overlay" aria-hidden="true"></pre>
-        <textarea id="csv" rows="6" placeholder="name,$copies&#10;Alice,2&#10;Bob,1"
-                  spellcheck="false"></textarea>
-      </div>
+      <textarea id="csv" rows="6" placeholder="name,$copies&#10;Alice,2&#10;Bob,1"
+                spellcheck="false"></textarea>
+      <ol id="csv-rows" class="csv-rows" aria-label="parsed CSV rows"></ol>
       <div class="row" style="margin-top:.5rem;">
         <span class="muted" id="tpl-cols">no data</span>
       </div>
@@ -2216,33 +2215,46 @@ function csvRender() {
     allBtn.textContent = "Print all rows";
     allBtn.hidden = true;
   }
-  csvOverlayRender();
+  csvRowsRender();
 }
 
-/* Mirror the textarea content into the absolutely-positioned <pre>
- * with per-line spans so we can style the header line bold and the
- * active row's background. Called whenever the textarea content,
- * csvCurrentRow, or csvShowHeader changes. */
-function csvOverlayRender() {
-  const ta      = document.getElementById("csv");
-  const overlay = document.getElementById("csv-overlay");
-  const text    = ta.value;
-  const lines   = text.split("\n");
-  /* Active line index in the textarea: 0 = header, 1..N = data rows.
-   * If there's no data, we still highlight the header when active. */
+/* Build the clickable rows list — one <li> per non-empty CSV line.
+ * Header (first row) gets .header (bold). The currently-active row
+ * gets .active (accent background). Click activates the row,
+ * driving the canvas preview without touching the textarea. */
+function csvRowsRender() {
+  const ul    = document.getElementById("csv-rows");
+  ul.innerHTML = "";
+  const text  = document.getElementById("csv").value;
+  const lines = text.split("\n").map(s => s.replace(/\r$/, ""));
+  /* Hide the list entirely when nothing's been typed — no point
+   * showing an empty box. */
+  ul.hidden = !text.trim();
+  if (!text.trim()) return;
   const activeLine = csvShowHeader ? 0 : (csvCurrentRow + 1);
-  const html = lines.map((line, i) => {
-    const cls = ["csv-line"];
-    if (i === 0)          cls.push("header");
-    if (i === activeLine) cls.push("active");
-    /* Empty line still needs height — emit a zero-width-space so
-     * the line renders at the same height as a non-empty line. */
-    const safe = line === "" ? "​" : escapeHtml(line);
-    return `<span class="${cls.join(" ")}">${safe}</span>`;
-  }).join("\n");
-  /* Trailing newline so the user's caret on a new empty line
-   * positions correctly against the overlay. */
-  overlay.innerHTML = html + "\n";
+  lines.forEach((line, i) => {
+    /* Skip blank tail lines so a stray trailing newline doesn't
+     * render as an empty row. */
+    if (i === lines.length - 1 && line === "") return;
+    const li = document.createElement("li");
+    li.textContent = line || " ";   /* non-breaking space keeps height */
+    if (i === 0)            li.classList.add("header");
+    if (i === activeLine)   li.classList.add("active");
+    li.addEventListener("click", () => {
+      const n = csvData.data.length;
+      if (i === 0 && csvData.headers.length) {
+        csvShowHeader = true;
+      } else if (n) {
+        csvShowHeader = false;
+        csvCurrentRow = Math.min(Math.max(0, i - 1), n - 1);
+      } else {
+        return;
+      }
+      csvRender();
+      redraw();
+    });
+    ul.appendChild(li);
+  });
 }
 
 function escapeHtml(s) {
@@ -2276,25 +2288,6 @@ function csvCycle(dir) {
     } else {
       csvCurrentRow = next;
     }
-  }
-  csvRender();
-  redraw();
-}
-
-/* Click inside the textarea sets the active row to whatever line
- * the caret landed on. Line 0 = header, lines 1..N = data rows. */
-function csvActivateFromCaret() {
-  const ta = document.getElementById("csv");
-  const before = ta.value.slice(0, ta.selectionStart);
-  const lineIdx = before.split("\n").length - 1;
-  const n = csvData.data.length;
-  if (lineIdx === 0 && csvData.headers.length) {
-    csvShowHeader = true;
-  } else if (n) {
-    csvShowHeader = false;
-    csvCurrentRow = Math.min(Math.max(0, lineIdx - 1), n - 1);
-  } else {
-    return;
   }
   csvRender();
   redraw();
@@ -3427,7 +3420,55 @@ document.addEventListener("keydown", ev => {
   if (!inField && ctrl && (ev.key === "d" || ev.key === "D")) {
     ev.preventDefault(); duplicateSelected(); return;
   }
+  /* Arrow keys: move selected element when no modifier; with shift,
+   * arrows rotate (left/right) or scale (up/down). Held arrow keys
+   * auto-repeat through the browser's native key-repeat. */
+  if (!inField && !ctrl && selectedId != null) {
+    const el = elementById(selectedId);
+    if (!el) return;
+    const isArrow = ev.key === "ArrowLeft" || ev.key === "ArrowRight"
+                 || ev.key === "ArrowUp"   || ev.key === "ArrowDown";
+    if (!isArrow) return;
+    ev.preventDefault();
+    kbdUndoTick();
+    if (ev.shiftKey) {
+      if (ev.key === "ArrowLeft")  rotateBy(-1);
+      if (ev.key === "ArrowRight") rotateBy(+1);
+      if (ev.key === "ArrowUp")    kbdScaleBy(1.05);
+      if (ev.key === "ArrowDown")  kbdScaleBy(1 / 1.05);
+    } else {
+      if (ev.key === "ArrowLeft")  el.x -= 1;
+      if (ev.key === "ArrowRight") el.x += 1;
+      if (ev.key === "ArrowUp")    el.y -= 1;
+      if (ev.key === "ArrowDown")  el.y += 1;
+      clampElementPos(el);
+      syncPropsPanel();
+      redraw();
+    }
+  }
 });
+
+/* Group consecutive arrow-key actions into a single undo entry by
+ * only pushing once per ~800 ms keystroke run. Otherwise nudging
+ * an element 20 pixels via 20 arrow presses would consume 20 undo
+ * slots — annoying. */
+let kbdLastTime = 0;
+function kbdUndoTick() {
+  const now = Date.now();
+  if (now - kbdLastTime > 800) pushUndo();
+  kbdLastTime = now;
+}
+
+/* Uniform scale via keyboard, regardless of aspectLocked — matches
+ * the corner-handle drag behaviour. */
+function kbdScaleBy(factor) {
+  const el = elementById(selectedId);
+  if (!el) return;
+  el.scaleX = clampScale((el.scaleX ?? 1) * factor);
+  el.scaleY = clampScale((el.scaleY ?? 1) * factor);
+  syncPropsPanel();
+  redraw();
+}
 
 /* Track "fresh focus" so the first input event after a focus into
  * a property field pushes an undo entry — but tabbing through
@@ -3443,26 +3484,11 @@ document.getElementById("props-panel").addEventListener("focusout", () => {
 });
 document.getElementById("print").addEventListener("click", doPrint);
 document.getElementById("print-all").addEventListener("click", doPrintAll);
-/* The textarea drives both the model (parseCSV → csvData) AND the
- * styled overlay; both rebuild on input. Click-to-activate moves
- * the highlighted row + canvas preview to whatever line the caret
- * is on. Scroll the overlay along with the textarea so long inputs
- * stay aligned. */
-{
-  const $ta = document.getElementById("csv");
-  $ta.addEventListener("input", csvUpdate);
-  $ta.addEventListener("click", csvActivateFromCaret);
-  $ta.addEventListener("keyup", e => {
-    /* Caret-moving keys: re-evaluate the active line. */
-    if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"].includes(e.key))
-      csvActivateFromCaret();
-  });
-  $ta.addEventListener("scroll", () => {
-    const ov = document.getElementById("csv-overlay");
-    ov.scrollTop  = $ta.scrollTop;
-    ov.scrollLeft = $ta.scrollLeft;
-  });
-}
+/* Textarea edits drive both the parsed model (parseCSV → csvData)
+ * and the rows list below. Row activation is driven entirely by
+ * clicking items in #csv-rows — the textarea stays a plain editor
+ * with native caret behaviour. */
+document.getElementById("csv").addEventListener("input", csvUpdate);
 document.getElementById("tpl-prev").addEventListener("click", () => csvCycle(-1));
 document.getElementById("tpl-next").addEventListener("click", () => csvCycle(+1));
 
