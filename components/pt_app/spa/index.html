@@ -38,6 +38,9 @@ button { background:var(--accent); color:#fff; border:0; border-radius:4px; padd
 button:disabled { background:var(--muted); cursor:not-allowed; }
 button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
 button.secondary[aria-pressed="true"], button.secondary.toggled { background:var(--accent); color:var(--bg); }
+/* Lock button: the icon (🔒/🔓) carries state, not the chrome —
+ * leave it in the default look in both positions. */
+#aspect-lock, #aspect-lock[aria-pressed="true"] { background:transparent; color:var(--accent); }
 .canvas-viewport { position:relative; overflow:hidden; max-width:100%; touch-action:none; border:1px solid var(--line); border-radius:4px; background:#fff; }
 canvas { display:block; image-rendering:pixelated; background:#fff; }
 #el-list .grip { touch-action:none; }
@@ -185,9 +188,10 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <input id="text" type="text" placeholder='Type text — use {column} for CSV substitution'>
         </div>
         <div class="row" style="margin-bottom:.5rem">
-          <label>size</label>
+          <label>font px</label>
           <input id="size" type="range" min="20" max="120" value="80">
           <span id="size-val" class="dim">80px</span>
+          <span class="muted">(base size; w/h scales on top)</span>
         </div>
         <div class="row">
           <label>x</label>
@@ -273,6 +277,13 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       </div>
 
       <div id="props-transform" hidden style="margin-top:.75rem; padding-top:.75rem; border-top:1px solid var(--line);">
+        <div class="row" style="margin-bottom:.5rem">
+          <label>size</label>
+          <input id="el-w" type="number" min="1" step="1" style="max-width:90px" title="visible width (px)">
+          <button id="aspect-lock" class="secondary" type="button" aria-pressed="true" title="lock aspect ratio: when on, w and h scale together; when off, mid-edge handles stretch one axis">🔒</button>
+          <input id="el-h" type="number" min="1" step="1" style="max-width:90px" title="visible height (px)">
+          <span class="muted">px</span>
+        </div>
         <div class="row" style="margin-bottom:.5rem">
           <label>rotation</label>
           <input id="el-rotation" type="number" step="1" style="max-width:90px">
@@ -509,7 +520,9 @@ let selectedId = null;
 let nextId    = 1;
 
 function defaultText() {
-  return { id: nextId++, type: "text", x: 14, y: 0, rotation: 0, composite: "and", text: "hello", size: 80 };
+  return { id: nextId++, type: "text", x: 14, y: 0, rotation: 0, composite: "and",
+           scaleX: 1, scaleY: 1, aspectLocked: true,
+           text: "hello", size: 80 };
 }
 
 function elementById(id) {
@@ -650,7 +663,7 @@ function drawImage(ctx, el) {
     ctx.drawImage(el._dithered, 0, 0);
   } else {
     ctx.fillStyle = "#ddd";
-    ctx.fillRect(0, 0, el._w, el._h);
+    ctx.fillRect(0, 0, el._baseW || 0, el._baseH || 0);
   }
 }
 
@@ -794,7 +807,7 @@ function measureBarcode(_ctx, el) {
 function drawBarcode(ctx, el) {
   if (el._barcodeError) {
     ctx.fillStyle = "#fdd";
-    ctx.fillRect(0, 0, el._w, el._h);
+    ctx.fillRect(0, 0, el._baseW || 0, el._baseH || 0);
     ctx.fillStyle = "#900";
     ctx.font = "10px sans-serif";
     ctx.textBaseline = "top";
@@ -867,7 +880,7 @@ function measureQR(_ctx, el) {
 function drawQR(ctx, el) {
   if (el._qrError) {
     ctx.fillStyle = "#fdd";
-    ctx.fillRect(0, 0, el._w, el._h);
+    ctx.fillRect(0, 0, el._baseW || 0, el._baseH || 0);
     ctx.fillStyle = "#900";
     ctx.font = "10px sans-serif";
     ctx.textBaseline = "top";
@@ -887,6 +900,14 @@ function measureElement(ctx, el) {
   if (el.type === "image")   measureImage(ctx, el);
   if (el.type === "barcode") measureBarcode(ctx, el);
   if (el.type === "qr")      measureQR(ctx, el);
+  /* Type-specific measure writes intrinsic size to _w/_h. Save those
+   * as base, then apply scale to get the visible bounds the rest of
+   * the code (hit-test, bounds, handles) operates on. */
+  el._baseW = el._w;
+  el._baseH = el._h;
+  const sX = el.scaleX ?? 1, sY = el.scaleY ?? 1;
+  el._w = el._baseW * sX;
+  el._h = el._baseH * sY;
 }
 
 /* Composite mode — how this element's pixels combine with the
@@ -923,34 +944,38 @@ function drawElement(ctx, el) {
    * stair-stepped but still 1-bit, no gradient artefacts that the
    * print threshold would render as inconsistent dithering. */
   ctx.imageSmoothingEnabled = false;
-  const w = el._w || 0, h = el._h || 0;
-  ctx.translate(el.x + w / 2, el.y + h / 2);
+  const visW = el._w  || 0, visH = el._h  || 0;
+  const baseW = el._baseW || 0, baseH = el._baseH || 0;
+  const sX = el.scaleX ?? 1,    sY = el.scaleY ?? 1;
+  ctx.translate(el.x + visW / 2, el.y + visH / 2);
   const rot = (el.rotation || 0) * Math.PI / 180;
   if (rot) ctx.rotate(rot);
-  /* Flip about the element centre. Applied AFTER rotate so the
-   * geometric flip happens in the rotated frame — visually this
-   * matches what users expect from "mirror left-right" / "mirror
-   * top-bottom" buttons in vector tools. */
-  if (el.flipH || el.flipV) ctx.scale(el.flipH ? -1 : 1, el.flipV ? -1 : 1);
-  ctx.translate(-w / 2, -h / 2);
+  /* Flip + non-uniform scale about the element centre, all rolled
+   * into one ctx.scale call. Applied AFTER rotate so the flip /
+   * stretch happen in the rotated frame — matches Figma / Inkscape
+   * conventions. Inner draw uses base coords (0..baseW × 0..baseH)
+   * which the scale projects to (0..visW × 0..visH) in the parent. */
+  ctx.scale((el.flipH ? -1 : 1) * sX, (el.flipV ? -1 : 1) * sY);
+  ctx.translate(-baseW / 2, -baseH / 2);
 
   const op = el.composite || "and";
   ctx.globalCompositeOperation = COMPOSITE_MAP[op] || "multiply";
 
-  if (op === "not" && w > 0 && h > 0) {
-    /* Render the element into a scratch canvas with white ground,
-     * invert luminance, then drawImage the result onto the main
-     * context (still under the centre-pivot transform). */
+  if (op === "not" && baseW > 0 && baseH > 0) {
+    /* Render the element into a scratch canvas at base size with
+     * white ground, invert luminance, then drawImage the result onto
+     * the main context (under the centre-pivot transform). The scale
+     * already on ctx will paint scratch at visible × visible. */
     const scratch = document.createElement("canvas");
-    scratch.width = w; scratch.height = h;
+    scratch.width = baseW; scratch.height = baseH;
     const sctx = scratch.getContext("2d");
     sctx.fillStyle = "#fff";
-    sctx.fillRect(0, 0, w, h);
+    sctx.fillRect(0, 0, baseW, baseH);
     if (el.type === "text")    drawText(sctx, el);
     if (el.type === "image")   drawImage(sctx, el);
     if (el.type === "barcode") drawBarcode(sctx, el);
     if (el.type === "qr")      drawQR(sctx, el);
-    const data = sctx.getImageData(0, 0, w, h);
+    const data = sctx.getImageData(0, 0, baseW, baseH);
     for (let i = 0; i < data.data.length; i += 4) {
       data.data[i]     = 255 - data.data[i];
       data.data[i + 1] = 255 - data.data[i + 1];
@@ -1024,11 +1049,17 @@ function hitHandle(el, x, y) {
     const cos = Math.cos(-rot), sin = Math.sin(-rot);
     [dx, dy] = [dx * cos - dy * sin, dx * sin + dy * cos];
   }
+  /* Order matters: corner handles win ties at the corner over edges
+   * (corners give uniform scale, edges give axis-only). */
   const candidates = [
     ["tl",     -w/2, -h/2],
     ["tr",      w/2, -h/2],
     ["br",      w/2,  h/2],
     ["bl",     -w/2,  h/2],
+    ["t",       0,   -h/2],
+    ["r",       w/2,  0  ],
+    ["b",       0,    h/2],
+    ["l",      -w/2,  0  ],
     ["rotate",  0,   -h/2 - ROTATE_OFF],
   ];
   for (const [name, hx, hy] of candidates) {
@@ -1038,29 +1069,41 @@ function hitHandle(el, x, y) {
   return null;
 }
 
-/* Resize: drag a corner away from / toward the element centre to
- * scale. Each type has its own "scale driver" — the property whose
- * value the corner-handle distance is mapped to. */
-function getScaleProp(el) {
-  if (el.type === "text")    return el.size;
-  if (el.type === "image")   return el.h;
-  if (el.type === "barcode") return el.h;
-  if (el.type === "qr")      return el.size;
-  return 1;
+/* Resize: handle-driven scaling of element.scaleX / .scaleY. The
+ * type-specific intrinsic size (text.size, image.h, barcode.size+h,
+ * qr.size) defines the bake / render quality at scale=1; scaleX and
+ * scaleY are pure transform multipliers applied in drawElement.
+ *
+ * Bounds: 0.05× to 50× — enough range for ant-text to billboard,
+ * tight enough that a cursor near the centre can't shrink to zero. */
+function clampScale(s) {
+  if (!Number.isFinite(s)) return 1;
+  return Math.max(0.05, Math.min(50, s));
 }
-function setScaleProp(el, value) {
-  if (el.type === "text") {
-    el.size = Math.max(8, Math.min(200, Math.round(value)));
-  } else if (el.type === "image") {
-    const v = Math.max(8, Math.min(128, Math.round(value)));
-    if (v !== el.h) { el.h = v; el._dithered = null; }
-  } else if (el.type === "barcode") {
-    const v = Math.max(16, Math.min(128, Math.round(value)));
-    if (v !== el.h) { el.h = v; el._barcodeCanvas = null; }
-  } else if (el.type === "qr") {
-    const v = Math.max(1, Math.min(6, Math.round(value)));
-    if (v !== el.size) { el.size = v; el._qrCanvas = null; }
+
+/* Toggle aspect lock. Snapping into locked: keep the visibly larger
+ * axis and recompute the other so the original (base) aspect ratio
+ * is restored. Snapping out: just clear the flag, scaleX/scaleY are
+ * already independent. */
+function toggleAspectLock() {
+  const el = elementById(selectedId);
+  if (!el) return;
+  pushUndo();
+  if (el.aspectLocked === false) {
+    /* unlocked → locked: figure out the larger visible side and
+     * collapse to a single uniform scale. */
+    const sX = el.scaleX ?? 1, sY = el.scaleY ?? 1;
+    const visW = (el._baseW || 1) * sX;
+    const visH = (el._baseH || 1) * sY;
+    const u = visW >= visH ? sX : sY;
+    el.scaleX = u;
+    el.scaleY = u;
+    el.aspectLocked = true;
+  } else {
+    el.aspectLocked = false;
   }
+  syncPropsPanel();
+  redraw();
 }
 
 /* forPrint=true skips the UI overlays (margin tint, selection ring)
@@ -1328,7 +1371,15 @@ function drawSelectionChrome(ctx, el) {
     projectLocal(el,  w/2,  h/2),
     projectLocal(el, -w/2,  h/2),
   ];
-  const topMid = projectLocal(el, 0, -h/2);
+  /* Mid-edge anchors — top, right, bottom, left. Drag these for
+   * single-axis (or aspect-locked uniform) scaling. */
+  const edges = [
+    projectLocal(el,  0,   -h/2),  /* top    */
+    projectLocal(el,  w/2,  0  ),  /* right  */
+    projectLocal(el,  0,    h/2),  /* bottom */
+    projectLocal(el, -w/2,  0  ),  /* left   */
+  ];
+  const topMid = edges[0];
   const rotPos = projectLocal(el, 0, -h/2 - ROTATE_OFF);
 
   ctx.save();
@@ -1357,6 +1408,18 @@ function drawSelectionChrome(ctx, el) {
   for (const [x, y] of corners) {
     ctx.fillRect(x - HANDLE_VIS/2, y - HANDLE_VIS/2, HANDLE_VIS, HANDLE_VIS);
     ctx.strokeRect(x - HANDLE_VIS/2, y - HANDLE_VIS/2, HANDLE_VIS, HANDLE_VIS);
+  }
+  /* Mid-edge squares — slightly narrower in the perpendicular axis
+   * so they read as "stretch this side". */
+  const E_LONG = HANDLE_VIS, E_SHORT = HANDLE_VIS - 2;
+  /* top + bottom are wide-but-short; left + right are tall-but-narrow. */
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = edges[i];
+    const horiz = (i === 0 || i === 2);
+    const w0 = horiz ? E_LONG  : E_SHORT;
+    const h0 = horiz ? E_SHORT : E_LONG;
+    ctx.fillRect(x - w0/2, y - h0/2, w0, h0);
+    ctx.strokeRect(x - w0/2, y - h0/2, w0, h0);
   }
   ctx.restore();
 }
@@ -1848,9 +1911,24 @@ function syncPropsPanel() {
   document.getElementById("props-barcode").hidden   = !el || el.type !== "barcode";
   document.getElementById("props-qr").hidden        = !el || el.type !== "qr";
   document.getElementById("props-transform").hidden = !el;
+  /* Freshly-added elements may not have been measured yet; do a
+   * one-shot scratch measure so the size inputs aren't blank on
+   * first selection. */
+  if (el && !Number.isFinite(el._baseW)) {
+    const tmp = document.createElement("canvas").getContext("2d");
+    measureElement(tmp, el);
+  }
   if (el) {
     document.getElementById("el-rotation").value  = el.rotation  || 0;
     document.getElementById("el-composite").value = el.composite || "and";
+    /* Visible w/h come from the most recent measure pass; round so
+     * the input shows a clean integer instead of 47.0123. */
+    document.getElementById("el-w").value = Math.max(1, Math.round(el._w || 0));
+    document.getElementById("el-h").value = Math.max(1, Math.round(el._h || 0));
+    const locked = el.aspectLocked !== false;
+    const $lock = document.getElementById("aspect-lock");
+    $lock.setAttribute("aria-pressed", locked ? "true" : "false");
+    $lock.textContent = locked ? "🔒" : "🔓";
     const $fh = document.getElementById("flip-h");
     const $fv = document.getElementById("flip-v");
     $fh.setAttribute("aria-pressed", el.flipH ? "true" : "false");
@@ -1916,6 +1994,20 @@ function bindPropInput(id, key, parseFn) {
     if (id === "text" || id === "bc-text" || id === "qr-text"
      || id === "bc-sym") renderLayerList();
     redraw();
+    /* Type-specific size knobs (font size, dither height, module
+     * px) feed into baseW/baseH, so the visible w/h shown in the
+     * unified Size row needs a refresh — but only if those inputs
+     * aren't currently focused, to avoid clobbering in-progress
+     * typing. */
+    if (id === "size"   || id === "img-h" || id === "bc-h"
+     || id === "bc-size"|| id === "qr-size") {
+      const $w = document.getElementById("el-w");
+      const $h = document.getElementById("el-h");
+      if (document.activeElement !== $w)
+        $w.value = Math.max(1, Math.round(el._w || 0));
+      if (document.activeElement !== $h)
+        $h.value = Math.max(1, Math.round(el._h || 0));
+    }
   });
 }
 bindPropInput("text", "text");
@@ -1961,6 +2053,31 @@ function rotateBy(delta) {
 document.getElementById("rot-cw").addEventListener("click",  () => rotateBy(+90));
 document.getElementById("rot-ccw").addEventListener("click", () => rotateBy(-90));
 
+/* w / h numeric inputs map directly into scaleX / scaleY relative
+ * to the element's intrinsic base size. The base size comes from
+ * the last measure pass; if it's missing for some reason (e.g. an
+ * empty barcode), we read 1 to avoid divide-by-zero. */
+function applySize(axis, px) {
+  const el = elementById(selectedId);
+  if (!el || !Number.isFinite(px) || px < 1) return;
+  pushUndo();
+  const baseW = el._baseW || 1, baseH = el._baseH || 1;
+  if (axis === "w") {
+    el.scaleX = clampScale(px / baseW);
+    if (el.aspectLocked !== false) el.scaleY = el.scaleX;
+  } else {
+    el.scaleY = clampScale(px / baseH);
+    if (el.aspectLocked !== false) el.scaleX = el.scaleY;
+  }
+  syncPropsPanel();
+  redraw();
+}
+document.getElementById("el-w").addEventListener("input",
+  e => applySize("w", parseFloat(e.target.value)));
+document.getElementById("el-h").addEventListener("input",
+  e => applySize("h", parseFloat(e.target.value)));
+document.getElementById("aspect-lock").addEventListener("click", toggleAspectLock);
+
 function flipBy(axis) {
   const el = elementById(selectedId);
   if (!el) return;
@@ -1999,6 +2116,7 @@ document.getElementById("add-barcode").addEventListener("click", () => {
   const el = {
     id: nextId++, type: "barcode",
     x: rightmostX(), y: 24, rotation: 0, composite: "and",
+    scaleX: 1, scaleY: 1, aspectLocked: true,
     h: 60,
     symbology: "code128b",
     text: "ABC123",
@@ -2014,6 +2132,7 @@ document.getElementById("add-qr").addEventListener("click", () => {
   const el = {
     id: nextId++, type: "qr",
     x: rightmostX(), y: 0, rotation: 0, composite: "and",
+    scaleX: 1, scaleY: 1, aspectLocked: true,
     text: "https://pt700.local/",
     ecc: "M",
     size: 3,
@@ -2037,6 +2156,7 @@ document.getElementById("image-file").addEventListener("change", async e => {
       const el = {
         id: nextId++, type: "image",
         x: rightmostX(), y: 0, rotation: 0, composite: "and",
+        scaleX: 1, scaleY: 1, aspectLocked: true,
         h: HEAD_PX,
         algorithm: "atkinson",
         threshold: 128,
@@ -2171,10 +2291,25 @@ canvas.addEventListener("pointerdown", ev => {
         startRotation: sel.rotation || 0,
       };
     } else {
+      /* Project the grab point into element-local space so axis
+       * scaling can be expressed cleanly as |local-x|/|local-y| ratios
+       * regardless of rotation/flip. */
+      let lx = p.x - cx, ly = p.y - cy;
+      const rot = (sel.rotation || 0) * Math.PI / 180;
+      if (rot) {
+        const cos = Math.cos(-rot), sin = Math.sin(-rot);
+        [lx, ly] = [lx * cos - ly * sin, lx * sin + ly * cos];
+      }
+      if (sel.flipH) lx = -lx;
+      if (sel.flipV) ly = -ly;
       resize = {
-        id: sel.id,
-        startDist: Math.hypot(p.x - cx, p.y - cy) || 1,
-        startVal:  getScaleProp(sel),
+        id:        sel.id,
+        handle,
+        startSX:   sel.scaleX ?? 1,
+        startSY:   sel.scaleY ?? 1,
+        startLX:   Math.abs(lx) || 1,
+        startLY:   Math.abs(ly) || 1,
+        startD:    Math.hypot(lx, ly) || 1,
       };
     }
     canvas.setPointerCapture(ev.pointerId);
@@ -2219,16 +2354,45 @@ canvas.addEventListener("pointermove", ev => {
     return;
   }
 
-  /* Corner handle drag: scale property by ratio of current to
-   * starting handle-distance from element centre. */
+  /* Resize handle drag. Corner handles always scale uniformly (both
+   * axes by the same factor). Mid-edge handles scale only their own
+   * axis when the aspect ratio is unlocked, or scale uniformly when
+   * locked (driven by the dragged-axis ratio). */
   if (resize) {
     const el = elementById(resize.id);
     if (el) {
       const p = evtToCanvas(ev);
       const cx = el.x + (el._w || 0) / 2;
       const cy = el.y + (el._h || 0) / 2;
-      const d  = Math.hypot(p.x - cx, p.y - cy) || 1;
-      setScaleProp(el, resize.startVal * (d / resize.startDist));
+      let lx = p.x - cx, ly = p.y - cy;
+      const rot = (el.rotation || 0) * Math.PI / 180;
+      if (rot) {
+        const cos = Math.cos(-rot), sin = Math.sin(-rot);
+        [lx, ly] = [lx * cos - ly * sin, lx * sin + ly * cos];
+      }
+      if (el.flipH) lx = -lx;
+      if (el.flipV) ly = -ly;
+      const ratioX = Math.abs(lx) / resize.startLX;
+      const ratioY = Math.abs(ly) / resize.startLY;
+      const ratioD = Math.hypot(lx, ly) / resize.startD;
+      const corner = (resize.handle === "tl" || resize.handle === "tr"
+                  || resize.handle === "br" || resize.handle === "bl");
+      const horiz  = (resize.handle === "l"  || resize.handle === "r");
+      const vert   = (resize.handle === "t"  || resize.handle === "b");
+      const locked = el.aspectLocked !== false;
+      let nSX = resize.startSX, nSY = resize.startSY;
+      if (corner) {
+        nSX = resize.startSX * ratioD;
+        nSY = resize.startSY * ratioD;
+      } else if (horiz) {
+        nSX = resize.startSX * ratioX;
+        nSY = locked ? resize.startSY * ratioX : resize.startSY;
+      } else if (vert) {
+        nSY = resize.startSY * ratioY;
+        nSX = locked ? resize.startSX * ratioY : resize.startSX;
+      }
+      el.scaleX = clampScale(nSX);
+      el.scaleY = clampScale(nSY);
       syncPropsPanel();
       redraw();
     }
