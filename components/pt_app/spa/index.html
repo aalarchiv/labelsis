@@ -2360,20 +2360,41 @@ function csvUpdateEmptyClass() {
   csv.classList.toggle("empty", !csvText().trim());
 }
 
-/* Wrap any orphan text/<br> nodes that Chrome can leave at the top
- * level when typing into an empty contenteditable, so the per-line
- * styling rules consistently apply. Called from the input listener. */
+/* Normalize the contenteditable's structure so per-line styling
+ * (.header on the first <div>, .active on the row driving the
+ * preview) keeps lining up with reality. Chromium sometimes leaves
+ * orphan text/<br> nodes at the top level — typing into an empty
+ * editor lands the first chars as a raw text node before any <div>,
+ * which would shift every subsequent row's index by one. We wrap
+ * those orphans in a <div> in place rather than rewriting the whole
+ * tree, so the user's caret stays where the browser put it. */
 function csvNormalize() {
   const csv = document.getElementById("csv");
-  const orphans = [];
-  for (const n of Array.from(csv.childNodes)) {
-    if (n.nodeType === Node.TEXT_NODE || n.nodeName === "BR") orphans.push(n);
-    else break;
-  }
-  if (orphans.length) {
-    const div = document.createElement("div");
-    for (const n of orphans) div.appendChild(n);
-    csv.insertBefore(div, csv.firstChild);
+  let i = 0;
+  while (i < csv.childNodes.length) {
+    const n = csv.childNodes[i];
+    if (n.nodeType === Node.TEXT_NODE || n.nodeName === "BR") {
+      // Collect the run of contiguous orphans starting at i.
+      const group = [n];
+      let j = i + 1;
+      while (j < csv.childNodes.length) {
+        const m = csv.childNodes[j];
+        if (m.nodeType === Node.TEXT_NODE || m.nodeName === "BR") {
+          group.push(m);
+          j++;
+        } else break;
+      }
+      const div = document.createElement("div");
+      // Insert the wrapper at the position of the first orphan,
+      // then move the orphan nodes inside it. appendChild on a node
+      // that is already in the DOM moves it (doesn't clone), and
+      // the live NodeList shrinks as we go — so we don't advance i.
+      csv.insertBefore(div, n);
+      for (const g of group) div.appendChild(g);
+      i++; // Skip past the wrapper we just inserted.
+    } else {
+      i++;
+    }
   }
 }
 
