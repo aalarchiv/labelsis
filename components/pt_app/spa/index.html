@@ -521,10 +521,16 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       column repeats a row N times in batch print. Date helpers:
       <code>{$dt|YYYY-MM-DD}</code>, <code>{$time|HH:mm}</code>,
       <code>{$now}</code> (ISO) — work without CSV too. Sequence
-      helpers: <code>{$row}</code> (0-based row index),
-      <code>{$col}</code> (0-based copy within the row),
-      <code>{$seq}</code> (1-based label number),
-      <code>{$total}</code> (total labels in batch).</p>
+      helpers: <code>{$row}</code> (0-based data-row index, header
+      excluded), <code>{$copy}</code> (0-based copy within the row,
+      varies only when <code>$copies</code> &gt; 1),
+      <code>{$seq}</code> (1-based label number in batch),
+      <code>{$total}</code> (total labels). Append a signed integer
+      offset after a second <code>|</code> to shift any value:
+      <code>{$row|+1}</code> for 1-based row numbers,
+      <code>{$dt|YYYY-MM-DD|+86400}</code> for tomorrow's date
+      (offset is seconds for date helpers). Use <code>\{</code> /
+      <code>\}</code> to write literal braces.</p>
       <div id="csv" contenteditable="true" spellcheck="false"
            role="textbox" aria-multiline="true" aria-label="CSV editor"
            data-placeholder="name,$copies&#10;Alice,2&#10;Bob,1"></div>
@@ -2197,18 +2203,18 @@ let csvShowHeader = false;
 
 /* Build the context object substitute() needs for the current
  * preview state. Used by drawText/measureText. doPrintAll sets
- * csvBatchCtx so per-copy iterations override $row/$col/$seq. */
+ * csvBatchCtx so per-copy iterations override $row/$copy/$seq. */
 let csvBatchCtx = null;
 function previewCtx() {
   if (csvBatchCtx) return csvBatchCtx;
   if (!csvData.data.length) {
-    return { row: 0, col: 0, seq: 1, total: 1, headerMode: csvShowHeader };
+    return { row: 0, copy: 0, seq: 1, total: 1, headerMode: csvShowHeader };
   }
   const times = csvData.data.map(r => Math.max(1, parseInt(r["$copies"], 10) || 1));
   const total = times.reduce((s, t) => s + t, 0);
   const r     = csvShowHeader ? 0 : csvCurrentRow;
   const seq   = csvShowHeader ? 1 : (times.slice(0, r).reduce((s, t) => s + t, 0) + 1);
-  return { row: r, col: 0, seq, total, headerMode: csvShowHeader };
+  return { row: r, copy: 0, seq, total, headerMode: csvShowHeader };
 }
 
 function parseCSV(text) {
@@ -2242,38 +2248,84 @@ function parseCSV(text) {
   return { headers, data };
 }
 
-/* {col} for CSV cell, optional |format. Special keys $dt/$now/$time
- * substitute the current date/time; format string accepts YYYY MM DD
- * HH mm ss tokens (zero-padded). Sequence keys $row/$col/$seq/$total
- * pull from ctx.
+/* Template substitution. {column} pulls from the active CSV row;
+ * {$key} pulls from the runtime context (date/time + sequence
+ * counters). Format spec after `|` accepts:
+ *   - a date format string (YYYY MM DD HH mm ss tokens, zero-padded)
+ *     for $dt / $time / $now
+ *   - a signed integer offset (+N or -N) added to numeric vars
+ *     ($row, $copy, $seq, $total) or, for date vars, an offset in
+ *     seconds applied to the displayed time
+ * Multiple `|`-separated parts let you combine fmt + offset for
+ * date vars, e.g. {$dt|YYYY-MM-DD|+86400} = tomorrow's date.
  *
  *   {name}                   - column lookup
  *   {$dt|YYYY-MM-DD}         - 2026-04-28
+ *   {$dt|YYYY-MM-DD|+86400}  - 2026-04-29 (tomorrow)
  *   {$time|HH:mm}            - 14:32
+ *   {$time|HH:mm|-3600}      - 13:32 (an hour earlier)
  *   {$now}                   - 2026-04-28T14:32:07.123Z (ISO)
- *   {$row}                   - 0-based row index in CSV data
- *   {$col}                   - 0-based copy index within the current row
+ *   {$row}                   - 0-based data-row index (header excluded)
+ *   {$row|+1}                - 1-based row number
+ *   {$copy}                  - 0-based copy index within the row
+ *                              (only varies when $copies > 1)
  *   {$seq}                   - 1-based label number in the batch
+ *   {$seq|-1}                - 0-based label number
  *   {$total}                 - total labels in the batch
+ *   \{ \}                    - literal braces (escape)
  *
  * In header-preview mode (`ctx.headerMode`) every placeholder
  * resolves to its raw key name so the canvas shows the layout
  * with variable identifiers in place of values. */
+const TPL_ESC_OPEN  = "";
+const TPL_ESC_CLOSE = "";
+
 function substitute(tpl, row, ctx) {
   ctx = ctx || {};
-  return tpl.replace(/\{\s*([\w$]+)\s*(?:\|\s*([^}]+?)\s*)?\}/g, (m, key, fmt) => {
+  // Step 1: hide escaped braces so the template regex won't match
+  // them. Step 3 puts the real characters back at the end.
+  let s = tpl.replace(/\\\{/g, TPL_ESC_OPEN).replace(/\\\}/g, TPL_ESC_CLOSE);
+  s = s.replace(/\{\s*([\w$]+)\s*((?:\|[^{}]*)*)\s*\}/g, (m, key, rest) => {
     if (ctx.headerMode) return key;
-    if (key === "$dt" || key === "$now")
-      return fmt ? formatDate(new Date(), fmt) : new Date().toISOString();
-    if (key === "$time")
-      return formatDate(new Date(), fmt || "HH:mm:ss");
-    if (key === "$row")   return String(ctx.row   ?? 0);
-    if (key === "$col")   return String(ctx.col   ?? 0);
-    if (key === "$seq")   return String(ctx.seq   ?? 1);
-    if (key === "$total") return String(ctx.total ?? 1);
+    const parts = rest ? rest.slice(1).split("|").map(p => p.trim()) : [];
+    if (key === "$dt" || key === "$now") {
+      const { fmt, offsetSec } = parseDateParts(parts);
+      const d = new Date(Date.now() + offsetSec * 1000);
+      return fmt ? formatDate(d, fmt) : d.toISOString();
+    }
+    if (key === "$time") {
+      const { fmt, offsetSec } = parseDateParts(parts);
+      const d = new Date(Date.now() + offsetSec * 1000);
+      return formatDate(d, fmt || "HH:mm:ss");
+    }
+    if (key === "$row")   return String((ctx.row   ?? 0) + parseIntOffset(parts));
+    if (key === "$copy")  return String((ctx.copy  ?? 0) + parseIntOffset(parts));
+    if (key === "$col")   return String((ctx.copy  ?? 0) + parseIntOffset(parts));
+    if (key === "$seq")   return String((ctx.seq   ?? 1) + parseIntOffset(parts));
+    if (key === "$total") return String((ctx.total ?? 1) + parseIntOffset(parts));
     if (row && row[key] !== undefined) return String(row[key]);
     return m;
   });
+  return s.replace(//g, "{").replace(//g, "}");
+}
+
+/* Date format spec: parts may contain a token-style format string
+ * (YYYY-MM-DD …) and/or a signed-integer second offset. Order
+ * doesn't matter — we sniff each part for the integer pattern.  */
+function parseDateParts(parts) {
+  let fmt = null, offsetSec = 0;
+  for (const p of parts) {
+    if (/^[+\-]?\d+$/.test(p)) offsetSec = parseInt(p, 10);
+    else if (p) fmt = p;
+  }
+  return { fmt, offsetSec };
+}
+
+function parseIntOffset(parts) {
+  for (const p of parts) {
+    if (/^[+\-]?\d+$/.test(p)) return parseInt(p, 10);
+  }
+  return 0;
 }
 
 function formatDate(d, fmt) {
@@ -2515,7 +2567,7 @@ async function doPrintAll() {
       for (let j = 0; j < copies; j++) {
         /* Per-copy ctx so $row/$col/$seq/$total expand correctly
          * inside text elements. cleared in the finally clause. */
-        csvBatchCtx = { row: i, col: j, seq, total, headerMode: false };
+        csvBatchCtx = { row: i, copy: j, seq, total, headerMode: false };
         csvRender(); redraw();
         log(`row ${i+1}/${csvData.data.length} copy ${j+1}/${copies}  (total ${seq}/${total})`);
         try { await postPrint(); ok++; }
