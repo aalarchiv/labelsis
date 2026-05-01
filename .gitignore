@@ -26,7 +26,6 @@ build-oracle/
 main/wifi_credentials.h
 
 # Third-party reference materials (Brother SDM PDF, OSS clones, installers).
-# 300+ MB and includes embedded .git repos — kept local. Track refs/README.md
-# so contributors know what should live here.
-refs/*
-!refs/README.md
+# Kept strictly local: 300+ MB, embedded .git repos, and mixed licenses
+# (incl. GPL) that must not be redistributed by this project.
+refs/
