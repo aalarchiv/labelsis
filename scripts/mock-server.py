@@ -150,6 +150,11 @@ class Handler(BaseHTTPRequestHandler):
                             "application/javascript")
             return
 
+        if path == "/favicon.ico":
+            self._send_file(os.path.join(SPA_DIR, "favicon.ico"),
+                            "image/x-icon")
+            return
+
         if path == "/setup.html":
             self._send_file(os.path.join(SPA_DIR, "setup.html"), "text/html")
             return

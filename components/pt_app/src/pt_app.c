@@ -777,6 +777,11 @@ extern const uint8_t icon_woff2_end[]   asm("_binary_bootstrap_icons_woff2_end")
 extern const uint8_t icon_json_start[]  asm("_binary_bootstrap_icons_json_start");
 extern const uint8_t icon_json_end[]    asm("_binary_bootstrap_icons_json_end");
 
+/* Multi-resolution favicon.ico (~34 KB), served at /favicon.ico so
+ * browsers stop logging 405s when they auto-request it. */
+extern const uint8_t favicon_start[]    asm("_binary_favicon_ico_start");
+extern const uint8_t favicon_end[]      asm("_binary_favicon_ico_end");
+
 static esp_err_t api_index(httpd_req_t *req)
 {
     cors_headers(req);
@@ -793,17 +798,16 @@ static esp_err_t api_qrcode_js(httpd_req_t *req)
                            qrcode_js_end - qrcode_js_start);
 }
 
-/* Browsers auto-request /favicon.ico on every page load; without a
- * handler the wildcard CORS catch-all matches the URI but not the
- * GET method, producing a 405 in the serial log. Reply 204 No
- * Content with a long-lived Cache-Control so the browser stops
- * asking after the first request. */
+/* Browsers auto-request /favicon.ico on every page load. Serve the
+ * embedded multi-resolution .ico (contains 16/32/48/... sizes) with
+ * a long-lived Cache-Control so it's only fetched once. */
 static esp_err_t api_favicon(httpd_req_t *req)
 {
     cors_headers(req);
+    httpd_resp_set_type(req, "image/x-icon");
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=31536000, immutable");
-    httpd_resp_set_status(req, "204 No Content");
-    return httpd_resp_send(req, NULL, 0);
+    return httpd_resp_send(req, (const char *)favicon_start,
+                           favicon_end - favicon_start);
 }
 
 static esp_err_t api_icon_woff2(httpd_req_t *req)
