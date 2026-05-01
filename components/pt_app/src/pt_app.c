@@ -793,6 +793,19 @@ static esp_err_t api_qrcode_js(httpd_req_t *req)
                            qrcode_js_end - qrcode_js_start);
 }
 
+/* Browsers auto-request /favicon.ico on every page load; without a
+ * handler the wildcard CORS catch-all matches the URI but not the
+ * GET method, producing a 405 in the serial log. Reply 204 No
+ * Content with a long-lived Cache-Control so the browser stops
+ * asking after the first request. */
+static esp_err_t api_favicon(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=31536000, immutable");
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
+}
+
 static esp_err_t api_icon_woff2(httpd_req_t *req)
 {
     cors_headers(req);
@@ -879,6 +892,10 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/fonts/bootstrap-icons.json", .method = HTTP_GET,
         .handler = api_icon_json, .user_ctx = NULL,
     };
+    static const httpd_uri_t favicon_route = {
+        .uri = "/favicon.ico", .method = HTTP_GET,
+        .handler = api_favicon, .user_ctx = NULL,
+    };
     static const httpd_uri_t cors_route = {
         .uri = "/*", .method = HTTP_OPTIONS,
         .handler = cors_preflight, .user_ctx = NULL,
@@ -894,6 +911,7 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &qrcode_route);
     httpd_register_uri_handler(s_http, &icon_woff2_route);
     httpd_register_uri_handler(s_http, &icon_json_route);
+    httpd_register_uri_handler(s_http, &favicon_route);
     httpd_register_uri_handler(s_http, &cors_route);
     return ESP_OK;
 }
