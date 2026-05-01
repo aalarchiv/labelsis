@@ -267,30 +267,86 @@ static esp_err_t wifi_ap_up(const char *ssid)
 static pt_transport_t            s_transport;
 static pt_transport_mock_t       s_mock;
 static pt_transport_usb_host_t  *s_usb;
-static const char               *s_transport_name = "none";
+static const char               *s_transport_name = "waiting";
+
+/* Forward decl: api_status / api_print etc. read this to short-circuit
+ * with a "no printer attached" response when no real device is open. */
+static bool transport_ready(void)
+{
+    return s_transport.send && s_transport.recv;
+}
+
+/* Try once to open the USB host transport. Returns true on success
+ * (transport now points at usb_host) OR if a P-Lite-mode PT-* was
+ * detected (transport stays empty but s_transport_name is set so the
+ * SPA can show a helpful message). The retry task uses the return
+ * value to decide whether to keep polling. */
+static bool transport_try_usb(uint32_t connect_timeout_ms)
+{
+    pt_transport_usb_host_t *u = pt_transport_usb_host_open(connect_timeout_ms);
+    if (u) {
+        s_usb            = u;
+        s_transport      = pt_transport_usb_host_transport(s_usb);
+        s_transport_name = "usb_host";
+        ESP_LOGI(TAG, "transport: usb_host (PT-* attached)");
+        return true;
+    }
+    if (pt_transport_usb_host_plite_seen()) {
+        memset(&s_transport, 0, sizeof s_transport);
+        s_transport_name = "plite";
+        return false;  /* keep polling -- user might flip the slider */
+    }
+    return false;
+}
+
+/* Background poller. Runs as long as no real printer is attached;
+ * once a USB attach succeeds the loop exits and the task self-deletes.
+ * 5 s polling interval is fine -- USB enumeration itself takes hundreds
+ * of ms, and the user-perceived "plug in cable, see green dot" lag of
+ * up to 5 s + enumerate is well within reasonable. */
+#define TRANSPORT_RETRY_MS  5000
+
+static void transport_retry_task(void *arg)
+{
+    (void)arg;
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(TRANSPORT_RETRY_MS));
+        if (transport_ready()) break;  /* attached by another path */
+        ESP_LOGD(TAG, "transport: retry USB attach");
+        /* Short connect timeout for retries -- if a printer is plugged
+         * in it enumerates in well under 2 s; longer just makes the
+         * SPA's status poll feel laggy. */
+        if (transport_try_usb(2000) && transport_ready()) break;
+    }
+    ESP_LOGI(TAG, "transport: retry task exiting (transport=%s)", s_transport_name);
+    vTaskDelete(NULL);
+}
 
 static void transport_up(const pt_app_config_t *cfg)
 {
-    if (cfg->use_usb_host) {
-        uint32_t to = cfg->usb_connect_timeout_ms ? cfg->usb_connect_timeout_ms : 10000;
-        s_usb = pt_transport_usb_host_open(to);
-        if (s_usb) {
-            s_transport      = pt_transport_usb_host_transport(s_usb);
-            s_transport_name = "usb_host";
-            ESP_LOGI(TAG, "transport: usb_host (PT-* attached)");
-            return;
-        }
-        if (pt_transport_usb_host_plite_seen()) {
-            s_transport      = pt_transport_mock_init(&s_mock);
-            s_transport_name = "plite";
-            ESP_LOGW(TAG, "transport: PT-* in P-Lite mode (no printer interface)");
-            return;
-        }
-        ESP_LOGW(TAG, "USB host open failed -- falling back to mock");
+    if (!cfg->use_usb_host) {
+        /* Dev / host-CMake / unit-test path. The mock is the only thing
+         * that makes sense without USB host hardware. */
+        s_transport      = pt_transport_mock_init(&s_mock);
+        s_transport_name = "mock";
+        ESP_LOGI(TAG, "transport: mock (use_usb_host=false)");
+        return;
     }
-    s_transport      = pt_transport_mock_init(&s_mock);
-    s_transport_name = "mock";
-    ESP_LOGI(TAG, "transport: mock (no real printer)");
+    /* Real device. Try USB once; if no printer, leave the transport
+     * empty and start a background retry task. The HTTP server stays
+     * up so the SPA loads and is fully usable for label DESIGN -- the
+     * /api/print path itself returns 503 "no_printer" until a real
+     * device shows up, after which it just starts working. */
+    uint32_t to = cfg->usb_connect_timeout_ms ? cfg->usb_connect_timeout_ms : 5000;
+    if (transport_try_usb(to) && transport_ready()) return;
+    if (s_transport_name == NULL || strcmp(s_transport_name, "plite") != 0) {
+        s_transport_name = "waiting";
+    }
+    memset(&s_transport, 0, sizeof s_transport);
+    ESP_LOGW(TAG, "transport: no PT-* attached -- waiting; SPA usable for design");
+    BaseType_t r = xTaskCreate(transport_retry_task, "tx_retry", 4096,
+                               NULL, tskIDLE_PRIORITY + 1, NULL);
+    if (r != pdPASS) ESP_LOGW(TAG, "transport: retry task create failed");
 }
 
 /* HTTP API */
@@ -357,12 +413,25 @@ static const char *err_kind(pt_err_t e)
 static esp_err_t api_status(httpd_req_t *req)
 {
     cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    /* No printer attached yet (booted without USB device). Reply
+     * "ok=false" with the current transport name so the SPA can show
+     * "waiting" / "P-Lite" instead of a misleading green dot. The
+     * background transport_retry_task is polling in parallel; once a
+     * printer attaches the next status poll returns real data. */
+    if (!transport_ready()) {
+        char body[96];
+        int n = snprintf(body, sizeof body,
+                         "{\"ok\":false,\"transport\":\"%s\",\"error\":\"no_printer\"}",
+                         s_transport_name);
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_send(req, body, n);
+    }
     /* Short wait -- a status poll that races with a long print should
      * fail fast as "busy" rather than holding the connection while the
      * print finishes. */
     if (!SESSION_LOCK(500)) {
         httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"transport\":\"busy\",\"error\":\"busy\"}");
     }
@@ -401,7 +470,6 @@ static esp_err_t api_status(httpd_req_t *req)
             (unsigned)st.status_type,
             (unsigned)st.phase_type);
     }
-    httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, n);
 }
 
@@ -419,9 +487,20 @@ static void hdr_bool(httpd_req_t *req, const char *name, bool *dst)
 static esp_err_t api_info(httpd_req_t *req)
 {
     cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    /* Same short-circuit as api_status: nothing to query when there's
+     * no live transport. The SPA falls back to its built-in geometry
+     * defaults so label design keeps working. */
+    if (!transport_ready()) {
+        char body[96];
+        int n = snprintf(body, sizeof body,
+                         "{\"ok\":false,\"transport\":\"%s\",\"error\":\"no_printer\"}",
+                         s_transport_name);
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_send(req, body, n);
+    }
     if (!SESSION_LOCK(500)) {
         httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"transport\":\"busy\",\"error\":\"busy\"}");
     }
@@ -434,7 +513,6 @@ static esp_err_t api_info(httpd_req_t *req)
                          "{\"ok\":false,\"transport\":\"%s\",\"error\":\"%s\"}",
                          s_transport_name, err_kind(err));
         httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_set_type(req, "application/json");
         return httpd_resp_send(req, body, n);
     }
 
@@ -485,12 +563,18 @@ static esp_err_t api_info(httpd_req_t *req)
 static esp_err_t feed_or_cut(httpd_req_t *req, bool do_cut, uint16_t dots)
 {
     cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    /* No printer attached -- nothing to feed or cut. Refuse cleanly so
+     * the SPA's button can show the failure. */
+    if (!transport_ready()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"no_printer\"}");
+    }
     /* Wait the full session-lock window -- feed/cut still go through
      * pt_session_print_raster (with a one-row zero job), so they need
      * exclusive printer access for the duration. */
     if (!SESSION_LOCK(150000)) {
         httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"busy\"}");
     }
 
@@ -559,11 +643,19 @@ static esp_err_t api_feed(httpd_req_t *req)
 static esp_err_t api_print(httpd_req_t *req)
 {
     cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    /* Refuse with a clean error rather than reading the (potentially
+     * large) body just to drop it. The SPA can show "no printer
+     * attached" inline; once the user plugs in, the next print call
+     * just works. */
+    if (!transport_ready()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"no_printer\"}");
+    }
     int total = req->content_len;
     if (total <= 0 || total % 16 != 0 || total > MAX_PRINT_BODY) {
         httpd_resp_set_status(req, total > MAX_PRINT_BODY
                               ? "413 Payload Too Large" : "400 Bad Request");
-        httpd_resp_set_type(req, "application/json");
         const char *what = (total <= 0)            ? "missing_body"
                          : (total > MAX_PRINT_BODY) ? "too_large"
                                                     : "length_not_aligned_16";

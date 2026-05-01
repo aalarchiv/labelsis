@@ -993,8 +993,13 @@ async function refreshStatus() {
     renderStatus(j);
     redraw();
   } catch (e) {
+    /* Network unreachable -- treat as "no printer" so the dot goes
+     * red and Print disables. Stays that way until the next poll
+     * comes back or the user fixes the apiHost setting. */
+    printer = null;
     setConnState(null);
     renderStatus(null);
+    refreshPrintButtons();
   }
 }
 
@@ -1087,6 +1092,7 @@ function transportLabel(tx) {
   if (tx === "usb_host") return ["real PT-* printer (USB)", "kv-ok"];
   if (tx === "mock")     return ["mock backend (no printer attached)", "kv-err"];
   if (tx === "plite")    return ["P-Lite mode — slide switch to E or hold PLite button 2 s, then reboot", "kv-err"];
+  if (tx === "waiting")  return ["no printer attached — design works, print waits for hot-plug", "kv-err"];
   if (tx === "libusb")   return ["libusb (host-side test transport)", "kv-ok"];
   return [tx || "?", "kv-err"];
 }
@@ -3107,13 +3113,21 @@ function refreshUndoButtons() {
 let printingInProgress = false;
 let _lastPrintErr      = null;
 function refreshPrintButtons() {
-  const err = elements.some(e => e._barcodeError || e._qrError);
+  const err     = elements.some(e => e._barcodeError || e._qrError);
+  /* Treat anything other than a real USB printer as "no printer" --
+   * waiting / plite / mock all mean Print would either fail or print
+   * to nothing useful. The firmware returns 503 "no_printer" while
+   * waiting; this just disables the button up-front so the user
+   * doesn't get a delayed error. */
+  const noPrint = !printer || !printer.ok || printer.transport !== "usb_host";
   const print = document.getElementById("print");
   const all   = document.getElementById("print-all");
   if (!print || !all) return;
-  print.disabled = err || printingInProgress;
-  all.disabled   = err || printingInProgress;
-  const tip = err ? "Fix barcode / QR errors before printing" : "";
+  print.disabled = err || noPrint || printingInProgress;
+  all.disabled   = err || noPrint || printingInProgress;
+  const tip = err     ? "Fix barcode / QR errors before printing"
+            : noPrint ? "No printer attached -- design now, print when it shows up"
+            : "";
   print.title = tip;
   all.title   = tip;
   if (_lastPrintErr !== null && _lastPrintErr !== err) renderLayerList();

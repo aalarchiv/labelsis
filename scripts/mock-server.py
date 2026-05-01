@@ -30,8 +30,12 @@ SPA_DIR = os.path.normpath(os.path.join(
 ))
 
 # Mutable state -- adjust to simulate different printer conditions.
-# `transport` controls what the SPA's title-bar dot shows: "usb_host"
-# is green ("real" printer attached), "mock" / "plite" are red.
+# `transport` controls what the SPA's title-bar dot shows:
+#   "usb_host"  green ("real" printer attached, status reports a model)
+#   "waiting"   red, "no printer attached" -- /api/status replies 503
+#               no_printer; firmware retries USB attach in background
+#   "plite"     red, PT-* in mass-storage mode
+#   "mock"      red, only used when use_usb_host=false in pt_app config
 STATE = {
     "transport":      "usb_host",
     "model":          0x70,        # PT-P700
@@ -172,10 +176,23 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/status":
+            # Mirror the firmware: when no real printer is attached the
+            # transport is "waiting" / "plite" and we return 503 with
+            # the transport name, no status fields.
+            if STATE["transport"] in ("waiting", "plite"):
+                self._send_json(503, {"ok": False,
+                                      "transport": STATE["transport"],
+                                      "error": "no_printer"})
+                return
             self._send_json(200, {**STATE, "ok": True})
             return
 
         if path == "/api/info":
+            if STATE["transport"] in ("waiting", "plite"):
+                self._send_json(503, {"ok": False,
+                                      "transport": STATE["transport"],
+                                      "error": "no_printer"})
+                return
             tape = TAPES.get(STATE["media_width_mm"], TAPES[12])
             offside = (tape["tape_dots"] - tape["print"]) // 2
             self._send_json(200, {
@@ -216,6 +233,9 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length > 0 else b""
 
         if path == "/api/print":
+            if STATE["transport"] in ("waiting", "plite"):
+                self._send_json(503, {"ok": False, "error": "no_printer"})
+                return
             if length == 0:
                 self._send_json(400, {"ok": False, "error": "missing_body"})
                 return
