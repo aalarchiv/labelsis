@@ -4,6 +4,15 @@
  *
  * Target-only -- the host CMake build does not list this file. Compiles
  * for both ESP32-S2 and ESP32-S3 (identical USB-OTG controller).
+ *
+ * Lifecycle: usb_host_install + the lib/client tasks are one-shot
+ * singletons. The first call to pt_transport_usb_host_open() brings
+ * the stack up; subsequent retries (after a no-device timeout) just
+ * wait again on the device-ready semaphore. We never call
+ * usb_host_uninstall in production -- it's brittle to re-install
+ * during the same boot, and the firmware never tears the stack down
+ * anyway. Hot-plug after boot now works because the client task is
+ * already running when the device's NEW_DEV event arrives.
  */
 
 #include "pt_transport_usb_host.h"
@@ -39,9 +48,10 @@ static const uint16_t PT_PIDS_PLITE[] = {
     0x2065,  /* PT-P750W in P-Lite mode */
 };
 
-/* Sticky flag set by on_client_event when a P-Lite-mode PT-* shows up
- * during the open() probe. Cleared on close() and on the next open()
- * attempt so a stale detection doesn't bleed into a later session. */
+/* Sticky flag set by on_client_event when a P-Lite-mode PT-* shows up.
+ * The pt_app retry loop reads this between open() attempts to decide
+ * whether to surface a P-Lite-specific message instead of the generic
+ * "no printer attached". */
 static volatile bool s_plite_seen;
 
 /* Bulk transfers: PT-* MPS is 64 bytes per the SDM. We allocate 1 KB
@@ -51,11 +61,9 @@ static volatile bool s_plite_seen;
 
 struct pt_transport_usb_host {
     SemaphoreHandle_t        bus_lock;        /* serializes send/recv     */
-    SemaphoreHandle_t        device_ready;    /* signaled on enumeration  */
     SemaphoreHandle_t        xfer_in_done;    /* signaled by IN callback  */
     SemaphoreHandle_t        xfer_out_done;   /* signaled by OUT callback */
 
-    usb_host_client_handle_t client_hdl;
     usb_device_handle_t      dev_hdl;
     uint8_t                  dev_addr;
     uint8_t                  intf_num;
@@ -67,35 +75,51 @@ struct pt_transport_usb_host {
     usb_transfer_t          *xfer_in;
     usb_transfer_t          *xfer_out;
 
-    TaskHandle_t             lib_task;
-    TaskHandle_t             client_task;
-    volatile bool            stop;
-
-    bool                     installed;
-    bool                     client_registered;
     bool                     device_open;
     bool                     interface_claimed;
 };
+
+/* Singleton USB host stack. Installed lazily on first open(). */
+static bool                     s_host_inited;
+static usb_host_client_handle_t s_client_hdl;
+static TaskHandle_t             s_lib_task;
+static TaskHandle_t             s_client_task;
+
+/* Filtering pipeline between the client event handler (producer) and
+ * pt_transport_usb_host_open() (consumer). When a PT-* shows up, the
+ * handler opens the device, validates VID/PID, stores the handle in
+ * s_pending_dev, and releases s_pending_sem. The consumer takes the
+ * semaphore + claims the handle. s_pending_lock guards both fields. */
+static SemaphoreHandle_t        s_pending_sem;
+static SemaphoreHandle_t        s_pending_lock;
+static usb_device_handle_t      s_pending_dev;
+static uint8_t                  s_pending_addr;
+
+/* The currently-paired transport, or NULL. Used by the client event
+ * handler to invalidate it on USB_HOST_CLIENT_EVENT_DEV_GONE so any
+ * in-flight or subsequent send/recv on a yanked cable fails cleanly
+ * instead of dereferencing a stale device handle. */
+static struct pt_transport_usb_host *volatile s_active;
 
 /* tasks */
 
 static void lib_task(void *arg)
 {
-    struct pt_transport_usb_host *u = arg;
-    while (!u->stop) {
+    (void)arg;
+    /* Loop forever. We don't expose a teardown -- the firmware keeps
+     * this running for the lifetime of the boot. */
+    while (1) {
         uint32_t flags = 0;
         usb_host_lib_handle_events(pdMS_TO_TICKS(100), &flags);
     }
-    vTaskDelete(NULL);
 }
 
 static void client_task(void *arg)
 {
-    struct pt_transport_usb_host *u = arg;
-    while (!u->stop) {
-        usb_host_client_handle_events(u->client_hdl, pdMS_TO_TICKS(100));
+    (void)arg;
+    while (1) {
+        usb_host_client_handle_events(s_client_hdl, pdMS_TO_TICKS(100));
     }
-    vTaskDelete(NULL);
 }
 
 /* descriptor walk */
@@ -161,25 +185,25 @@ static int pick_endpoints(struct pt_transport_usb_host *u)
 
 static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
 {
-    struct pt_transport_usb_host *u = arg;
+    (void)arg;
     if (msg->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
-        if (u->device_open) return;  /* already paired */
-
         usb_device_handle_t dev = NULL;
-        if (usb_host_device_open(u->client_hdl, msg->new_dev.address, &dev) != ESP_OK)
+        if (usb_host_device_open(s_client_hdl, msg->new_dev.address, &dev) != ESP_OK)
             return;
 
         const usb_device_desc_t *desc = NULL;
         if (usb_host_get_device_descriptor(dev, &desc) != ESP_OK || !desc) {
-            usb_host_device_close(u->client_hdl, dev);
+            usb_host_device_close(s_client_hdl, dev);
             return;
         }
+
         bool match = (desc->idVendor == PT_VID);
         if (match) {
             match = false;
             for (size_t i = 0; i < sizeof PT_PIDS / sizeof PT_PIDS[0]; i++)
                 if (desc->idProduct == PT_PIDS[i]) { match = true; break; }
         }
+
         if (!match) {
             /* Same vendor, P-Lite mode? Flag for the app layer so the
              * SPA can render a specific hint instead of generic
@@ -199,48 +223,109 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
                     }
                 }
             }
-            usb_host_device_close(u->client_hdl, dev);
+            usb_host_device_close(s_client_hdl, dev);
             return;
         }
 
-        u->dev_hdl     = dev;
-        u->dev_addr    = msg->new_dev.address;
-        u->device_open = true;
-
-        if (pick_endpoints(u) != 0) {
-            ESP_LOGE(TAG, "no printer-class bulk endpoints found");
-            usb_host_device_close(u->client_hdl, dev);
-            u->dev_hdl     = NULL;
-            u->device_open = false;
-            return;
+        /* PT-* found. Hand it to whoever's currently waiting in
+         * pt_transport_usb_host_open. The lock guards against two
+         * NEW_DEV events racing (rare but possible if a hub bursts
+         * connect events). */
+        if (xSemaphoreTake(s_pending_lock, portMAX_DELAY) == pdTRUE) {
+            if (s_pending_dev) {
+                /* Previous candidate hadn't been consumed yet; drop
+                 * the older one so the newest device wins. Probably
+                 * a duplicate event. */
+                usb_host_device_close(s_client_hdl, s_pending_dev);
+            }
+            s_pending_dev  = dev;
+            s_pending_addr = msg->new_dev.address;
+            xSemaphoreGive(s_pending_lock);
+            xSemaphoreGive(s_pending_sem);
+            ESP_LOGI(TAG, "PT-* enumerated: vid=%04x pid=%04x addr=%u",
+                     desc->idVendor, desc->idProduct, msg->new_dev.address);
+        } else {
+            usb_host_device_close(s_client_hdl, dev);
         }
-
-        if (usb_host_interface_claim(u->client_hdl, dev, u->intf_num, 0) != ESP_OK) {
-            ESP_LOGE(TAG, "interface_claim failed");
-            usb_host_device_close(u->client_hdl, dev);
-            u->dev_hdl     = NULL;
-            u->device_open = false;
-            return;
-        }
-        u->interface_claimed = true;
-
-        ESP_LOGI(TAG, "PT-* paired: vid=%04x pid=%04x intf=%u in=0x%02x out=0x%02x",
-                 desc->idVendor, desc->idProduct,
-                 u->intf_num, u->ep_in_addr, u->ep_out_addr);
-        xSemaphoreGive(u->device_ready);
     } else if (msg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
-        /* Device disconnected. We don't auto-recover -- the caller can
-         * detect via send/recv failures and re-open. */
-        if (u->dev_hdl == msg->dev_gone.dev_hdl) {
+        /* Device disconnected. Two cases:
+         *  - It was the active session's device: mark the session
+         *    closed so subsequent send/recv fails fast and the SPA's
+         *    next status poll sees transport=waiting; pt_app's retry
+         *    task picks up the next attach.
+         *  - It was a pending (filtered but not yet claimed) device:
+         *    drop our stored handle so the next open() doesn't try
+         *    to claim a dead device. */
+        struct pt_transport_usb_host *u = s_active;
+        if (u && u->dev_hdl == msg->dev_gone.dev_hdl) {
             if (u->interface_claimed) {
-                usb_host_interface_release(u->client_hdl, u->dev_hdl, u->intf_num);
+                usb_host_interface_release(s_client_hdl, u->dev_hdl, u->intf_num);
                 u->interface_claimed = false;
             }
-            usb_host_device_close(u->client_hdl, u->dev_hdl);
+            usb_host_device_close(s_client_hdl, u->dev_hdl);
             u->dev_hdl     = NULL;
             u->device_open = false;
+            ESP_LOGW(TAG, "PT-* disconnected");
+        }
+        if (xSemaphoreTake(s_pending_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+            if (s_pending_dev == msg->dev_gone.dev_hdl) {
+                s_pending_dev = NULL;
+            }
+            xSemaphoreGive(s_pending_lock);
         }
     }
+}
+
+/* Install the USB host stack, register our client, and spawn the lib /
+ * client tasks. Idempotent -- safe to call from every open() attempt
+ * because retries during a no-device wait must not re-install. */
+static esp_err_t host_init_once(void)
+{
+    if (s_host_inited) return ESP_OK;
+
+    s_pending_sem  = xSemaphoreCreateBinary();
+    s_pending_lock = xSemaphoreCreateMutex();
+    if (!s_pending_sem || !s_pending_lock) {
+        ESP_LOGE(TAG, "host_init_once: semaphore alloc failed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    const usb_host_config_t host_cfg = {
+        .skip_phy_setup = false,
+        .intr_flags     = ESP_INTR_FLAG_LEVEL1,
+    };
+    esp_err_t r = usb_host_install(&host_cfg);
+    if (r != ESP_OK) {
+        ESP_LOGE(TAG, "usb_host_install failed: %s", esp_err_to_name(r));
+        return r;
+    }
+
+    if (xTaskCreate(lib_task, "pt_usb_lib", 4096, NULL, 5, &s_lib_task) != pdPASS) {
+        ESP_LOGE(TAG, "lib_task create failed");
+        return ESP_FAIL;
+    }
+
+    const usb_host_client_config_t cli_cfg = {
+        .is_synchronous   = false,
+        .max_num_event_msg = 5,
+        .async = {
+            .client_event_callback = on_client_event,
+            .callback_arg          = NULL,
+        },
+    };
+    if (usb_host_client_register(&cli_cfg, &s_client_hdl) != ESP_OK) {
+        ESP_LOGE(TAG, "client_register failed");
+        return ESP_FAIL;
+    }
+
+    if (xTaskCreate(client_task, "pt_usb_cli", 4096, NULL, 5, &s_client_task) != pdPASS) {
+        ESP_LOGE(TAG, "client_task create failed");
+        return ESP_FAIL;
+    }
+
+    s_host_inited = true;
+    ESP_LOGI(TAG, "USB host stack installed -- waiting for PT-* enumeration");
+    return ESP_OK;
 }
 
 /* transfers */
@@ -341,55 +426,66 @@ pt_transport_usb_host_t *pt_transport_usb_host_open(uint32_t connect_timeout_ms)
 {
     s_plite_seen = false;
 
-    struct pt_transport_usb_host *u = calloc(1, sizeof *u);
-    if (!u) return NULL;
+    if (host_init_once() != ESP_OK) return NULL;
 
-    u->bus_lock      = xSemaphoreCreateMutex();
-    u->device_ready  = xSemaphoreCreateBinary();
-    u->xfer_in_done  = xSemaphoreCreateBinary();
-    u->xfer_out_done = xSemaphoreCreateBinary();
-    if (!u->bus_lock || !u->device_ready
-        || !u->xfer_in_done || !u->xfer_out_done) goto fail;
-
-    const usb_host_config_t host_cfg = {
-        .skip_phy_setup = false,
-        .intr_flags     = ESP_INTR_FLAG_LEVEL1,
-    };
-    if (usb_host_install(&host_cfg) != ESP_OK) {
-        ESP_LOGE(TAG, "usb_host_install failed");
-        goto fail;
-    }
-    u->installed = true;
-
-    if (xTaskCreate(lib_task, "pt_usb_lib", 4096, u, 5, &u->lib_task) != pdPASS)
-        goto fail;
-
-    const usb_host_client_config_t cli_cfg = {
-        .is_synchronous   = false,
-        .max_num_event_msg = 5,
-        .async = {
-            .client_event_callback = on_client_event,
-            .callback_arg          = u,
-        },
-    };
-    if (usb_host_client_register(&cli_cfg, &u->client_hdl) != ESP_OK) {
-        ESP_LOGE(TAG, "client_register failed");
-        goto fail;
-    }
-    u->client_registered = true;
-
-    if (xTaskCreate(client_task, "pt_usb_cli", 4096, u, 5, &u->client_task) != pdPASS)
-        goto fail;
-
-    if (xSemaphoreTake(u->device_ready, pdMS_TO_TICKS(connect_timeout_ms)) != pdTRUE) {
+    /* Block until the singleton client task hands us a matching
+     * device, or the caller's timeout expires. */
+    if (xSemaphoreTake(s_pending_sem, pdMS_TO_TICKS(connect_timeout_ms)) != pdTRUE) {
         ESP_LOGW(TAG, "no PT-* attached within %u ms",
                  (unsigned)connect_timeout_ms);
+        return NULL;
+    }
+
+    /* Consume the pending device under the lock so a racing DEV_GONE
+     * can't free the handle out from under us. */
+    usb_device_handle_t dev = NULL;
+    uint8_t             addr = 0;
+    if (xSemaphoreTake(s_pending_lock, portMAX_DELAY) == pdTRUE) {
+        dev  = s_pending_dev;
+        addr = s_pending_addr;
+        s_pending_dev  = NULL;
+        s_pending_addr = 0;
+        xSemaphoreGive(s_pending_lock);
+    }
+    if (!dev) {
+        ESP_LOGW(TAG, "device vanished between enumerate and claim");
+        return NULL;
+    }
+
+    struct pt_transport_usb_host *u = calloc(1, sizeof *u);
+    if (!u) {
+        usb_host_device_close(s_client_hdl, dev);
+        return NULL;
+    }
+    u->bus_lock      = xSemaphoreCreateMutex();
+    u->xfer_in_done  = xSemaphoreCreateBinary();
+    u->xfer_out_done = xSemaphoreCreateBinary();
+    if (!u->bus_lock || !u->xfer_in_done || !u->xfer_out_done) {
+        ESP_LOGE(TAG, "open: semaphore alloc failed");
+        usb_host_device_close(s_client_hdl, dev);
         goto fail;
     }
 
-    if (usb_host_transfer_alloc(USB_BUF_SIZE, 0, &u->xfer_in) != ESP_OK) goto fail;
+    u->dev_hdl     = dev;
+    u->dev_addr    = addr;
+    u->device_open = true;
+
+    if (pick_endpoints(u) != 0) {
+        ESP_LOGE(TAG, "no printer-class bulk endpoints found");
+        goto fail;
+    }
+    if (usb_host_interface_claim(s_client_hdl, dev, u->intf_num, 0) != ESP_OK) {
+        ESP_LOGE(TAG, "interface_claim failed");
+        goto fail;
+    }
+    u->interface_claimed = true;
+
+    if (usb_host_transfer_alloc(USB_BUF_SIZE, 0, &u->xfer_in)  != ESP_OK) goto fail;
     if (usb_host_transfer_alloc(USB_BUF_SIZE, 0, &u->xfer_out) != ESP_OK) goto fail;
 
+    s_active = u;
+    ESP_LOGI(TAG, "PT-* paired: addr=%u intf=%u in=0x%02x out=0x%02x",
+             u->dev_addr, u->intf_num, u->ep_in_addr, u->ep_out_addr);
     return u;
 
 fail:
@@ -411,28 +507,21 @@ void pt_transport_usb_host_close(pt_transport_usb_host_t *u)
 {
     if (!u) return;
 
-    u->stop = true;
-    /* Wake handler tasks so they observe `stop`. */
-    if (u->installed) usb_host_lib_unblock();
-    if (u->lib_task)    vTaskDelay(pdMS_TO_TICKS(50));
-    if (u->client_task) vTaskDelay(pdMS_TO_TICKS(50));
+    if (s_active == u) s_active = NULL;
 
     if (u->xfer_in)  usb_host_transfer_free(u->xfer_in);
     if (u->xfer_out) usb_host_transfer_free(u->xfer_out);
 
     if (u->interface_claimed && u->dev_hdl)
-        usb_host_interface_release(u->client_hdl, u->dev_hdl, u->intf_num);
-    if (u->device_open && u->dev_hdl)
-        usb_host_device_close(u->client_hdl, u->dev_hdl);
-    if (u->client_registered)
-        usb_host_client_deregister(u->client_hdl);
-    if (u->installed)
-        usb_host_uninstall();
+        usb_host_interface_release(s_client_hdl, u->dev_hdl, u->intf_num);
+    if (u->dev_hdl)
+        usb_host_device_close(s_client_hdl, u->dev_hdl);
 
     if (u->bus_lock)      vSemaphoreDelete(u->bus_lock);
-    if (u->device_ready)  vSemaphoreDelete(u->device_ready);
     if (u->xfer_in_done)  vSemaphoreDelete(u->xfer_in_done);
     if (u->xfer_out_done) vSemaphoreDelete(u->xfer_out_done);
 
     free(u);
+    /* NOTE: the USB host stack stays installed. usb_host_install is
+     * one-shot per boot in this codebase -- see host_init_once. */
 }
