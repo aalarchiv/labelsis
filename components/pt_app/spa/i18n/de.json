@@ -6,6 +6,7 @@
   "panel.status":            "Status",
   "panel.about":             "Über",
   "about.intro":             "pt700 — Netzwerk-Druckserver für den Brother PT-P700, ESP32-S3 als USB-Host mit eigener Web-Oberfläche.",
+  "about.firmware":          "Firmware",
   "about.licenses":          "Drittanbieter-Komponenten in dieser Firmware:",
   "panel.wifi":              "WLAN",
   "panel.wifi.help":         "Netzwerk auswählen und Passwort eingeben. Beim Speichern startet das Gerät neu. Schlägt die Verbindung fehl, kommt beim nächsten Start der pt700-setup-AP für ein erneutes Onboarding hoch.",

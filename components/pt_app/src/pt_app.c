@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "esp_app_desc.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -496,27 +497,40 @@ static esp_err_t api_info(httpd_req_t *req)
     /* Same short-circuit as api_status: nothing to query when there's
      * no live transport. The SPA falls back to its built-in geometry
      * defaults so label design keeps working. */
+    /* Firmware version always goes in the response, even on no-printer
+     * paths, so the SPA's About panel can display it without depending
+     * on the printer being attached. esp_app_get_description() reads
+     * the static app_desc structure -- cheap and never fails. */
+    const esp_app_desc_t *app = esp_app_get_description();
+    const char           *ver = (app && app->version[0]) ? app->version : "";
+
     if (!transport_ready()) {
-        char body[96];
+        char body[160];
         int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"transport\":\"%s\",\"error\":\"no_printer\"}",
-                         s_transport_name);
+                         "{\"ok\":false,\"transport\":\"%s\","
+                         "\"fw_version\":\"%s\",\"error\":\"no_printer\"}",
+                         s_transport_name, ver);
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_send(req, body, n);
     }
     if (!SESSION_LOCK(500)) {
+        char body[160];
+        int n = snprintf(body, sizeof body,
+                         "{\"ok\":false,\"transport\":\"busy\","
+                         "\"fw_version\":\"%s\",\"error\":\"busy\"}",
+                         ver);
         httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"transport\":\"busy\",\"error\":\"busy\"}");
+        return httpd_resp_send(req, body, n);
     }
     pt_status_t st;
     pt_err_t err = pt_session_query_status(&s_transport, &st, NULL);
     SESSION_UNLOCK();
     if (err != PT_OK) {
-        char body[128];
+        char body[192];
         int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"transport\":\"%s\",\"error\":\"%s\"}",
-                         s_transport_name, err_kind(err));
+                         "{\"ok\":false,\"transport\":\"%s\","
+                         "\"fw_version\":\"%s\",\"error\":\"%s\"}",
+                         s_transport_name, ver, err_kind(err));
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_send(req, body, n);
     }
@@ -528,10 +542,11 @@ static esp_err_t api_info(httpd_req_t *req)
     unsigned offside = have_geom
         ? (unsigned)((g.tape_width_dots - g.print_pins) / 2u) : 0;
 
-    char body[416];
+    char body[480];
     int  n = snprintf(body, sizeof body,
         "{\"ok\":true,"
         "\"transport\":\"%s\","
+        "\"fw_version\":\"%s\","
         "\"model\":%u,"
         "\"media_width_mm\":%u,"
         "\"media_type\":%u,"
@@ -545,6 +560,7 @@ static esp_err_t api_info(httpd_req_t *req)
             "\"right_margin_pins\":%u,"
             "\"non_printable_dots_per_side\":%u}}",
         s_transport_name,
+        ver,
         (unsigned)st.model,
         (unsigned)st.media_width_mm,
         (unsigned)st.media_type,

@@ -345,6 +345,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
     <div class="panel">
       <h2 data-i18n="panel.about">About</h2>
       <p class="muted" data-i18n="about.intro">pt700 — network print server for the Brother PT-P700, ESP32-S3 USB host with a self-hosted web UI.</p>
+      <p class="muted"><span data-i18n="about.firmware">Firmware</span>: <span id="about-fw-version">…</span></p>
       <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
       <dl class="about-licenses">
         <dt><a href="https://github.com/espressif/esp-idf" target="_blank" rel="noopener">ESP-IDF</a></dt>
@@ -1020,6 +1021,10 @@ async function refreshDeviceInfo() {
   } catch (e) {
     deviceInfo = null;
   }
+  /* Firmware version goes in About regardless of printer state; the
+   * 503 paths emit fw_version too. */
+  const verEl = document.getElementById("about-fw-version");
+  if (verEl) verEl.textContent = deviceInfo?.fw_version || "unknown";
   if (printer) renderStatus(printer);
 }
 

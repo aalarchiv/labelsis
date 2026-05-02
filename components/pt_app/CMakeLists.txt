@@ -9,6 +9,7 @@ idf_component_register(
         esp_event
         esp_netif
         esp_http_server
+        esp_app_format
         nvs_flash
         mdns
         esp_driver_gpio

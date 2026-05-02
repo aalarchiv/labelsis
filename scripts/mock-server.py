@@ -195,8 +195,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/info":
             if STATE["transport"] in ("waiting", "plite"):
                 self._send_json(503, {"ok": False,
-                                      "transport": STATE["transport"],
-                                      "error": "no_printer"})
+                                      "transport":  STATE["transport"],
+                                      "fw_version": STATE["fw_version"],
+                                      "error":      "no_printer"})
                 return
             tape = TAPES.get(STATE["media_width_mm"], TAPES[12])
             offside = (tape["tape_dots"] - tape["print"]) // 2
