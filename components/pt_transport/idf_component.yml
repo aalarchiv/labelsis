@@ -1,0 +1,5 @@
+## Managed-component dependencies for pt_transport.
+## Pulled by `idf.py reconfigure` (or just `idf.py build`).
+
+dependencies:
+  espressif/usb_host_msc: "^1.2.0"

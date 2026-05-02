@@ -26,6 +26,8 @@
 #include "freertos/task.h"
 #include "usb/usb_host.h"
 
+#include "plite_unstick.h"
+
 static const char *TAG = "pt_usb";
 
 #define PT_VID 0x04F9
@@ -43,21 +45,16 @@ static const uint16_t PT_PIDS[] = {
  * position the PT-* enumerates as USB Mass Storage (a virtual disk
  * containing Brother's "P-touch Editor Lite") with one of these PIDs
  * and exposes no printer-class interface -- see the research notes in
- * the SDM (mode 3 = P-touch Template) and ptouch-esp32 prior art. We
- * can't drive prints in that state today, but flagging it lets the
- * SPA show the user a useful "slide to E or hold the PLite button"
- * hint instead of generic "unavailable".
+ * the SDM (mode 3 = P-touch Template) and ptouch-esp32 prior art.
  *
- * Programmatic unstick is known-feasible but not yet implemented.
- * Brother's BrUsbPrnIO.dll BrEsSwitchELtoETempW does it by writing 10
- * magic bytes (1B 69 61 01 1B 69 55 66 00 00) to the file PTLITE.PRN
- * on the printer's mounted FAT volume, NOT via raw SCSI BOT. An
- * earlier attempt (commit 85a015b, reverted f57d9e3) sent the right
- * bytes via the wrong transport (raw WRITE(10) to LBA 0) and silently
- * failed. Implementing it properly needs a minimal FAT layer on top
- * of MSC. See bd memory pt-p700-mode-switch-windows-ptlite-prn for
- * the full disassembly notes, and bd issue pt700-wmf for the work
- * item. */
+ * Auto-unstick: when on_client_event sees one of these PIDs we hand
+ * the device to plite_unstick (which mounts the MSC volume via
+ * espressif/usb_host_msc + FatFs and rewrites PTLITE.PRN with the
+ * 10-byte magic sequence Brother's BrEsSwitchELtoETempW emits). The
+ * printer should then re-enumerate as PID 0x2061 within ~10 s and
+ * the next NEW_DEV event takes the normal printer path. If the
+ * unstick fails s_plite_seen stays set so the SPA can fall back to
+ * the manual "slide to E" hint. */
 static const uint16_t PT_PIDS_PLITE[] = {
     0x2064,  /* PT-P700 in P-Lite mode */
     0x2065,  /* PT-P750W in P-Lite mode */
@@ -231,10 +228,17 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
                 for (size_t i = 0; i < sizeof PT_PIDS_PLITE / sizeof PT_PIDS_PLITE[0]; i++) {
                     if (desc->idProduct == PT_PIDS_PLITE[i]) {
                         ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) -- "
-                                      "slide to E or hold PLite button 2s",
+                                      "scheduling auto-unstick",
                                  desc->idProduct);
                         s_plite_seen = true;
-                        break;
+                        /* Close our handle FIRST so the MSC driver can
+                         * claim the device without a refcount fight. */
+                        usb_host_device_close(s_client_hdl, dev);
+                        if (plite_unstick_schedule(msg->new_dev.address) != ESP_OK) {
+                            ESP_LOGW(TAG, "P-Lite: auto-unstick schedule failed; "
+                                          "slide to E or hold PLite button 2s");
+                        }
+                        return;
                     }
                 }
             }
@@ -336,6 +340,15 @@ static esp_err_t host_init_once(void)
     if (xTaskCreate(client_task, "pt_usb_cli", 4096, NULL, 5, &s_client_task) != pdPASS) {
         ESP_LOGE(TAG, "client_task create failed");
         return ESP_FAIL;
+    }
+
+    /* MSC driver alongside our printer client so we can flip a
+     * P-Lite-mode PT-* (PIDs 0x2064/0x2065) back to print mode by
+     * rewriting PTLITE.PRN. Best-effort: log and continue if it
+     * fails; we just lose the auto-unstick capability and fall back
+     * to "tell the user to flip the slider". */
+    if (plite_unstick_init() != ESP_OK) {
+        ESP_LOGW(TAG, "plite_unstick_init failed -- auto-unstick disabled");
     }
 
     s_host_inited = true;
