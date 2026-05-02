@@ -99,6 +99,23 @@ Same protocol path as the firmware, just a different transport
 - `components/pt_protocol/` -- raster encoders + status decoder + geometry
 - `tools/cli/pt_send.c` -- Linux command-line printer driver
 
+## Verifying tape geometry against Brother's source
+
+`scripts/parse_ptd.py` parses Brother's binary `BSPP*AD.PTD` driver
+files (the per-model tape table the Windows driver loads at runtime).
+Lets you cross-check the hardcoded geometry in
+`components/pt_protocol/src/pt_protocol.c` against Brother's
+authoritative numbers, or extend it for a new model:
+
+```sh
+scripts/parse_ptd.py path/to/BSPP70AD.PTD --compare
+# matched=6  diffs=0  skipped=18 (split-print + HSe rows)
+```
+
+How to obtain a `.PTD` file is documented in the script's
+docstring (download the printer driver MSI, unpack with 7z, look for
+`BSPP*AD.PTD`).
+
 ## Issue tracker
 
 This project uses **bd (beads)** for issue tracking. `bd ready` lists
