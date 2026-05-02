@@ -15,7 +15,13 @@
 /* SDM p. 20 TZe table -- left margin pins | print area pins | right pins
  * for the H500/P700/E500 (128-pin head). The printer reports the tape
  * width via the status byte 10 as 4 / 6 / 9 / 12 / 18 / 24 (rounded up
- * for the 3.5 mm tape -- SDM table (3), p. 27). */
+ * for the 3.5 mm tape -- SDM table (3), p. 27).
+ *
+ * Cross-verified byte-for-byte against Brother's authoritative
+ * BSPP70AD.PTD (the binary tape table the Windows PT-P700 driver
+ * loads at runtime). Run scripts/parse_ptd.py --compare on a
+ * sibling-model PTD to extend coverage to PT-H500 / PT-E500 /
+ * PT-P750W or to add HSe heat-shrink rows. */
 pt_err_t pt_tape_geometry_tze(uint8_t width_mm, pt_tape_geometry_t *out)
 {
     if (!out) return PT_ERR_INVALID_ARG;

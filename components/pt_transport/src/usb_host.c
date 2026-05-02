@@ -44,9 +44,20 @@ static const uint16_t PT_PIDS[] = {
  * containing Brother's "P-touch Editor Lite") with one of these PIDs
  * and exposes no printer-class interface -- see the research notes in
  * the SDM (mode 3 = P-touch Template) and ptouch-esp32 prior art. We
- * can't drive prints in that state, but flagging it lets the SPA show
- * the user a useful "slide to E or hold the PLite button" hint
- * instead of generic "unavailable". */
+ * can't drive prints in that state today, but flagging it lets the
+ * SPA show the user a useful "slide to E or hold the PLite button"
+ * hint instead of generic "unavailable".
+ *
+ * Programmatic unstick is known-feasible but not yet implemented.
+ * Brother's BrUsbPrnIO.dll BrEsSwitchELtoETempW does it by writing 10
+ * magic bytes (1B 69 61 01 1B 69 55 66 00 00) to the file PTLITE.PRN
+ * on the printer's mounted FAT volume, NOT via raw SCSI BOT. An
+ * earlier attempt (commit 85a015b, reverted f57d9e3) sent the right
+ * bytes via the wrong transport (raw WRITE(10) to LBA 0) and silently
+ * failed. Implementing it properly needs a minimal FAT layer on top
+ * of MSC. See bd memory pt-p700-mode-switch-windows-ptlite-prn for
+ * the full disassembly notes, and bd issue pt700-wmf for the work
+ * item. */
 static const uint16_t PT_PIDS_PLITE[] = {
     0x2064,  /* PT-P700 in P-Lite mode */
     0x2065,  /* PT-P750W in P-Lite mode */
