@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "pt_led.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,9 @@ typedef struct {
      * onboarding. Set to a negative value to disable. GPIO 0 is the
      * BOOT button on most ESP32-S2/S3 devkits. */
     int         reset_gpio_num;
+    /* Status LED (optional). Default-initialised type=NONE skips it
+     * entirely. See pt_led.h for the cadence/colour table. */
+    pt_led_config_t led;
 } pt_app_config_t;
 
 /* Bring everything up. Returns ESP_OK once the HTTP server is listening

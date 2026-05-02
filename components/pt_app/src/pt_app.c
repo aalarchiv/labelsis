@@ -25,6 +25,8 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
+#include "pt_dns.h"
+#include "pt_led.h"
 #include "pt_protocol.h"
 #include "pt_session.h"
 #include "pt_transport.h"
@@ -289,6 +291,7 @@ static bool transport_try_usb(uint32_t connect_timeout_ms)
         s_transport      = pt_transport_usb_host_transport(s_usb);
         s_transport_name = "usb_host";
         ESP_LOGI(TAG, "transport: usb_host (PT-* attached)");
+        pt_led_set(PT_LED_READY);
         return true;
     }
     if (pt_transport_usb_host_plite_seen()) {
@@ -330,6 +333,7 @@ static void transport_up(const pt_app_config_t *cfg)
         s_transport      = pt_transport_mock_init(&s_mock);
         s_transport_name = "mock";
         ESP_LOGI(TAG, "transport: mock (use_usb_host=false)");
+        pt_led_set(PT_LED_READY);
         return;
     }
     /* Real device. Try USB once; if no printer, leave the transport
@@ -344,6 +348,7 @@ static void transport_up(const pt_app_config_t *cfg)
     }
     memset(&s_transport, 0, sizeof s_transport);
     ESP_LOGW(TAG, "transport: no PT-* attached -- waiting; SPA usable for design");
+    pt_led_set(PT_LED_USB_WAITING);
     BaseType_t r = xTaskCreate(transport_retry_task, "tx_retry", 4096,
                                NULL, tskIDLE_PRIORITY + 1, NULL);
     if (r != pdPASS) ESP_LOGW(TAG, "transport: retry task create failed");
@@ -719,9 +724,11 @@ static esp_err_t api_print(httpd_req_t *req)
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"busy\"}");
     }
+    pt_led_set(PT_LED_PRINTING);
     pt_err_t err = pt_session_print_raster(&s_transport, buf,
                                            n_rows, width, &opts);
     SESSION_UNLOCK();
+    pt_led_set(transport_ready() ? PT_LED_READY : PT_LED_USB_WAITING);
     free(buf);
 
     char rbody[128];
@@ -1132,6 +1139,11 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
     s_session_mutex = xSemaphoreCreateMutex();
     if (!s_session_mutex) return ESP_ERR_NO_MEM;
 
+    /* Status LED first so the boot pattern is visible from the moment
+     * power comes up, even if subsequent steps fail. */
+    pt_led_init(&cfg->led);
+    pt_led_set(PT_LED_BOOT);
+
     /* Start the reset-button watcher first so a stuck button can rescue
      * a board that would otherwise wedge in a connect/AP loop. */
     reset_button_up(cfg->reset_gpio_num);
@@ -1151,6 +1163,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
     if (ssid) {
         ESP_LOGI(TAG, "wifi: connecting to %s (%s)",
                  ssid, have_stored ? "from NVS" : "from cfg");
+        pt_led_set(PT_LED_STA_CONNECTING);
         if (wifi_sta_up(ssid, password) != ESP_OK) {
             ESP_LOGW(TAG, "wifi: STA failed -- entering AP onboarding");
             ap_mode = true;
@@ -1166,6 +1179,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
     }
 
     if (ap_mode) {
+        pt_led_set(PT_LED_AP_ONBOARDING);
         if (wifi_ap_up(AP_SETUP_SSID) != ESP_OK) {
             ESP_LOGE(TAG, "wifi: AP up failed");
             return ESP_FAIL;
@@ -1173,6 +1187,13 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         if (http_ap_up() != ESP_OK) {
             ESP_LOGE(TAG, "http: AP server failed");
             return ESP_FAIL;
+        }
+        /* DNS hijack so phones pop the captive-portal sheet straight
+         * onto the setup page -- no manual URL needed. Best effort:
+         * onboarding still works if it fails, just less smoothly. */
+        if (pt_dns_hijack_start() != ESP_OK) {
+            ESP_LOGW(TAG, "dns: hijack start failed -- "
+                          "user will need http://192.168.4.1/ manually");
         }
         ESP_LOGI(TAG, "ap: %s up -- connect and visit http://192.168.4.1/",
                  AP_SETUP_SSID);

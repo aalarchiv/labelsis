@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "src/pt_app.c"
+    SRCS "src/pt_app.c" "src/pt_led.c" "src/pt_dns.c"
     INCLUDE_DIRS "include"
     REQUIRES
         pt_session
@@ -12,6 +12,8 @@ idf_component_register(
         nvs_flash
         mdns
         esp_driver_gpio
+        lwip
+        led_strip
     EMBED_TXTFILES "spa/index.html" "spa/setup.html" "spa/qrcode.min.js"
     # Bootstrap Icons v1.13.1 (MIT, https://icons.getbootstrap.com/) --
     # binary woff2 (~130 KB) + name->codepoint JSON for the picker.

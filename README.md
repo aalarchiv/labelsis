@@ -65,19 +65,47 @@ tape values; press the print button to send a label.
 
 ## Wi-Fi onboarding (no `wifi_credentials.h`)
 
-If `main/wifi_credentials.h` is absent or its STA association fails, the
-device brings up an open SoftAP `pt700-setup` and the next-best behaviour:
+If `main/wifi_credentials.h` is absent, the configured SSID is out of
+range, or the password is wrong, the device brings up an open SoftAP
+`pt700-setup`. Same fallback if the network later disappears (router
+swap, password change, moving the device).
 
 1. Connect a phone or laptop to **`pt700-setup`**.
-2. Open `http://192.168.4.1/` (most phones surface a "sign in to network"
-   prompt; if not, navigate manually).
-3. Pick your home network from the scan dropdown (or type SSID), enter the
-   WPA2 passphrase twice (with the `show` toggle if needed), hit
+2. The phone's "sign in to network" sheet should pop straight onto the
+   setup page, thanks to the on-device captive-portal DNS. If it
+   doesn't, open `http://192.168.4.1/` manually.
+3. Pick your home network from the scan dropdown (or type SSID), enter
+   the WPA2 passphrase twice (with the `show` toggle if needed), hit
    **save & reboot**.
 4. Reconnect to your normal Wi-Fi; reload `http://pt700.local/`.
 
-After a successful first STA association the creds are persisted to NVS and
-the AP doesn't come back up unless STA fails again or you wipe.
+After a successful first STA association the creds are persisted to
+NVS and the AP doesn't come back up unless STA fails again or you wipe.
+
+mDNS (`pt700.local`) needs Bonjour on Windows < 10 and is sometimes
+blocked on enterprise / mesh networks with client isolation. If
+`pt700.local` doesn't resolve, look for the device's IP in your
+router's DHCP table and use that directly.
+
+## Status LED
+
+If a status LED is wired (GPIO or WS2812 RGB pixel — see
+`pt_app_config.led` in `main/main.c`), it indicates which stage the
+device is in. Default config matches the ESP32-S3-DevKitC-1's onboard
+RGB pixel on GPIO 48.
+
+| Stage           | Cadence                | RGB colour |
+|-----------------|------------------------|------------|
+| Boot            | very fast strobe       | yellow     |
+| STA connecting  | brief blip every 1 s   | blue       |
+| AP onboarding   | fast even blink (~3 Hz)| magenta    |
+| Ready           | solid                  | green      |
+| USB waiting     | brief blip every 2 s   | orange     |
+| Printing        | rapid strobe           | white      |
+| Error           | even 1 Hz blink        | red        |
+
+A single-GPIO LED is distinguished by cadence alone (colour collapses
+to "on/off"). Set `.led.type = PT_LED_TYPE_NONE` to disable.
 
 ## BOOT button = Wi-Fi reset
 
