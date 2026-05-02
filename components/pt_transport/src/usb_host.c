@@ -33,6 +33,10 @@ static const uint16_t PT_PIDS[] = {
     0x205E,  /* PT-H500 */
     0x205F,  /* PT-E500 */
     0x2061,  /* PT-P700 */
+    0x2062,  /* PT-P750W (Wi-Fi sibling of P700; identical USB protocol
+              * when wired -- the on-printer Wi-Fi is independent of the
+              * print path). Confirmed by ptouch-esp32 PID table flags
+              * (FLAG_RASTER_PACKBITS|FLAG_P700_INIT, same as P700). */
 };
 
 /* Same VID, different firmware mode: when the side slider is in P-Lite

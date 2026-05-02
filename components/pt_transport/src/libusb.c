@@ -19,6 +19,8 @@ static const uint16_t KNOWN_PIDS[] = {
     0x205E,  /* PT-H500 */
     0x205F,  /* PT-E500 */
     0x2061,  /* PT-P700 */
+    0x2062,  /* PT-P750W (Wi-Fi sibling of P700; identical USB protocol
+              * when wired). */
 };
 
 struct pt_transport_libusb {

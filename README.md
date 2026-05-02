@@ -1,12 +1,31 @@
 # pt700
 
-Network print server for the Brother **PT-P700** label printer, running on
-**ESP32-S3** (USB host) with a self-hosted web UI for label design.
+Network print server for the Brother **PT-P700** family of label printers,
+running on **ESP32-S3** (USB host) with a self-hosted web UI for label
+design.
+
+## Supported printers
+
+Same protocol family per Brother's SDM v1.11 (`PT-H500/P700/E500 raster
+command reference`); PT-P750W cross-confirmed against ptouch-esp32. All
+must be in normal print mode (slider position **E** on models that have
+one, not **EL** / P-Lite).
+
+| Model     | VID:PID    | Notes |
+|-----------|------------|-------|
+| PT-H500   | 04F9:205E  | Handheld |
+| PT-P700   | 04F9:2061  | Reference platform; tested |
+| PT-P750W  | 04F9:2062  | P700 with on-printer Wi-Fi (irrelevant when wired via USB) |
+| PT-E500   | 04F9:205F  | Handheld |
+
+P-Lite-mode PIDs (`0x2064` / `0x2065`) are detected and surfaced to the
+SPA with a "flip the slider" hint, but cannot be driven directly --
+they enumerate as USB Mass Storage, not printer class.
 
 ## What it does
 
-- **USB host** — drives a real PT-P700 (also PT-H500 / PT-E500) over the
-  ESP32-S3's native USB-OTG controller using the SDM raster command set.
+- **USB host** — drives the printer over the ESP32-S3's native USB-OTG
+  controller using the SDM raster command set.
 - **Web UI** — single-page label designer at `http://pt700.local/` with live
   tape-aware preview, status panel, CSV-templated batch printing, and Wi-Fi
   / settings tabs.
@@ -20,7 +39,7 @@ Network print server for the Brother **PT-P700** label printer, running on
 | Item | Notes |
 |---|---|
 | **ESP32-S3-DevKitC-1-N16R8** | 16 MB QIO flash, 8 MB octal PSRAM. The `sdkconfig.defaults.esp32s3` overlay is tuned for this board; an `N8R2` (8 MB flash, 2 MB quad PSRAM) board needs the flash-size and `SPIRAM_MODE_OCT` lines overridden. |
-| **PT-P700** label printer | Side slider must be in the normal position (**E** / Edit), not **EL** (Editor Lite / P-Lite mode). See *P-Lite* below. |
+| **PT-P700-family label printer** | See *Supported printers* above for the full PID list. Models with a side slider must be in the normal position (**E** / Edit), not **EL** (Editor Lite / P-Lite mode); see *P-Lite* below. |
 | **USB-C → USB-B cable** | From the devkit's right-side USB port (native S3 USB-OTG peripheral) to the printer's square USB-B port. The devkit becomes the host. A USB-C-to-USB-A adapter + a normal A-to-B printer cable also works. |
 | **USB-C → USB-A or USB-C → USB-C** | From the devkit's left-side UART port (CP2102N) to your PC, for flashing + serial logs. The two USB-C ports on the devkit are independent; both can be plugged in simultaneously. |
 | **PT-P700 power supply** | Printer self-powered from its own AC adapter, not the devkit. |

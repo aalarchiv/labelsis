@@ -7,8 +7,9 @@
  *
  * Uses the esp-idf usb_host component. Same VID/PID match as
  * pt_transport_libusb (Brother 0x04F9, PIDs {0x205E PT-H500,
- * 0x205F PT-E500, 0x2061 PT-P700}). Same pt_transport_t shape so
- * pt_session works without knowing which backend is below it.
+ * 0x205F PT-E500, 0x2061 PT-P700, 0x2062 PT-P750W}). Same
+ * pt_transport_t shape so pt_session works without knowing which
+ * backend is below it.
  *
  * Target-only (esp-idf component build); the host CMake skips this
  * file. Both ESP32-S2 and ESP32-S3 expose the same USB-OTG controller,

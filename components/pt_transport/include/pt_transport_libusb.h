@@ -24,8 +24,9 @@ extern "C" {
 typedef struct pt_transport_libusb pt_transport_libusb_t;
 
 /* Open the first connected PT-* device (VID 0x04F9, PID in
- * {0x205E PT-H500, 0x205F PT-E500, 0x2061 PT-P700}). Returns NULL on
- * libusb init failure or when no matching device is found. */
+ * {0x205E PT-H500, 0x205F PT-E500, 0x2061 PT-P700, 0x2062 PT-P750W}).
+ * Returns NULL on libusb init failure or when no matching device is
+ * found. */
 pt_transport_libusb_t *pt_transport_libusb_open(void);
 
 /* Get a pt_transport_t bound to *u for use by pt_session etc. The
