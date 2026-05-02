@@ -21,10 +21,12 @@ static const char *TAG = "pt_plite";
 #define PLITE_FILE  PLITE_MOUNT "/PTLITE.PRN"
 
 /* The Windows tool requires PTLITE.PRN to be at least 0x200 bytes
- * (one sector); the firmware places the magic at offset (size - 10),
- * so a smaller file would have nowhere to put it. Real files seen on
- * device are typically a few KB. */
-#define PLITE_MIN_SIZE 0x200
+ * (one sector). The magic always goes at fixed offset 0x1F6 within
+ * the file (= last 10 bytes of sector 0), NOT at the file's tail --
+ * the firmware only sniffs sector 0 of the file's first cluster.
+ * Real PTLITE.PRN files seen on device are tens of KB. */
+#define PLITE_MIN_SIZE  0x200
+#define PLITE_MAGIC_OFF 0x1F6
 
 /* Magic byte sequence the firmware sniffs at the tail of PTLITE.PRN.
  *
@@ -77,12 +79,16 @@ esp_err_t plite_unstick_init(void)
     return ESP_OK;
 }
 
-/* Build the magic-tail buffer in place. Caller-allocated buf of size
- * `size`; we zero it then copy magic to the last 10 bytes. */
+/* Build the payload buffer in place. Caller-allocated `buf` of length
+ * `size` (== file size); we zero it then copy magic to the FIXED
+ * offset 0x1F6 (= last 10 bytes of sector 0). The firmware only
+ * sniffs sector 0 of the file's first cluster -- writing the magic
+ * at size-N (the file tail) lands it past the sniff window, which is
+ * what an earlier attempt got wrong. */
 static void build_payload(uint8_t *buf, long size)
 {
     memset(buf, 0, (size_t)size);
-    memcpy(buf + size - sizeof PLITE_UNSTICK_MAGIC,
+    memcpy(buf + PLITE_MAGIC_OFF,
            PLITE_UNSTICK_MAGIC,
            sizeof PLITE_UNSTICK_MAGIC);
 }

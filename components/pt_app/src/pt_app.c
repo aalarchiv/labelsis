@@ -303,27 +303,45 @@ static bool transport_try_usb(uint32_t connect_timeout_ms)
     return false;
 }
 
-/* Background poller. Runs as long as no real printer is attached;
- * once a USB attach succeeds the loop exits and the task self-deletes.
- * 5 s polling interval is fine -- USB enumeration itself takes hundreds
- * of ms, and the user-perceived "plug in cable, see green dot" lag of
- * up to 5 s + enumerate is well within reasonable. */
-#define TRANSPORT_RETRY_MS  5000
+/* Background monitor. Runs forever (single instance). Polls
+ * transport_ready every TRANSPORT_POLL_MS; on every false->true or
+ * true->false edge updates the status LED, and re-attempts a USB
+ * attach whenever we're not ready. Replaces the old "self-deleting
+ * retry task" -- that exited after the first successful pair, which
+ * meant a subsequent unplug or P-Lite slider flip left the LED stuck
+ * green and no auto-recovery happened on hot-plug. */
+#define TRANSPORT_POLL_MS  2000
 
-static void transport_retry_task(void *arg)
+static void transport_monitor_task(void *arg)
 {
     (void)arg;
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(TRANSPORT_RETRY_MS));
-        if (transport_ready()) break;  /* attached by another path */
-        ESP_LOGD(TAG, "transport: retry USB attach");
-        /* Short connect timeout for retries -- if a printer is plugged
-         * in it enumerates in well under 2 s; longer just makes the
-         * SPA's status poll feel laggy. */
-        if (transport_try_usb(2000) && transport_ready()) break;
+    bool last_ready = transport_ready();
+    if (last_ready) pt_led_set(PT_LED_READY);
+    else            pt_led_set(PT_LED_USB_WAITING);
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(TRANSPORT_POLL_MS));
+
+        bool ready = transport_ready();
+        if (ready != last_ready) {
+            if (ready) {
+                ESP_LOGI(TAG, "transport: %s online", s_transport_name);
+                pt_led_set(PT_LED_READY);
+            } else {
+                ESP_LOGW(TAG, "transport: lost (now %s)", s_transport_name);
+                pt_led_set(PT_LED_USB_WAITING);
+            }
+            last_ready = ready;
+        }
+
+        /* Try to (re)attach when not ready. Short connect timeout so
+         * a missing printer doesn't make this loop stall and miss
+         * disconnect transitions. transport_try_usb is safe to call
+         * when no device is pending -- it just returns false. */
+        if (!ready) {
+            transport_try_usb(1500);
+        }
     }
-    ESP_LOGI(TAG, "transport: retry task exiting (transport=%s)", s_transport_name);
-    vTaskDelete(NULL);
 }
 
 static void transport_up(const pt_app_config_t *cfg)
@@ -337,22 +355,24 @@ static void transport_up(const pt_app_config_t *cfg)
         pt_led_set(PT_LED_READY);
         return;
     }
-    /* Real device. Try USB once; if no printer, leave the transport
-     * empty and start a background retry task. The HTTP server stays
-     * up so the SPA loads and is fully usable for label DESIGN -- the
-     * /api/print path itself returns 503 "no_printer" until a real
-     * device shows up, after which it just starts working. */
+    /* Real device. Try USB once with the user-configured timeout for
+     * a quick first-boot pair, then hand off to the monitor task
+     * which handles initial-pair retries, hot-plug, P-Lite recovery,
+     * and LED state for the lifetime of the boot. */
     uint32_t to = cfg->usb_connect_timeout_ms ? cfg->usb_connect_timeout_ms : 5000;
-    if (transport_try_usb(to) && transport_ready()) return;
-    if (s_transport_name == NULL || strcmp(s_transport_name, "plite") != 0) {
-        s_transport_name = "waiting";
+    if (transport_try_usb(to) && transport_ready()) {
+        /* attach succeeded; LED already set in transport_try_usb */
+    } else {
+        if (s_transport_name == NULL || strcmp(s_transport_name, "plite") != 0) {
+            s_transport_name = "waiting";
+        }
+        memset(&s_transport, 0, sizeof s_transport);
+        ESP_LOGW(TAG, "transport: no PT-* attached -- waiting; SPA usable for design");
     }
-    memset(&s_transport, 0, sizeof s_transport);
-    ESP_LOGW(TAG, "transport: no PT-* attached -- waiting; SPA usable for design");
-    pt_led_set(PT_LED_USB_WAITING);
-    BaseType_t r = xTaskCreate(transport_retry_task, "tx_retry", 4096,
+
+    BaseType_t r = xTaskCreate(transport_monitor_task, "tx_mon", 4096,
                                NULL, tskIDLE_PRIORITY + 1, NULL);
-    if (r != pdPASS) ESP_LOGW(TAG, "transport: retry task create failed");
+    if (r != pdPASS) ESP_LOGW(TAG, "transport: monitor task create failed");
 }
 
 /* HTTP API */
