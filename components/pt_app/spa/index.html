@@ -1102,7 +1102,7 @@ function colorChip(name, fallback) {
 function transportLabel(tx) {
   if (tx === "usb_host") return ["real PT-* printer (USB)", "kv-ok"];
   if (tx === "mock")     return ["mock backend (no printer attached)", "kv-err"];
-  if (tx === "plite")    return ["P-Lite mode — auto-unstick attempted; if still stuck, slide switch to E or hold PLite button 2 s", "kv-err"];
+  if (tx === "plite")    return ["P-Lite mode — slide switch to E or hold the PLite button 2 s", "kv-err"];
   if (tx === "waiting")  return ["no printer attached — design works, print waits for hot-plug", "kv-err"];
   if (tx === "libusb")   return ["libusb (host-side test transport)", "kv-ok"];
   return [tx || "?", "kv-err"];

@@ -29,3 +29,9 @@ main/wifi_credentials.h
 # Kept strictly local: 300+ MB, embedded .git repos, and mixed licenses
 # (incl. GPL) that must not be redistributed by this project.
 refs/
+
+# Upstream source archives (Bootstrap Icons zip etc.). The relevant
+# files have already been extracted into the components that need
+# them; the originals are kept locally for re-extract / version bumps
+# but not redistributed.
+external/

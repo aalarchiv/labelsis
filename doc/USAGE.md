@@ -52,10 +52,13 @@ Some PT-* models have a side slider with two positions:
   **cannot drive prints** in this mode.
 
 If the slider is in EL position, the SPA shows a message:
-`transport: P-Lite mode -- slide switch to E or hold PLite button 2s,
-then reboot`. Either physically slide the switch or hold the
-printer's PLite button for ~2 s to flip back, then reboot the ESP32.
+`transport: P-Lite mode -- slide switch to E or hold the PLite
+button 2 s`. Physically slide the switch or hold the printer's
+PLite button for ~2 s to flip back; the ESP32's transport monitor
+re-pairs the printer automatically within a few seconds.
 
 Driving the printer out of P-Lite over USB alone is on the backlog
-(`pt700-wmf`, P4) -- needs a USB packet capture from Brother's own
-tool to get right.
+(`pt700-wmf`, P4). Three implementation attempts have been reverted
+so far -- see [doc/RESEARCH-PLITE.md](RESEARCH-PLITE.md) for the
+post-mortem and what would unblock it (a USB packet capture of
+Brother's own tool flipping a real PT-P700).

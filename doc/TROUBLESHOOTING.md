@@ -7,7 +7,7 @@ First-hour symptom catalog.
 | No boot log on `idf.py monitor` | Wrong USB port -- use the **UART** port (left of devkit, near reset/boot buttons), not the native USB (right). See [HARDWARE.md](HARDWARE.md#devkit-usb-ports). |
 | `wifi: failed` in log | Wrong `WIFI_SSID` / `WIFI_PASSWORD` in `main/wifi_credentials.h`, or `WIFI_AUTH_WPA2_PSK` mismatch (open / WPA3-only networks not supported). Or just delete the file and use AP-mode onboarding. |
 | `transport: waiting -- no PT-* attached` | Printer not plugged in, plugged into the wrong port (use the **right** USB-C / OTG port for the printer), or printer powered off. SPA still loads; printer-state UI shows the issue. |
-| `transport: P-Lite mode …` | Side slider in EL position. Slide to E or hold the printer's PLite button for 2 s, then reboot the ESP. Details in [USAGE.md](USAGE.md#p-lite-mode). |
+| `transport: P-Lite mode …` | Side slider in EL position. Slide to E or hold the printer's PLite button for 2 s; the ESP picks up the re-enumerated device automatically within a few seconds. Details in [USAGE.md](USAGE.md#p-lite-mode). |
 | Print returns timeout | If `/api/status` shows `transport: usb_host` (not `mock`), and the printer has tape, check `print_timeout_ms` in `pt_app_config_t` -- default 120 s suffices for ~3 m of label. |
 | `pt700.local` doesn't resolve | mDNS support missing on your OS (rare on macOS/Linux, common on Windows without iTunes/Bonjour) or blocked by your router (enterprise / mesh client-isolation). Use the printed IP from the boot log, or check the router's DHCP table for `pt700`. |
 | `httpd_register_uri_handler: no slots` | `cfg.max_uri_handlers` in `http_up()` is too low. Bump it. Currently 16. |
