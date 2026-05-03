@@ -73,6 +73,16 @@ printing on an ESP32-S3 devkit. PT-H500 / PT-E500 / PT-P750W are
 protocol-family matches per the Brother SDM but untested on hardware.
 ESP32-S2 builds clean, untested.
 
+## Security
+
+The HTTP API has **no authentication**: anyone who can reach the
+device on the network can print, scan Wi-Fi, or rewrite credentials.
+This is a deliberate trade-off for a single-user appliance on a
+trusted LAN -- the same posture as a typical home printer's web
+panel. Run it on a trusted network, **do not expose port 80 to the
+public internet**, and treat the device the way you'd treat any
+other unauthenticated LAN appliance.
+
 ## License
 
 [MIT](LICENSE). Bundled third-party components keep their own

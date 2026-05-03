@@ -1869,6 +1869,21 @@ function loadIconCatalog() {
       .filter(([n, cp]) => iconAllowed(n, cp))
       .map(([n]) => n)
       .sort();
+    /* Migrate icon elements saved against the old Bootstrap-Icons
+     * catalog. Rewriting el.icon to the resolved Material name now
+     * means the next save persists the new name to localStorage --
+     * the migration is sticky and the props-panel display matches
+     * what the picker would set. */
+    if (Array.isArray(elements)) {
+      for (const el of elements) {
+        if (el.type === "icon" && el.icon) {
+          const resolved = resolveIconName(el.icon);
+          if (resolved !== el.icon && ICON_CODEPOINTS[resolved] != null) {
+            el.icon = resolved;
+          }
+        }
+      }
+    }
     /* Now that the codepoint table exists, re-sync the props panel
      * (so the preview glyph + name show up if the user added an icon
      * before the JSON arrived) and redraw any on-canvas placeholders. */
@@ -1886,9 +1901,88 @@ function defaultIcon() {
            icon: "star", size: 80 };
 }
 
+/* Best-effort migration map for labels saved against the old
+ * Bootstrap-Icons catalog. Bootstrap-only stems whose Material
+ * equivalent does NOT match the algorithmic fallbacks below get
+ * an explicit entry. The fallbacks (strip "-fill" suffix, swap
+ * "-" for "_") cover most names automatically -- this table only
+ * needs to grow when someone reports a previously-saved icon
+ * that comes back as "?". */
+const ICON_NAME_MIGRATIONS = {
+  "geo-alt":      "place",
+  "geo":          "place",
+  "envelope":     "email",
+  "house":        "home",
+  "house-door":   "home",
+  "gear":         "settings",
+  "trash":        "delete",
+  "trash3":       "delete",
+  "pencil":       "edit",
+  "x-lg":         "close",
+  "x-circle":     "cancel",
+  "x":            "close",
+  "bell":         "notifications",
+  "camera":       "photo_camera",
+  "clock":        "schedule",
+  "calendar":     "calendar_today",
+  "calendar3":    "calendar_today",
+  "printer":      "print",
+  "heart":        "favorite",
+  "magnet":       "tune",
+  "tag":          "label",
+  "tags":         "label",
+  "tools":        "build",
+  "wrench":       "build",
+  "exclamation-triangle": "warning",
+  "info-circle":  "info",
+  "question-circle": "help",
+  "check-circle": "check_circle",
+  "chevron-up":   "expand_less",
+  "chevron-down": "expand_more",
+  "chevron-left": "chevron_left",
+  "chevron-right":"chevron_right",
+  "arrow-up":     "arrow_upward",
+  "arrow-down":   "arrow_downward",
+  "arrow-left":   "arrow_back",
+  "arrow-right":  "arrow_forward",
+};
+
+/* Cache resolved names so repeated lookups (every redraw) stay O(1)
+ * after the first hit. Keys = saved icon names; values = the resolved
+ * Material name (or the original name when nothing matched). */
+const _iconNameCache = new Map();
+
+function resolveIconName(name) {
+  if (!name) return name;
+  if (!ICON_CODEPOINTS) return name;       /* catalog still loading */
+  if (ICON_CODEPOINTS[name] != null) return name;
+  const cached = _iconNameCache.get(name);
+  if (cached !== undefined) return cached;
+  const candidates = [];
+  if (ICON_NAME_MIGRATIONS[name])               candidates.push(ICON_NAME_MIGRATIONS[name]);
+  /* Bootstrap pairs "foo" / "foo-fill"; Material has only one
+   * variant per icon. Strip the suffix and try again. */
+  const stripped = name.replace(/-fill$/, "");
+  if (stripped !== name) {
+    if (ICON_NAME_MIGRATIONS[stripped])         candidates.push(ICON_NAME_MIGRATIONS[stripped]);
+    candidates.push(stripped);
+    candidates.push(stripped.replace(/-/g, "_"));
+  }
+  /* BS uses dashes ("alarm-fill", "geo-alt"); Material uses
+   * underscores ("alarm", "place", "calendar_today"). */
+  candidates.push(name.replace(/-/g, "_"));
+  for (const c of candidates) {
+    if (ICON_CODEPOINTS[c] != null) { _iconNameCache.set(name, c); return c; }
+  }
+  _iconNameCache.set(name, name);  /* nothing worked -- remember so we don't retry */
+  return name;
+}
+
 function iconCodepoint(name) {
-  if (ICON_CODEPOINTS && ICON_CODEPOINTS[name] != null) return ICON_CODEPOINTS[name];
-  return null;
+  if (!ICON_CODEPOINTS) return null;
+  const resolved = resolveIconName(name);
+  const cp = ICON_CODEPOINTS[resolved];
+  return cp != null ? cp : null;
 }
 
 function measureIcon(ctx, el) {
@@ -3124,7 +3218,7 @@ function restoreFromJSON(json) {
     /* Drop unknown types defensively -- saved labels from a future
      * schema with new element kinds shouldn't crash the older
      * codebase trying to render them. */
-    if (!data || !["text", "image", "barcode", "qr", "rect"].includes(data.type)) continue;
+    if (!data || !["text", "image", "barcode", "qr", "rect", "icon"].includes(data.type)) continue;
     const el = applyElementDefaults(data);
     nextId = Math.max(nextId, (el.id | 0) + 1);
     if (el.type === "image" && el.src) {
@@ -3133,6 +3227,16 @@ function restoreFromJSON(json) {
       img.onerror = () => { el._loadError = true; redraw(); };
       img.src = el.src;
       el._img = img;
+    }
+    /* Same Bootstrap->Material migration as in loadIconCatalog().
+     * Catches library loads + undo/redo that happen after the
+     * catalog is already cached (loadIconCatalog short-circuits on
+     * second call so its migration walk wouldn't re-run). */
+    if (el.type === "icon" && el.icon && ICON_CODEPOINTS) {
+      const resolved = resolveIconName(el.icon);
+      if (resolved !== el.icon && ICON_CODEPOINTS[resolved] != null) {
+        el.icon = resolved;
+      }
     }
     elements.push(el);
   }
@@ -4124,7 +4228,14 @@ document.getElementById("lib-save").addEventListener("click", () => {
       }
     } finally { pending = false; }
   });
-  search.addEventListener("input", () => renderGrid(search.value));
+  /* Debounce: rebuilding ~2200 button elements is fine on a desktop
+   * but visibly stutters on phones. 80 ms swallows fast-typing
+   * keystrokes without feeling laggy. */
+  let searchTimer = 0;
+  search.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => renderGrid(search.value), 80);
+  });
   grid.addEventListener("click", ev => {
     const tile = ev.target.closest(".tile");
     if (!tile) return;

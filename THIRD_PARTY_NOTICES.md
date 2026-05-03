@@ -14,7 +14,8 @@ text required by each upstream.
 - Copyright: (c) Espressif Systems (Shanghai) CO LTD and contributors
 - Linked against the firmware; not redistributed in source form.
 
-Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
+Apache License 2.0: full text at [`licenses/LICENSE-APACHE-2.0.txt`](licenses/LICENSE-APACHE-2.0.txt)
+(canonical copy: https://www.apache.org/licenses/LICENSE-2.0).
 
 ---
 
@@ -28,7 +29,8 @@ Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
   build time; full LICENSE retained at
   `managed_components/espressif__mdns/LICENSE`.
 
-Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
+Apache License 2.0: full text at [`licenses/LICENSE-APACHE-2.0.txt`](licenses/LICENSE-APACHE-2.0.txt)
+(canonical copy: https://www.apache.org/licenses/LICENSE-2.0).
 
 ---
 
@@ -48,7 +50,8 @@ Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
 - License: Apache-2.0
 - Copyright: (c) Google Inc.
 
-Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
+Apache License 2.0: full text at [`licenses/LICENSE-APACHE-2.0.txt`](licenses/LICENSE-APACHE-2.0.txt)
+(canonical copy: https://www.apache.org/licenses/LICENSE-2.0).
 
 ---
 
