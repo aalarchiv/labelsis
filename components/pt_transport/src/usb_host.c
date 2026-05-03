@@ -517,6 +517,11 @@ bool pt_transport_usb_host_plite_seen(void)
     return s_plite_seen;
 }
 
+bool pt_transport_usb_host_alive(const pt_transport_usb_host_t *u)
+{
+    return u && u->device_open;
+}
+
 void pt_transport_usb_host_close(pt_transport_usb_host_t *u)
 {
     if (!u) return;

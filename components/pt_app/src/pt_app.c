@@ -276,7 +276,13 @@ static const char               *s_transport_name = "waiting";
  * with a "no printer attached" response when no real device is open. */
 static bool transport_ready(void)
 {
-    return s_transport.send && s_transport.recv;
+    if (!s_transport.send || !s_transport.recv) return false;
+    /* For the USB host backend, the function pointers stay set after
+     * a DEV_GONE event -- only the underlying device flag flips. The
+     * mock transport has no s_usb so it falls through and the
+     * pointers are the truth. */
+    if (s_usb) return pt_transport_usb_host_alive(s_usb);
+    return true;
 }
 
 /* Try once to open the USB host transport. Returns true on success
@@ -288,9 +294,16 @@ static bool transport_try_usb(uint32_t connect_timeout_ms)
 {
     pt_transport_usb_host_t *u = pt_transport_usb_host_open(connect_timeout_ms);
     if (u) {
+        /* Free the prior session struct (cable was unplugged or the
+         * slider was flipped to P-Lite); pt_transport_usb_host_close
+         * is safe on a struct whose underlying device is already
+         * gone -- it skips the interface_release / device_close
+         * steps that DEV_GONE already performed. */
+        pt_transport_usb_host_t *prev = s_usb;
         s_usb            = u;
         s_transport      = pt_transport_usb_host_transport(s_usb);
         s_transport_name = "usb_host";
+        if (prev) pt_transport_usb_host_close(prev);
         ESP_LOGI(TAG, "transport: usb_host (PT-* attached)");
         pt_led_set(PT_LED_READY);
         return true;

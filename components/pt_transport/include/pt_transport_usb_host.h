@@ -46,6 +46,14 @@ void pt_transport_usb_host_close(pt_transport_usb_host_t *u);
  * specific UI hint instead of generic "no printer". */
 bool pt_transport_usb_host_plite_seen(void);
 
+/* False once a USB DEV_GONE event has invalidated *u (cable yanked,
+ * printer powered off, slider flipped to P-Lite). The pt_transport_t
+ * function pointers themselves stay non-NULL after disconnect, so
+ * upper layers can't tell from the transport struct alone whether
+ * the device is still alive -- they should use this to gate
+ * "transport is ready" checks. */
+bool pt_transport_usb_host_alive(const pt_transport_usb_host_t *u);
+
 #ifdef __cplusplus
 }
 #endif
