@@ -170,14 +170,28 @@ class Handler(BaseHTTPRequestHandler):
             self._send_file(os.path.join(SPA_DIR, "i18n", name), "application/json")
             return
 
-        if path == "/fonts/bootstrap-icons.woff2":
-            self._send_file(os.path.join(SPA_DIR, "fonts", "bootstrap-icons.woff2"),
+        if path == "/fonts/material-icons.woff2":
+            self._send_file(os.path.join(SPA_DIR, "fonts", "material-icons.woff2"),
                             "font/woff2")
             return
 
-        if path == "/fonts/bootstrap-icons.json":
-            self._send_file(os.path.join(SPA_DIR, "fonts", "bootstrap-icons.json"),
-                            "application/json")
+        if path == "/fonts/material-icons.json":
+            # Upstream codepoints.json carries hex strings ("eb8d"); the
+            # firmware build converts them to decimal in build_spa_assets.py.
+            # Mirror that conversion here so the SPA running against this
+            # mock sees exactly the same shape it gets in production.
+            with open(os.path.join(SPA_DIR, "fonts",
+                                   "material-icons-codepoints.json")) as f:
+                raw = json.load(f)
+            decimal = {name: int(hex_str, 16) for name, hex_str in raw.items()}
+            body = json.dumps(decimal, sort_keys=True,
+                              separators=(",", ":")).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         if path == "/api/status":

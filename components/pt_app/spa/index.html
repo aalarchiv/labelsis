@@ -5,14 +5,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>pt700</title>
 <style>
-/* Bootstrap Icons v1.13.1 (MIT, https://icons.getbootstrap.com/).
- * Used for the icon element + picker. Renamed family to "bi" so
+/* Material Icons (filled) -- Apache-2.0, (c) Google,
+ * https://github.com/marella/material-icons.
+ * Used for the icon element + picker. Renamed family to "mi" so
  * canvas ctx.font doesn't have to escape the dash. font-display:
  * block holds short to avoid an icon flash; the picker awaits
  * document.fonts.ready before rendering. */
 @font-face {
-  font-family: "bi";
-  src: url("/fonts/bootstrap-icons.woff2") format("woff2");
+  font-family: "mi";
+  src: url("/fonts/material-icons.woff2") format("woff2");
   font-display: block;
 }
 :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --err:#f85149; --panel:#161b22; --line:#30363d; }
@@ -174,7 +175,7 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
 .font-row .name   { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
 .font-row .sample { color:var(--muted); white-space:nowrap; flex:0 0 auto; }
 /* Icon picker -- modal <dialog> with a search field + scrollable
- * grid of all 2078 Bootstrap Icons. Tiles use the bi font directly
+ * grid of all ~2276 Material Icons. Tiles use the mi font directly
  * (no per-icon CSS class). Filter is plain string-contains on the
  * icon name. */
 #icon-picker            { width:min(560px, 92vw); max-height:80vh; padding:1rem; }
@@ -186,7 +187,7 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
   gap:.25rem;
 }
 #icon-picker .tile      {
-  font-family:"bi"; font-size:24px;
+  font-family:"mi"; font-size:24px;
   display:flex; align-items:center; justify-content:center;
   aspect-ratio:1; border:1px solid transparent; border-radius:4px;
   background:transparent; color:var(--fg); cursor:pointer;
@@ -199,7 +200,7 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
 /* Inline preview in the props panel -- shows the chosen icon glyph
  * next to the "change..." button. */
 .icon-preview {
-  font-family:"bi"; font-size:1.5rem; line-height:1;
+  font-family:"mi"; font-size:1.5rem; line-height:1;
   display:inline-flex; align-items:center; justify-content:center;
   width:2rem; height:2rem;
   border:1px solid var(--line); border-radius:4px; background:var(--bg);
@@ -289,9 +290,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #el-list li.err     { border-color:var(--err); background:rgba(248,81,73,.06); }
 #el-list li.err .summary { color:var(--err); }
 /* Pure-CSS 2x3 dot grip handle. Drawn via a tiled radial-gradient
- * (no font, no SVG, no DOM cost) so we don't drag the 134 KB
- * bootstrap-icons font into the eager-load path just to render two
- * columns of dots in the layer list. The bi font is now only fetched
+ * (no font, no SVG, no DOM cost) so we don't drag the 125 KB
+ * material-icons font into the eager-load path just to render two
+ * columns of dots in the layer list. The mi font is now only fetched
  * when the icon picker is actually opened. */
 #el-list .grip {
   display:inline-block;
@@ -368,8 +369,8 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <dd>Apache-2.0 — © Espressif Systems (Shanghai) CO LTD</dd>
         <dt><a href="https://components.espressif.com/components/espressif/mdns" target="_blank" rel="noopener">espressif/mdns</a></dt>
         <dd>Apache-2.0 — © Espressif Systems (Shanghai) CO LTD</dd>
-        <dt><a href="https://github.com/twbs/icons/releases/tag/v1.13.1" target="_blank" rel="noopener">Bootstrap Icons v1.13.1</a></dt>
-        <dd>MIT — © 2019-2024 The Bootstrap Authors</dd>
+        <dt><a href="https://github.com/marella/material-icons" target="_blank" rel="noopener">Material Icons (filled)</a></dt>
+        <dd>Apache-2.0 — © Google</dd>
         <dt><a href="https://github.com/davidshimjs/qrcodejs" target="_blank" rel="noopener">qrcodejs</a></dt>
         <dd>MIT — © 2012 davidshimjs</dd>
         <dt><a href="https://github.com/MultiMote/niimblue" target="_blank" rel="noopener">niimblue</a></dt>
@@ -1810,35 +1811,36 @@ function drawRect(ctx, el) {
 
 /* icon element
  *
- * A single Bootstrap-Icons glyph rendered through canvas's font
- * subsystem. The element stores the icon NAME (e.g., "alarm-fill")
+ * A single Material Icons glyph rendered through canvas's font
+ * subsystem. The element stores the icon NAME (e.g., "alarm")
  * -- the codepoint is looked up at render time from the lazily-
- * fetched bootstrap-icons.json. icon.size controls the glyph height
+ * fetched material-icons.json. icon.size controls the glyph height
  * in print-px the same way as text.size; corner-drag scaling still
  * works. Because the glyph paints solid black through fillStyle, it
  * thresholds to clean ink in the print pass. */
 
 /* Restrict the picker to a subset of the font by codepoint range.
- * Empty array = no filter (all 2078 icons in v1.13.1). Each entry
- * is [start, end] inclusive in hex. The font + JSON still ship
- * every glyph; this only narrows what shows up in the picker grid
- * and what the catalog exposes via ICON_NAMES_LIST. Render-time
- * lookup is unfiltered so an element saved with an icon outside
- * the current range still draws correctly.
+ * Empty array = no filter (all ~2276 icons). Each entry is
+ * [start, end] inclusive in hex. The font + JSON still ship every
+ * glyph; this only narrows what shows up in the picker grid and
+ * what the catalog exposes via ICON_NAMES_LIST. Render-time lookup
+ * is unfiltered so an element saved with an icon outside the
+ * current range still draws correctly.
  *
- * Bootstrap Icons lives in U+F000-U+F8FF (private-use area). To
- * trim the picker to a curated subset, drop ranges in here:
+ * Material Icons lives in the BMP private-use block U+E000-U+EB99
+ * with a tail of supplementary-plane codepoints up into U+1F8FF.
+ * To trim the picker to a curated subset, drop ranges in here:
  *
- *   const ICON_RANGES = [[0xF100, 0xF1FF]];   // ~256 icons
- *   const ICON_RANGES = [[0xF400, 0xF4FF],    // alarms + alerts
- *                        [0xF600, 0xF6FF]];   // tools + symbols
+ *   const ICON_RANGES = [[0xE000, 0xE0FF]];   // first ~256 icons
+ *   const ICON_RANGES = [[0xE400, 0xE4FF],    // sample bands
+ *                        [0xE800, 0xE8FF]];
  *
  * Or pick by family with a name regex via ICON_NAME_FILTER below.
  */
 const ICON_RANGES      = [];    /* empty = all icons */
 const ICON_NAME_FILTER = null;  /* RegExp | null -- additional name */
-                                /* match (e.g. /-fill$/ for the   */
-                                /* filled variants only)          */
+                                /* match (e.g. /^arrow_/ to keep   */
+                                /* only the arrow family)          */
 
 function iconAllowed(name, codepoint) {
   if (ICON_RANGES.length) {
@@ -1860,7 +1862,7 @@ function loadIconCatalog() {
   if (ICON_CODEPOINTS) return Promise.resolve(ICON_CODEPOINTS);
   if (_iconLoadPromise) return _iconLoadPromise;
   _iconLoadPromise = (async () => {
-    const r    = await fetch(apiURL("/fonts/bootstrap-icons.json"));
+    const r    = await fetch(apiURL("/fonts/material-icons.json"));
     const data = await r.json();
     ICON_CODEPOINTS = data;
     ICON_NAMES_LIST = Object.entries(data)
@@ -1898,7 +1900,7 @@ function measureIcon(ctx, el) {
     el._w = el._h = el.size | 0;
     return;
   }
-  ctx.font = `${el.size | 0}px bi`;
+  ctx.font = `${el.size | 0}px mi`;
   el._w = Math.ceil(ctx.measureText(String.fromCodePoint(cp)).width);
   el._h = Math.max(1, el.size | 0);
 }
@@ -1914,7 +1916,7 @@ function drawIcon(ctx, el) {
     loadIconCatalog().then(() => redraw());
     return;
   }
-  ctx.font = `${el.size | 0}px bi`;
+  ctx.font = `${el.size | 0}px mi`;
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   ctx.fillStyle = "#000";
@@ -3642,7 +3644,7 @@ function syncPropsPanel() {
       Math.max(1, Math.round((el.size || 0) * (el.scaleY ?? 1)));
     document.getElementById("icon-x").value    = Math.round(el.x);
     document.getElementById("icon-y").value    = Math.round(el.y);
-    /* Render the live preview using the bi font + the icon name as
+    /* Render the live preview using the mi font + the icon name as
      * a CSS class would, but cheaper: just drop the codepoint glyph
      * into the span and let .icon-preview's font-family handle it. */
     const cp = iconCodepoint(el.icon);

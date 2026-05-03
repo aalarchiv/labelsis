@@ -12,11 +12,15 @@
 # versions can never drift -- a source change forces a rebuild of
 # both via the DEPENDS list below.
 #
-# Bootstrap Icons v1.13.1 (MIT, https://icons.getbootstrap.com/) --
-# binary woff2 (~130 KB) goes through EMBED_FILES untouched (already
-# compressed; gzipping hurts). favicon.ico (multi-resolution, ~34 KB)
-# is original artwork by the project author. Inkscape source kept at
-# doc/pt700favicon.svg if you need to re-export.
+# Material Icons (Apache-2.0, (c) Google,
+# https://github.com/marella/material-icons) -- filled variant.
+# Binary woff2 (~125 KB) goes through EMBED_FILES untouched (already
+# compressed; gzipping hurts). The companion name->codepoint table is
+# emitted by the bundler from the upstream hex-string format into
+# decimal integers the SPA can hand directly to String.fromCodePoint.
+# favicon.ico (multi-resolution, ~34 KB) is original artwork by the
+# project author. Inkscape source kept at doc/pt700favicon.svg if you
+# need to re-export.
 
 set(SPA_BUNDLE_DIR ${CMAKE_CURRENT_BINARY_DIR}/spa-bundle)
 set(SPA_BUNDLE_OUTPUTS
@@ -24,14 +28,14 @@ set(SPA_BUNDLE_OUTPUTS
     ${SPA_BUNDLE_DIR}/index.html.gz
     ${SPA_BUNDLE_DIR}/setup.html
     ${SPA_BUNDLE_DIR}/setup.html.gz
-    ${SPA_BUNDLE_DIR}/bootstrap-icons.json
-    ${SPA_BUNDLE_DIR}/bootstrap-icons.json.gz
+    ${SPA_BUNDLE_DIR}/material-icons.json
+    ${SPA_BUNDLE_DIR}/material-icons.json.gz
 )
 set(SPA_BUNDLE_INPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/spa/index.html
     ${CMAKE_CURRENT_SOURCE_DIR}/spa/qrcode.min.js
     ${CMAKE_CURRENT_SOURCE_DIR}/spa/setup.html
-    ${CMAKE_CURRENT_SOURCE_DIR}/spa/fonts/bootstrap-icons.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/spa/fonts/material-icons-codepoints.json
     ${CMAKE_SOURCE_DIR}/scripts/build_spa_assets.py
 )
 # ESP-IDF processes this CMakeLists twice: once in script mode (just
@@ -77,9 +81,9 @@ idf_component_register(
                    ${SPA_BUNDLE_DIR}/index.html.gz
                    ${SPA_BUNDLE_DIR}/setup.html
                    ${SPA_BUNDLE_DIR}/setup.html.gz
-                   ${SPA_BUNDLE_DIR}/bootstrap-icons.json
-                   ${SPA_BUNDLE_DIR}/bootstrap-icons.json.gz
-                   "spa/fonts/bootstrap-icons.woff2"
+                   ${SPA_BUNDLE_DIR}/material-icons.json
+                   ${SPA_BUNDLE_DIR}/material-icons.json.gz
+                   "spa/fonts/material-icons.woff2"
                    "spa/favicon.ico"
 )
 # Tie the bundler to the component lib so EMBED_FILES sees fresh

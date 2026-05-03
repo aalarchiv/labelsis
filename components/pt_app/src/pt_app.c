@@ -813,7 +813,7 @@ static esp_err_t api_print(httpd_req_t *req)
 }
 
 /* SPA assets embedded via EMBED_FILES in CMakeLists.txt. The text
- * assets (index.html, setup.html, bootstrap-icons.json) come in two
+ * assets (index.html, setup.html, material-icons.json) come in two
  * forms -- plain bytes and gzip-compressed -- emitted in lockstep
  * by scripts/build_spa_assets.py at build time so they cannot drift.
  * send_text_asset() picks which to ship based on Accept-Encoding.
@@ -829,15 +829,15 @@ extern const uint8_t setup_html_end[]      asm("_binary_setup_html_end");
 extern const uint8_t setup_html_gz_start[] asm("_binary_setup_html_gz_start");
 extern const uint8_t setup_html_gz_end[]   asm("_binary_setup_html_gz_end");
 
-/* Bootstrap Icons font (woff2, ~130 KB, already compressed --
- * gzipping won't help) + name-to-codepoint table (JSON, ~52 KB,
- * gzips to ~12 KB). MIT, https://icons.getbootstrap.com/. */
-extern const uint8_t icon_woff2_start[]   asm("_binary_bootstrap_icons_woff2_start");
-extern const uint8_t icon_woff2_end[]     asm("_binary_bootstrap_icons_woff2_end");
-extern const uint8_t icon_json_start[]    asm("_binary_bootstrap_icons_json_start");
-extern const uint8_t icon_json_end[]      asm("_binary_bootstrap_icons_json_end");
-extern const uint8_t icon_json_gz_start[] asm("_binary_bootstrap_icons_json_gz_start");
-extern const uint8_t icon_json_gz_end[]   asm("_binary_bootstrap_icons_json_gz_end");
+/* Material Icons (filled) font (woff2, ~125 KB, already compressed --
+ * gzipping won't help) + name-to-codepoint table (JSON, gzips well).
+ * Apache-2.0, (c) Google, https://github.com/marella/material-icons. */
+extern const uint8_t icon_woff2_start[]   asm("_binary_material_icons_woff2_start");
+extern const uint8_t icon_woff2_end[]     asm("_binary_material_icons_woff2_end");
+extern const uint8_t icon_json_start[]    asm("_binary_material_icons_json_start");
+extern const uint8_t icon_json_end[]      asm("_binary_material_icons_json_end");
+extern const uint8_t icon_json_gz_start[] asm("_binary_material_icons_json_gz_start");
+extern const uint8_t icon_json_gz_end[]   asm("_binary_material_icons_json_gz_end");
 
 /* Multi-resolution favicon.ico (~34 KB), served at /favicon.ico. */
 extern const uint8_t favicon_start[]    asm("_binary_favicon_ico_start");
@@ -917,7 +917,7 @@ static esp_err_t api_icon_woff2(httpd_req_t *req)
     cors_headers(req);
     httpd_resp_set_type(req, "font/woff2");
     /* font assets are immutable; long Cache-Control lets the browser
-     * skip re-downloading the 130 KB blob on every page reload. */
+     * skip re-downloading the 125 KB blob on every page reload. */
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=31536000, immutable");
     return httpd_resp_send(req, (const char *)icon_woff2_start,
                            icon_woff2_end - icon_woff2_start);
@@ -986,11 +986,11 @@ static esp_err_t http_up(uint16_t port)
         .handler = api_index, .user_ctx = NULL,
     };
     static const httpd_uri_t icon_woff2_route = {
-        .uri = "/fonts/bootstrap-icons.woff2", .method = HTTP_GET,
+        .uri = "/fonts/material-icons.woff2", .method = HTTP_GET,
         .handler = api_icon_woff2, .user_ctx = NULL,
     };
     static const httpd_uri_t icon_json_route = {
-        .uri = "/fonts/bootstrap-icons.json", .method = HTTP_GET,
+        .uri = "/fonts/material-icons.json", .method = HTTP_GET,
         .handler = api_icon_json, .user_ctx = NULL,
     };
     static const httpd_uri_t favicon_route = {

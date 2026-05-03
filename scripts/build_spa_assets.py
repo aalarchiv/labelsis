@@ -11,8 +11,11 @@ Reads from --spa-dir, writes to --output-dir:
     index.html.gz           gzip(index.html) at level 9
     setup.html              unchanged copy
     setup.html.gz           gzip(setup.html)
-    bootstrap-icons.json    unchanged copy
-    bootstrap-icons.json.gz gzip(bootstrap-icons.json)
+    material-icons.json     name -> codepoint table; values converted
+                            from upstream's hex strings ("eb8d") to
+                            decimal integers (60301) so the SPA can
+                            do String.fromCodePoint(cp) without parsing
+    material-icons.json.gz  gzip(material-icons.json)
 
 The plain copies are kept so the HTTP server can fall back when a
 client doesn't send Accept-Encoding: gzip (rare but possible). The
@@ -32,6 +35,7 @@ Usage:
 
 import argparse
 import gzip
+import json
 import os
 import re
 import sys
@@ -91,16 +95,22 @@ def main():
     index_html  = read_text("index.html")
     qrcode_js   = read_text("qrcode.min.js")
     setup_html  = read_text("setup.html")
-    icons_json  = read_text("fonts", "bootstrap-icons.json")
+    # Material Icons ships codepoints as hex strings ("eb8d"). Convert
+    # to decimal integers here so the SPA can pass the value straight
+    # into String.fromCodePoint(cp) at render time.
+    icons_raw   = json.loads(read_text("fonts", "material-icons-codepoints.json"))
+    icons_dec   = {name: int(hex_str, 16) for name, hex_str in icons_raw.items()}
+    # sort_keys for stable byte-for-byte builds; separators trim whitespace.
+    icons_json  = json.dumps(icons_dec, sort_keys=True, separators=(",", ":"))
 
     bundled = inline_qrcode(index_html, qrcode_js)
-    write_pair(args.output_dir, "index.html",           bundled.encode("utf-8"))
-    write_pair(args.output_dir, "setup.html",           setup_html.encode("utf-8"))
-    write_pair(args.output_dir, "bootstrap-icons.json", icons_json.encode("utf-8"))
+    write_pair(args.output_dir, "index.html",          bundled.encode("utf-8"))
+    write_pair(args.output_dir, "setup.html",          setup_html.encode("utf-8"))
+    write_pair(args.output_dir, "material-icons.json", icons_json.encode("utf-8"))
 
     # Print byte counts so the build log makes the win obvious.
     sys.stderr.write("SPA bundle:\n")
-    for name in ("index.html", "setup.html", "bootstrap-icons.json"):
+    for name in ("index.html", "setup.html", "material-icons.json"):
         plain = os.path.getsize(os.path.join(args.output_dir, name))
         gz    = os.path.getsize(os.path.join(args.output_dir, name + ".gz"))
         ratio = (gz / plain * 100) if plain else 0

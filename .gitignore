@@ -21,6 +21,10 @@ build-oracle/
 *.swp
 *.swo
 
+# Python bytecode (e.g. from running scripts/*.py during local dev)
+__pycache__/
+*.pyc
+
 # Per-developer Wi-Fi credentials — checked-in template is
 # main/wifi_credentials.example.h; the active file is gitignored.
 main/wifi_credentials.h
