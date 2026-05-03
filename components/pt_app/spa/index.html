@@ -464,7 +464,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <button id="text-strike"    class="secondary text-style" type="button" aria-pressed="false" aria-label="strikethrough" title="strikethrough"><s>S</s></button>
         </div>
         <div class="row">
-          <label data-i18n="field.font-px">font px</label>
+          <label data-i18n="field.font-px">font dots</label>
           <input id="text-size" type="number" min="1" max="500" step="1" value="80" class="compact-input">
         </div>
         <div class="row pair">
@@ -490,7 +490,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           </select>
           <label data-i18n="field.qr.module">module</label>
           <input id="qr-size" type="number" min="1" max="6" class="compact-input">
-          <span class="muted" data-i18n="field.qr.module.hint">(px per cell)</span>
+          <span class="muted" data-i18n="field.qr.module.hint">(dots per cell)</span>
         </div>
         <div class="row pair">
           <label data-i18n="field.x">x</label>
@@ -515,7 +515,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <input id="bc-h" type="number" min="16" max="128" class="compact-input">
           <label data-i18n="field.bc.module">module</label>
           <input id="bc-size" type="number" min="1" max="6" class="compact-input">
-          <span class="muted" data-i18n="field.bc.module.hint">(px/bar)</span>
+          <span class="muted" data-i18n="field.bc.module.hint">(dots/bar)</span>
         </div>
         <div class="row pair">
           <label data-i18n="field.x">x</label>
@@ -560,7 +560,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <div class="row">
           <label data-i18n="field.icon.size">size</label>
           <input id="icon-size" type="number" min="4" max="500" step="1" class="compact-input">
-          <span class="muted">px</span>
+          <span class="muted">dots</span>
         </div>
         <div class="row pair">
           <label data-i18n="field.x">x</label>
@@ -585,7 +585,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <div class="row">
           <label>height</label>
           <input id="img-h" type="number" min="8" max="128" class="compact-input">
-          <span class="muted" data-i18n="field.height.hint">(px; width scales)</span>
+          <span class="muted" data-i18n="field.height.hint">(dots; width scales)</span>
         </div>
         <div class="row pair">
           <label data-i18n="field.x">x</label>
@@ -597,10 +597,10 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
       <div id="props-transform" hidden style="margin-top:.75rem; padding-top:.75rem; border-top:1px solid var(--line);">
         <div class="row">
-          <label data-i18n="field.size" title="visible bounding box in pixels — width × height">size px</label>
-          <input id="el-w" type="number" min="1" step="1" class="compact-input" title="visible width (px)">
+          <label data-i18n="field.size" title="visible bounding box in printer dots (180 dpi) — width × height">size dots</label>
+          <input id="el-w" type="number" min="1" step="1" class="compact-input" title="visible width (dots, 180 dpi)">
           <button id="aspect-lock" class="secondary" type="button" aria-pressed="true" aria-label="lock aspect ratio" title="lock aspect ratio: when on, w and h scale together; when off, mid-edge handles stretch one axis">🔒</button>
-          <input id="el-h" type="number" min="1" step="1" class="compact-input" title="visible height (px)">
+          <input id="el-h" type="number" min="1" step="1" class="compact-input" title="visible height (dots, 180 dpi)">
         </div>
         <div class="row">
           <label data-i18n="field.rotation">rotation</label>
@@ -881,10 +881,10 @@ const STRINGS = {
     "field.text":              "text",
     "field.font":              "font",
     "field.style":             "style",
-    "field.font-px":           "font px",
+    "field.font-px":           "font dots",
     "field.x":                 "x",
     "field.y":                 "y",
-    "field.size":              "size px",
+    "field.size":              "size dots",
     "field.rotation":          "rotation",
     "field.flip":              "flip",
     "field.flip.h":            "↔ horizontal",
@@ -901,17 +901,17 @@ const STRINGS = {
     "field.algorithm.threshold":        "Threshold",
     "field.threshold":         "threshold",
     "field.height":            "height",
-    "field.height.hint":       "(px; width scales)",
+    "field.height.hint":       "(dots; width scales)",
     "field.bc.type":           "type",
     "field.bc.module":         "module",
-    "field.bc.module.hint":    "(px/bar)",
+    "field.bc.module.hint":    "(dots/bar)",
     "field.qr.ecc":            "ECC",
     "field.qr.ecc.l":          "L (low, ~7%)",
     "field.qr.ecc.m":          "M (medium, ~15%)",
     "field.qr.ecc.q":          "Q (quartile, ~25%)",
     "field.qr.ecc.h":          "H (high, ~30%)",
     "field.qr.module":         "module",
-    "field.qr.module.hint":    "(px per cell)",
+    "field.qr.module.hint":    "(dots per cell)",
     "msg.loading":             "loading…",
     "msg.printing":            "printing…",
     "msg.print.done":          "done — {rows} rows",
