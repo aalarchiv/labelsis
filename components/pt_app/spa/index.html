@@ -3937,6 +3937,21 @@ function rightmostX() {
 document.getElementById("add-text").addEventListener("click", () => {
   pushUndo();
   const el = defaultText();
+  /* Inherit font + size + style flags from the most recent text
+   * element on the canvas, so adding a series of text labels keeps
+   * the typography consistent without re-picking the font each
+   * time. Position, rotation, and the placeholder text stay at
+   * their defaults. Falls through unchanged when no text element
+   * exists yet. */
+  const prev = [...elements].reverse().find(e => e.type === "text");
+  if (prev) {
+    el.size       = prev.size;
+    el.fontFamily = prev.fontFamily;
+    el.bold       = prev.bold;
+    el.italic     = prev.italic;
+    el.underline  = prev.underline;
+    el.strike     = prev.strike;
+  }
   el.x = rightmostX();
   elements.push(el);
   selectElement(el.id);
