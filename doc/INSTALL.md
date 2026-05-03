@@ -32,11 +32,11 @@ I (...) pt_app: got IP: 192.168.x.y
 I (...) pt_app: wifi: persisted creds to NVS
 I (...) pt_usb: PT-* paired: vid=04f9 pid=2061 intf=0 in=0x81 out=0x02
 I (...) pt_app: transport: usb_host (PT-* attached)
-I (...) pt_app: mdns: pt700.local up
+I (...) pt_app: mdns: labelsis.local up
 I (...) pt_app: http: serving on port 80
 ```
 
-Then visit **`http://pt700.local/`** from any machine on the same LAN.
+Then visit **`http://labelsis.local/`** from any machine on the same LAN.
 The status panel should show `transport: usb_host` (green) with real
 model / tape values; press the print button to send a label.
 
@@ -44,24 +44,24 @@ model / tape values; press the print button to send a label.
 
 If `main/wifi_credentials.h` is absent, the configured SSID is out of
 range, or the password is wrong, the device brings up an open SoftAP
-`pt700-setup`. Same fallback if the network later disappears (router
+`labelsis-setup`. Same fallback if the network later disappears (router
 swap, password change, moving the device).
 
-1. Connect a phone or laptop to **`pt700-setup`**.
+1. Connect a phone or laptop to **`labelsis-setup`**.
 2. The phone's "sign in to network" sheet should pop straight onto the
    setup page, thanks to the on-device captive-portal DNS. If it
    doesn't, open `http://192.168.4.1/` manually.
 3. Pick your home network from the scan dropdown (or type SSID), enter
    the WPA2 passphrase twice (with the `show` toggle if needed), hit
    **save & reboot**.
-4. Reconnect to your normal Wi-Fi; reload `http://pt700.local/`.
+4. Reconnect to your normal Wi-Fi; reload `http://labelsis.local/`.
 
 After a successful first STA association the creds are persisted to
 NVS and the AP doesn't come back up unless STA fails again or you wipe.
 
-mDNS (`pt700.local`) needs Bonjour on Windows < 10 and is sometimes
+mDNS (`labelsis.local`) needs Bonjour on Windows < 10 and is sometimes
 blocked on enterprise / mesh networks with client isolation. If
-`pt700.local` doesn't resolve, look for the device's IP in your
+`labelsis.local` doesn't resolve, look for the device's IP in your
 router's DHCP table and use that directly.
 
 ## Status LED

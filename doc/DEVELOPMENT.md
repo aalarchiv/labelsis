@@ -29,11 +29,11 @@ pointed at the actual ESP. No flash cycle per UI change.
 cd components/pt_app/spa
 python3 -m http.server 8080
 # open http://localhost:8080/ in a browser
-# Settings tab → API host = http://pt700.local → save
+# Settings tab → API host = http://labelsis.local → save
 # Print/Wi-Fi tabs now drive the real device
 ```
 
-`localStorage["pt700:apiHost"]` persists the setting; clear it via
+`localStorage["labelsis:apiHost"]` persists the setting; clear it via
 the Settings tab to go back to same-origin.
 
 ## Architecture

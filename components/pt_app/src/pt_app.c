@@ -1,7 +1,7 @@
 /*
  * pt_app -- Wi-Fi + HTTP + transport glue. Owns:
  *   - NVS-persisted Wi-Fi creds with first-boot fallback to compiled-in
- *   - SoftAP onboarding ("pt700-setup" + setup page) when no creds
+ *   - SoftAP onboarding ("labelsis-setup" + setup page) when no creds
  *   - STA bring-up + transport open + mDNS + the HTTP API
  *   - long-press GPIO that wipes creds and re-enters AP mode
  */
@@ -1018,7 +1018,7 @@ static esp_err_t http_up(uint16_t port)
 
 /* AP onboarding */
 
-#define AP_SETUP_SSID "pt700-setup"
+#define AP_SETUP_SSID "labelsis-setup"
 
 /* Catch-all GET handler -- serves the setup page for /, captive-portal
  * detection URLs (Apple/Android/Microsoft probes), and any unknown
@@ -1204,8 +1204,8 @@ static esp_err_t mdns_up(void)
 {
     esp_err_t err = mdns_init();
     if (err != ESP_OK) return err;
-    mdns_hostname_set("pt700");
-    mdns_instance_name_set("pt700 print server");
+    mdns_hostname_set("labelsis");
+    mdns_instance_name_set("LabelSis print server");
     /* Advertise the HTTP service on the configured port. */
     mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
     return ESP_OK;
@@ -1292,7 +1292,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
     transport_up(cfg);
 
     if (mdns_up() == ESP_OK) {
-        ESP_LOGI(TAG, "mdns: pt700.local up");
+        ESP_LOGI(TAG, "mdns: labelsis.local up");
     } else {
         ESP_LOGW(TAG, "mdns: init failed (use the IP address instead)");
     }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>pt700 setup</title>
+<title>LabelSis setup</title>
 <style>
 :root { --bg:#0d1117; --fg:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --err:#f85149; --panel:#161b22; --line:#30363d; }
 * { box-sizing: border-box; }
@@ -26,7 +26,7 @@ button.secondary { background:transparent; color:var(--accent); border:1px solid
 </style>
 </head>
 <body>
-<header><h1>pt700 setup</h1></header>
+<header><h1>LabelSis setup</h1></header>
 <main>
   <div class="panel">
     <h2>Wi-Fi</h2>
@@ -107,7 +107,7 @@ async function save() {
     });
     const j = await r.json();
     if (j.ok) {
-      log("saved — rebooting. reconnect to your Wi-Fi and try http://pt700.local/", true);
+      log("saved — rebooting. reconnect to your Wi-Fi and try http://labelsis.local/", true);
     } else {
       log(`error: ${j.error}`, false);
       btn.disabled = false;

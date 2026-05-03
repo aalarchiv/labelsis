@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>pt700</title>
+<title>LabelSis</title>
 <style>
 /* Material Icons (filled) -- Apache-2.0, (c) Google,
  * https://github.com/marella/material-icons.
@@ -347,7 +347,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 </head>
 <body>
 <header>
-  <h1 id="title" title="click to toggle status">pt700</h1>
+  <h1 id="title" title="click to toggle status">LabelSis</h1>
   <nav id="nav">
     <a href="#status"   data-view="status"   data-i18n="tab.status" class="burger-only">Status</a>
     <a href="#print"    data-view="print"    data-i18n="tab.label" class="active">Label</a>
@@ -361,7 +361,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   <section id="view-status" hidden>
     <div class="panel">
       <h2 data-i18n="panel.about">About</h2>
-      <p class="muted" data-i18n="about.intro">pt700 — network print server for the Brother PT-P700, ESP32-S3 USB host with a self-hosted web UI.</p>
+      <p class="muted" data-i18n="about.intro">LabelSis — network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</p>
       <p class="muted"><span data-i18n="about.firmware">Firmware</span>: <span id="about-fw-version">…</span></p>
       <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
       <dl class="about-licenses">
@@ -731,7 +731,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   <section id="view-settings" hidden>
     <div class="panel">
       <h2 data-i18n="panel.wifi">Wi-Fi</h2>
-      <p class="muted" data-i18n="panel.wifi.help">Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the pt700-setup AP for re-onboarding.</p>
+      <p class="muted" data-i18n="panel.wifi.help">Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the labelsis-setup AP for re-onboarding.</p>
       <div class="row">
         <label data-i18n="field.wifi.network">network</label>
         <select id="wifi-ssid-select"><option value="">(scanning…)</option></select>
@@ -762,7 +762,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <p class="muted" data-i18n="panel.api-host.help">When the SPA is loaded outside the device (localhost dev server), set this to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this.</p>
       <div class="row">
         <label data-i18n="field.api-host">API host</label>
-        <input id="api-host" type="text" placeholder="(empty = same origin, e.g. http://pt700.local)">
+        <input id="api-host" type="text" placeholder="(empty = same origin, e.g. http://labelsis.local)">
       </div>
       <div class="row">
         <span class="spacer"></span>
@@ -815,10 +815,10 @@ const STRINGS = {
     "panel.label":             "Label",
     "panel.status":            "Status",
     "panel.about":             "About",
-    "about.intro":             "pt700 — network print server for the Brother PT-P700, ESP32-S3 USB host with a self-hosted web UI.",
+    "about.intro":             "LabelSis — network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.",
     "about.licenses":          "Third-party components bundled with this firmware:",
     "panel.wifi":              "Wi-Fi",
-    "panel.wifi.help":         "Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the pt700-setup AP for re-onboarding.",
+    "panel.wifi.help":         "Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the labelsis-setup AP for re-onboarding.",
     "panel.api-host":          "API host",
     "panel.api-host.help":     "When the SPA is loaded outside the device (localhost dev server), set this to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this.",
     "panel.language":          "Language",
@@ -935,7 +935,33 @@ const STRINGS = {
   },
 };
 
-const I18N_LANG_KEY = "pt700:lang";
+/* One-shot migration of localStorage keys after the project rename
+ * pt700 -> LabelSis. Walks every key prefixed "pt700:" and copies it
+ * to the same name under "labelsis:", then drops the old. Runs at
+ * module-init time so all the const definitions below see the new
+ * keys on first load post-upgrade. After v0.2.x there will be no
+ * remaining "pt700:" keys in any browser that has visited once;
+ * this loop is then a no-op and can be removed in a later release. */
+(function migrateLegacyStorageKeys() {
+  try {
+    const old = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("pt700:")) old.push(k);
+    }
+    for (const k of old) {
+      const newKey = "labelsis:" + k.slice("pt700:".length);
+      /* If the user has already started fresh under the new name, do
+       * not clobber that with stale data. */
+      if (localStorage.getItem(newKey) == null) {
+        localStorage.setItem(newKey, localStorage.getItem(k));
+      }
+      localStorage.removeItem(k);
+    }
+  } catch { /* private mode etc. -- nothing to migrate */ }
+})();
+
+const I18N_LANG_KEY = "labelsis:lang";
 let currentLang = localStorage.getItem(I18N_LANG_KEY) || I18N_DEFAULT_LANG;
 
 function t(key, params) {
@@ -990,9 +1016,9 @@ async function setLanguage(lang) {
 
 /* When the SPA runs outside the device (file://, localhost, etc.),
  * apiHost prefixes every /api/... request so the page can hit a real
- * pt700 over the LAN. Empty = same-origin, which is the embedded
+ * LabelSis over the LAN. Empty = same-origin, which is the embedded
  * default. Persisted to localStorage from the Settings tab. */
-let apiHost = (localStorage.getItem("pt700:apiHost") || "").replace(/\/+$/, "");
+let apiHost = (localStorage.getItem("labelsis:apiHost") || "").replace(/\/+$/, "");
 function apiURL(path) { return apiHost + path; }
 
 // SDM p.20 / p.14 tape geometry table (mirrors pt_tape_geometry_tze).
@@ -1223,7 +1249,7 @@ const PRINT_W_MAX = 2500;
 
 /* Canvas options -- persisted to localStorage. Pure UI state, never
  * sent to the printer. */
-const CANVAS_OPTS_KEY = "pt700:canvasOpts";
+const CANVAS_OPTS_KEY = "labelsis:canvasOpts";
 const CANVAS_OPTS_DEFAULT = {
   labelWidthMode: "auto",   /* "auto" | "fixed"                    */
   labelWidthMm:   30,       /* used when fixed                     */
@@ -3318,7 +3344,7 @@ function refreshPrintButtons() {
  * so a page reload (or a fresh visit later) drops the user back into
  * the same setup. Separate from the explicit label library -- the
  * library is for named saves, this is the live working state. */
-const SESSION_KEY = "pt700:session";
+const SESSION_KEY = "labelsis:session";
 let sessionLoading = false;       /* suppress save during restore */
 let sessionSaveTimer = null;
 
@@ -3389,10 +3415,10 @@ function loadSession() {
 
 /* label library: localStorage-backed save/load
  *
- * One entry per name under localStorage["pt700:labels"]. Image data
+ * One entry per name under localStorage["labelsis:labels"]. Image data
  * URLs survive serialisation (small logos round-trip cleanly within
  * the ~5-10 MB localStorage budget). */
-const LIB_KEY = "pt700:labels";
+const LIB_KEY = "labelsis:labels";
 let currentLabelName = "";
 
 function libRead() {
@@ -4089,7 +4115,7 @@ document.getElementById("add-qr").addEventListener("click", () => {
     id: nextId++, type: "qr",
     x: rightmostX(), y: 0, rotation: 0, composite: "or",
     scaleX: 1, scaleY: 1, aspectLocked: true,
-    text: "https://pt700.local/",
+    text: "https://labelsis.local/",
     ecc: "M",
     size: 3,
   };
@@ -4783,7 +4809,7 @@ document.getElementById("csv-export").addEventListener("click", () => {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
-  a.download = `pt700-labels-${stamp}.csv`;
+  a.download = `labelsis-labels-${stamp}.csv`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 0);
@@ -4855,15 +4881,15 @@ function settingsLog(msg, ok) {
 document.getElementById("api-host-save").addEventListener("click", () => {
   const v = document.getElementById("api-host").value.trim().replace(/\/+$/, "");
   apiHost = v;
-  if (v) localStorage.setItem("pt700:apiHost", v);
-  else   localStorage.removeItem("pt700:apiHost");
+  if (v) localStorage.setItem("labelsis:apiHost", v);
+  else   localStorage.removeItem("labelsis:apiHost");
   settingsLog(v ? `API host = ${v}` : "API host cleared (using same origin)", true);
   refreshStatus();
 });
 document.getElementById("api-host-clear").addEventListener("click", () => {
   document.getElementById("api-host").value = "";
   apiHost = "";
-  localStorage.removeItem("pt700:apiHost");
+  localStorage.removeItem("labelsis:apiHost");
   settingsLog("API host cleared (using same origin)", true);
   refreshStatus();
 });
@@ -4985,7 +5011,7 @@ async function wifiSave() {
     });
     const j = await r.json();
     if (j.ok) {
-      wifiLog("saved — rebooting. Reload http://pt700.local/ once it's back.", true);
+      wifiLog("saved — rebooting. Reload http://labelsis.local/ once it's back.", true);
     } else {
       wifiLog(`error: ${j.error}`, false);
       btn.disabled = false;

@@ -11,15 +11,15 @@
 #if __has_include("wifi_credentials.h")
 #  include "wifi_credentials.h"
 #else
-#  define WIFI_SSID     "pt700-build-no-creds"
+#  define WIFI_SSID     "labelsis-build-no-creds"
 #  define WIFI_PASSWORD "set-via-wifi_credentials.h"
 #endif
 
-static const char *TAG = "pt700";
+static const char *TAG = "labelsis";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "pt700 print server booting");
+    ESP_LOGI(TAG, "LabelSis print server booting");
 
     pt_app_config_t cfg = {
         .wifi_ssid              = WIFI_SSID,

@@ -1,19 +1,22 @@
-# pt700
+# LabelSis
 
 > Network print server for the **Brother PT-P700 family** of label
 > printers, running on **ESP32-S3** with a self-hosted web UI for
 > label design.
+>
+> *(LabelSis = "label this" said to your **sis**ter — Brother's other
+> sibling.)*
 
-![Screenshot of the pt700 label designer](doc/Screenshot.png)
+![Screenshot of the LabelSis label designer](doc/Screenshot.png)
 
 ## Why
 
 Brother ships P-touch Editor (Windows-only desktop) and a mobile app
 that talks Bluetooth to a select few models. There is no first-party
 way to put a USB-tethered PT-P700 on the LAN and print to it from any
-browser. **pt700** fills that gap: a single ESP32-S3 turns the printer
-into a stand-alone network device with no driver install, no app, no
-cloud account, no telemetry.
+browser. **LabelSis** fills that gap: a single ESP32-S3 turns the
+printer into a stand-alone network device with no driver install, no
+app, no cloud account, no telemetry.
 
 ## Highlights
 
@@ -24,7 +27,7 @@ cloud account, no telemetry.
   page automatically; no need to know an IP.
 - **Status LED** (single GPIO or WS2812 RGB) -- glance at the device,
   don't grep serial logs.
-- **mDNS** at `pt700.local`; falls back gracefully when blocked.
+- **mDNS** at `labelsis.local`; falls back gracefully when blocked.
 - **Mock dev server** (Python stdlib only) -- iterate the SPA without
   flashing or even owning the printer.
 
@@ -44,15 +47,15 @@ print mode (slider in **E**, not **EL** / P-Lite -- see
 ## Quick start
 
 ```sh
-git clone <repo> pt700 && cd pt700
+git clone <repo> labelsis && cd labelsis
 . ~/esp/esp-idf/export.sh
 idf.py set-target esp32s3
 idf.py flash monitor
 ```
 
-Connect a phone or laptop to the **`pt700-setup`** Wi-Fi the device
+Connect a phone or laptop to the **`labelsis-setup`** Wi-Fi the device
 brings up on first boot; the captive-portal page leads you through
-joining your home network. After that, visit `http://pt700.local/`.
+joining your home network. After that, visit `http://labelsis.local/`.
 
 Full instructions: **[doc/INSTALL.md](doc/INSTALL.md)**. Hardware
 list and cabling: **[doc/HARDWARE.md](doc/HARDWARE.md)**.

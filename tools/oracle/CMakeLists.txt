@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(pt700_oracle C)
+project(labelsis_oracle C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)

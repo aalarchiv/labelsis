@@ -4,7 +4,7 @@ How to drive the device from the SPA once it's on the LAN.
 
 ## The web UI
 
-Open `http://pt700.local/` (or the device IP) in a browser. Three views:
+Open `http://labelsis.local/` (or the device IP) in a browser. Three views:
 
 - **Label** -- the canvas designer. Add text, images, barcodes, QR
   codes, icons, rectangles. Right-click an element for context

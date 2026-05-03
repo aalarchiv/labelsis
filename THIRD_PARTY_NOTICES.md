@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This file lists third-party software bundled with the pt700 firmware
+This file lists third-party software bundled with the LabelSis firmware
 binary or with the source distribution, together with the license
 text required by each upstream.
 

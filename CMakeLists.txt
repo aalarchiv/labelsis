@@ -29,4 +29,4 @@ endif()
 # (or run scripts/idf-env.sh) so IDF_PATH is set.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
-project(pt700)
+project(labelsis)

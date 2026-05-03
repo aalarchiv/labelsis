@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Single-file mock of the pt700 firmware HTTP API.
+Single-file mock of the LabelSis firmware HTTP API.
 
 Serves the SPA from disk and replies to /api/* with sensible fake
 values so the web UI can be developed without flashing the ESP or
@@ -298,7 +298,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    p = argparse.ArgumentParser(description="pt700 mock HTTP server")
+    p = argparse.ArgumentParser(description="LabelSis mock HTTP server")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--bind", default="127.0.0.1",
                    help="interface to bind (use 0.0.0.0 for LAN access)")
@@ -309,7 +309,7 @@ def main():
         return 1
 
     server = ThreadingHTTPServer((args.bind, args.port), Handler)
-    print(f"pt700-mock listening on http://{args.bind}:{args.port}/")
+    print(f"labelsis-mock listening on http://{args.bind}:{args.port}/")
     print(f"  serving SPA from {SPA_DIR}")
     print(f"  edit STATE / TAPES at top of {__file__} to simulate other states")
     try:
