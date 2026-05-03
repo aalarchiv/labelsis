@@ -1182,14 +1182,13 @@ function renderStatus(j) {
  */
 const HEAD_PX = 128;          /* PT-* head height */
 
-/* On-screen canvas height tracks the physical tape width (= TAPES
- * entry's `dots`). Element coordinates stay in head-pin space (so
- * saved labels open unchanged), but rendering offsets them by
- * (HEAD_PX - tape_dots) / 2 so head-pin 0 lands at the visually
- * correct place on the tape. Updated per tape change in redraw();
- * read by evtToCanvas to keep mouse coords in element space. */
-let s_headOffset = 0;
-let s_tapeDots   = -1;   /* sentinel: first redraw always triggers fitZoom */
+/* The canvas always shows the full HEAD_PX-wide head extent so the
+ * user has a stable visual frame regardless of which tape is
+ * loaded. The on-screen canvas paints three nested zones top-to-
+ * bottom: (a) "head past tape" -- dark band where head pins exist
+ * but no tape; (b) "tape but unprintable" -- light red band; (c)
+ * print area -- white. Element coordinates remain in head-pin
+ * space and need no transform. */
 const PAD     = 24;           /* extra canvas margin so selection
                                  handles/rotate-stem can draw past
                                  the print area without being clipped.
@@ -2126,16 +2125,19 @@ function redraw(forPrint = false) {
   const c    = document.getElementById("preview");
   const ctx  = c.getContext("2d");
   const tape = printer && printer.ok ? TAPES[printer.media_width_mm] : TAPES[24];
-  const printPx     = tape ? tape.print  : 128;
-  const tapeDots    = tape ? tape.dots   : HEAD_PX;
-  const tapeMarginPx = Math.max(0, ((tapeDots - printPx) / 2) | 0);
-  const headOffset  = ((HEAD_PX - tapeDots) / 2) | 0;  /* may be negative for 24mm */
-  if (!forPrint) {
-    const tapeChanged = (s_tapeDots !== tapeDots);
-    s_headOffset = headOffset;
-    s_tapeDots   = tapeDots;
-    if (tapeChanged) fitZoom();
-  }
+  const printPx  = tape ? tape.print  : 128;
+  const marginPx = tape ? tape.margin : 0;
+  /* Per-side breakdown within the canvas (head extent):
+   *   offTapePx  = head pins where no tape exists at all
+   *   tapeBandPx = head pins on the tape but unprintable (border)
+   *   printPx    = the printable centre band
+   * Always: offTapePx + tapeBandPx == marginPx (= head's per-side
+   * non-printable margin from the SDM). For tapes wider than the
+   * head (24mm: dots=170 > HEAD_PX=128) offTapePx clamps to 0 and
+   * tapeBandPx is also 0 since print pins fill the head. */
+  const tapeDots    = tape ? tape.dots : HEAD_PX;
+  const tapeBandPx  = Math.max(0, ((tapeDots - printPx) / 2) | 0);
+  const offTapePx   = Math.max(0, marginPx - tapeBandPx);
 
   /* First pass: dry-run draw on a scratch canvas to measure widths
    * so we can size the visible canvas to fit the rightmost element. */
@@ -2174,67 +2176,76 @@ function redraw(forPrint = false) {
     return;
   }
 
-  /* On-screen redraw: canvas height = tape physical extent (in
-   * 180-dpi dots), so the user sees the actual tape they loaded.
-   * Print area sits centred within; on-tape unprintable border is
-   * the visible "tape but won't print" zone. PAD around it for
-   * rulers + drag handles. */
+  /* On-screen redraw: canvas height stays at HEAD_PX so the user
+   * has a stable visual frame regardless of tape width. The three
+   * zones (off-tape head, on-tape unprintable border, print band)
+   * are tinted within the head extent. PAD around it for rulers +
+   * drag handles. */
   c.width  = printW + 2 * PAD;
-  c.height = tapeDots + 2 * PAD;
+  c.height = HEAD_PX + 2 * PAD;
 
-  /* Soft grey gutter so the tape boundary is visible against
-   * the white print area. */
+  /* Soft grey gutter outside the head extent. */
   ctx.fillStyle = "#e9ecef";
   ctx.fillRect(0, 0, c.width, c.height);
 
-  /* Tape ground (light pink for the unprintable border, white for
-   * the print area) -- drawn once, in tape coordinates. */
   ctx.save();
   ctx.translate(PAD, PAD);
-  ctx.fillStyle = "rgba(255,80,80,.18)";
-  ctx.fillRect(0, 0, printW, tapeDots);                    /* whole tape tinted */
-  ctx.fillStyle = "#fff";                                  /* print band cleared */
-  ctx.fillRect(0, tapeMarginPx, printW, printPx);
-  if (canvasOpts.showGrid) drawGrid(ctx, printW, tapeDots);
-  ctx.restore();
 
-  /* Elements live in head-pin space; offset by -headOffset so a
-   * head-pin index lands on the correct spot of the tape canvas
-   * (top of head -> tape position headOffset; for 12mm tape that
-   * puts head pin 0 above the tape, head pin 22 at the tape's top
-   * edge). Width unaffected -- elements share the head's x axis. */
-  ctx.save();
-  ctx.translate(PAD, PAD - headOffset);
+  /* Three-zone background:
+   *   off-tape  -- darker grey ("head goes past the tape edge")
+   *   tape band -- light red ("tape but won't print")
+   *   print     -- white
+   * Painted in order so each clears the next inwards. */
+  ctx.fillStyle = "#bcc3cc";                                 /* off-tape head */
+  ctx.fillRect(0, 0, printW, HEAD_PX);
+  if (offTapePx < marginPx) {
+    ctx.fillStyle = "rgba(255,80,80,.28)";                   /* tape margin */
+    ctx.fillRect(0, offTapePx, printW, HEAD_PX - 2 * offTapePx);
+  }
+  ctx.fillStyle = "#fff";                                    /* print band */
+  ctx.fillRect(0, marginPx, printW, printPx);
+
+  /* Grid sits between the white fill and the elements so
+   * elements draw on top. */
+  if (canvasOpts.showGrid) drawGrid(ctx, printW, HEAD_PX);
+
   for (const el of elements) drawElement(ctx, el);
+
   ctx.restore();
 
-  /* "Colors" preview -- replace b/w pixels in the print band only
-   * (the on-tape unprintable border keeps its red tint). Pure UI;
-   * the print raster is unaffected (postPrint runs redraw(true)). */
-  if (canvasOpts.showColors) applyTapeColors(ctx, printW, tapeMarginPx, printPx);
+  /* "Colors" preview -- replace b/w pixels in the print band only.
+   * Pure UI; the print raster is unaffected (postPrint runs
+   * redraw(true)). */
+  if (canvasOpts.showColors) applyTapeColors(ctx, printW, marginPx, printPx);
 
-  /* Centre guides + selection chrome -- centre guides operate on
-   * tape coords (where the user sees them); selection chrome
-   * operates on head-pin coords (where elements live), so they get
-   * the same offset translation as the elements. */
-  if (canvasOpts.showCenter) {
-    ctx.save();
-    ctx.translate(PAD, PAD);
-    drawCenterGuides(ctx, printW, tapeDots);
-    ctx.restore();
-  }
+  /* Centre guides + selection chrome on top of any colour remap so
+   * they stay legible regardless of tape colour. */
+  ctx.save();
+  ctx.translate(PAD, PAD);
+  if (canvasOpts.showCenter) drawCenterGuides(ctx, printW, HEAD_PX);
   const sel = elementById(selectedId);
-  if (sel) {
-    ctx.save();
-    ctx.translate(PAD, PAD - headOffset);
-    drawSelectionChrome(ctx, sel);
-    ctx.restore();
+  if (sel) drawSelectionChrome(ctx, sel);
+  /* Tape edge lines (where the physical tape begins/ends within
+   * the head extent), drawn last so they sit on top of any tints
+   * but under the rulers. Skipped when the tape is at least as
+   * wide as the head -- there is no off-tape head to delineate. */
+  if (offTapePx > 0) {
+    ctx.strokeStyle = "rgba(0,0,0,0.45)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(0,             offTapePx + 0.5);
+    ctx.lineTo(printW,        offTapePx + 0.5);
+    ctx.moveTo(0,             HEAD_PX - offTapePx - 0.5);
+    ctx.lineTo(printW,        HEAD_PX - offTapePx - 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
+  ctx.restore();
 
   /* Rulers paint last in canvas-absolute coords, on top of the
-   * gutter (covers anything that bled into the top/left bands).
-   * tapeDots gives the ruler the correct physical extent. */
-  if (canvasOpts.showRulers) drawRulers(ctx, printW, tapeDots);
+   * gutter (covers anything that bled into the top/left bands). */
+  if (canvasOpts.showRulers) drawRulers(ctx, printW, HEAD_PX);
 
   /* Overflow banner: an element somewhere is past PRINT_W_MAX, so
    * we clamped printW to keep the canvas usable. Paint a flag at
@@ -4135,33 +4146,15 @@ function applyTransform() {
     (zoom === 1 && panX === 0 && panY === 0);
 }
 
-/* Pick a default zoom level that makes the tape canvas readable
- * regardless of physical width. Target ~280 px on screen for the
- * canvas height (which is now tape_dots + 2*PAD), clamped to the
- * existing 0.5-8x manual zoom range. Called on first draw and on
- * every tape change so a 3.5 mm tape doesn't render at native
- * 24 px (tiny) and a 24 mm tape isn't cramped at 1x either. */
-const FIT_TARGET_PX = 280;
-function fitZoom() {
-  if (!canvas || !canvas.height) return;
-  const wanted = FIT_TARGET_PX / canvas.height;
-  zoom = Math.max(0.5, Math.min(8, wanted));
-  panX = panY = 0;
-  applyTransform();
-}
-
 function evtToCanvas(ev) {
   /* Subtract PAD because the on-screen canvas has a PAD-wide gutter
-   * around the tape area but elements live in unpadded head-pixel
-   * space. Add s_headOffset on y because the canvas now matches the
-   * physical tape extent (not the head extent), so canvas-y=0 of
-   * the tape area maps to head-pin = s_headOffset. Negative results
-   * mean the pointer is over the gutter -- that's fine, hit tests
-   * just won't match. */
+   * around the printable area but elements live in unpadded
+   * print-pixel space. Negative results mean the pointer is over
+   * the gutter -- that's fine, hit tests just won't match. */
   const r = canvas.getBoundingClientRect();
   return {
     x: (ev.clientX - r.left) * (canvas.width  / r.width)  - PAD,
-    y: (ev.clientY - r.top)  * (canvas.height / r.height) - PAD + s_headOffset,
+    y: (ev.clientY - r.top)  * (canvas.height / r.height) - PAD,
   };
 }
 /* Long-press detection runs alongside drag start. If the pointer
@@ -4409,7 +4402,10 @@ canvas.addEventListener("wheel", ev => {
   applyTransform();
 }, { passive: false });
 
-document.getElementById("zoom-reset").addEventListener("click", fitZoom);
+document.getElementById("zoom-reset").addEventListener("click", () => {
+  zoom = 1; panX = 0; panY = 0;
+  applyTransform();
+});
 
 /* Right-click also opens the context menu -- no long-press wait. */
 canvas.addEventListener("contextmenu", ev => {
