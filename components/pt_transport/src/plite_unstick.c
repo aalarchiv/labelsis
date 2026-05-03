@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>     /* fsync */
 
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -153,23 +154,54 @@ static void unstick_task(void *arg)
         goto cleanup;
     }
     size_t written = fwrite(buf, 1, (size_t)size, f);
-    /* fflush + close is what actually pushes the SCSI WRITE(10)
-     * commands through. The OS / FatFs cache might delay the bytes
-     * until close, so we MUST close cleanly before the device
-     * re-enumerates. */
-    fflush(f);
-    fclose(f);
-    f = NULL;
-
     if ((long)written != size) {
         ESP_LOGW(TAG, "fwrite incomplete: %zu of %ld", written, size);
         goto cleanup;
     }
-    ESP_LOGI(TAG, "P-Lite unstick: magic written, awaiting re-enumeration");
+    /* Belt-and-suspenders flush sequence:
+     *   fflush  -- push stdio buffer into FatFs
+     *   fsync   -- push FatFs sector cache to the MSC layer
+     *              (esp-idf's vfs_fat implements f_sync via fsync)
+     * Without fsync the data could sit in FatFs's cache until
+     * f_unmount, which would delay the printer's window to act
+     * on the magic. */
+    fflush(f);
+    int fd = fileno(f);
+    if (fd >= 0 && fsync(fd) != 0) {
+        ESP_LOGW(TAG, "fsync failed: %s (continuing anyway)", strerror(errno));
+    }
+
+    /* Diagnostic: read the magic back to confirm what's actually on
+     * disk at offset 0x1F0..0x1FF (i.e. the 6 trailing zeros of the
+     * sector + the 10 magic bytes). If this dump shows zeros where
+     * the magic should be, FatFs/MSC corrupted the write. */
+    if (fseek(f, 0x1F0, SEEK_SET) == 0) {
+        uint8_t verify[16];
+        size_t  vr = fread(verify, 1, sizeof verify, f);
+        ESP_LOGI(TAG, "verify @ 0x1F0 (read %zu bytes):", vr);
+        ESP_LOG_BUFFER_HEXDUMP(TAG, verify, vr, ESP_LOG_INFO);
+    } else {
+        ESP_LOGW(TAG, "verify fseek(0x1F0) failed");
+    }
+
+    fclose(f);
+    f = NULL;
+
+    /* Hold the volume mounted while the printer reads the file and
+     * decides to flip. Brother's Windows tool also keeps the drive
+     * mounted (Windows does it implicitly) and polls for ~10 s for
+     * the new device. Tearing down MSC immediately after the write
+     * may abort the firmware's read mid-flight -- give it air. */
+    ESP_LOGI(TAG, "P-Lite unstick: magic written + synced; "
+                  "holding mount 8 s for printer to act");
+    vTaskDelay(pdMS_TO_TICKS(8000));
+    ESP_LOGI(TAG, "P-Lite unstick: hold over, releasing MSC");
 
 cleanup:
     if (buf) free(buf);
     if (f)   fclose(f);
+    /* If the printer already re-enumerated during the hold the MSC
+     * device handle is stale; uninstall is best-effort. */
     if (vfs) msc_host_vfs_unregister(vfs);
     if (dev) msc_host_uninstall_device(dev);
     /* Don't uninstall the MSC driver -- keep it ready for the next
