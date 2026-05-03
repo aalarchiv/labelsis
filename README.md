@@ -1,11 +1,8 @@
 # LabelSis
 
-> Network print server for the **Brother PT-P700 family** of label
-> printers, running on **ESP32-S3** with a self-hosted web UI for
-> label design.
->
-> *(LabelSis = "label this" said to your **sis**ter — Brother's other
-> sibling.)*
+Network print server for the **Brother PT-P700 family** of label
+printers, running on **ESP32-S3** with a self-hosted web UI for
+label design.
 
 ![Screenshot of the LabelSis label designer](doc/Screenshot.png)
 
