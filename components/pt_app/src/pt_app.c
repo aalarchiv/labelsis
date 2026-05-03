@@ -812,51 +812,97 @@ static esp_err_t api_print(httpd_req_t *req)
     return httpd_resp_send(req, rbody, rlen);
 }
 
-/* Single-file SPA embedded via EMBED_TXTFILES in CMakeLists.txt -- the
- * label designer. Inline CSS + JS so we don't need LittleFS yet; the
- * file is < 10 KB and lives in flash next to the code. */
-extern const char index_html_start[] asm("_binary_index_html_start");
-extern const char index_html_end[]   asm("_binary_index_html_end");
+/* SPA assets embedded via EMBED_FILES in CMakeLists.txt. The text
+ * assets (index.html, setup.html, bootstrap-icons.json) come in two
+ * forms -- plain bytes and gzip-compressed -- emitted in lockstep
+ * by scripts/build_spa_assets.py at build time so they cannot drift.
+ * send_text_asset() picks which to ship based on Accept-Encoding.
+ * qrcode.min.js is no longer a separate route; the bundler inlines
+ * it into index.html. */
+extern const uint8_t index_html_start[]    asm("_binary_index_html_start");
+extern const uint8_t index_html_end[]      asm("_binary_index_html_end");
+extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
+extern const uint8_t index_html_gz_end[]   asm("_binary_index_html_gz_end");
 
-/* Vendored MIT QR-code generator (davidshimjs/qrcodejs) embedded as
- * its own file because inlining 20 KB of minified code into the
- * already-large index.html is unpleasant. Served at /qrcode.min.js
- * so the SPA can `<script src=...>` it. */
-extern const char qrcode_js_start[] asm("_binary_qrcode_min_js_start");
-extern const char qrcode_js_end[]   asm("_binary_qrcode_min_js_end");
+extern const uint8_t setup_html_start[]    asm("_binary_setup_html_start");
+extern const uint8_t setup_html_end[]      asm("_binary_setup_html_end");
+extern const uint8_t setup_html_gz_start[] asm("_binary_setup_html_gz_start");
+extern const uint8_t setup_html_gz_end[]   asm("_binary_setup_html_gz_end");
 
-/* Bootstrap Icons font (woff2, ~130 KB) + name-to-codepoint table
- * (JSON, ~52 KB). MIT-licensed, https://icons.getbootstrap.com/.
- * Used by the SPA's icon element + picker. */
-extern const uint8_t icon_woff2_start[] asm("_binary_bootstrap_icons_woff2_start");
-extern const uint8_t icon_woff2_end[]   asm("_binary_bootstrap_icons_woff2_end");
-extern const uint8_t icon_json_start[]  asm("_binary_bootstrap_icons_json_start");
-extern const uint8_t icon_json_end[]    asm("_binary_bootstrap_icons_json_end");
+/* Bootstrap Icons font (woff2, ~130 KB, already compressed --
+ * gzipping won't help) + name-to-codepoint table (JSON, ~52 KB,
+ * gzips to ~12 KB). MIT, https://icons.getbootstrap.com/. */
+extern const uint8_t icon_woff2_start[]   asm("_binary_bootstrap_icons_woff2_start");
+extern const uint8_t icon_woff2_end[]     asm("_binary_bootstrap_icons_woff2_end");
+extern const uint8_t icon_json_start[]    asm("_binary_bootstrap_icons_json_start");
+extern const uint8_t icon_json_end[]      asm("_binary_bootstrap_icons_json_end");
+extern const uint8_t icon_json_gz_start[] asm("_binary_bootstrap_icons_json_gz_start");
+extern const uint8_t icon_json_gz_end[]   asm("_binary_bootstrap_icons_json_gz_end");
 
-/* Multi-resolution favicon.ico (~34 KB), served at /favicon.ico so
- * browsers stop logging 405s when they auto-request it. */
+/* Multi-resolution favicon.ico (~34 KB), served at /favicon.ico. */
 extern const uint8_t favicon_start[]    asm("_binary_favicon_ico_start");
 extern const uint8_t favicon_end[]      asm("_binary_favicon_ico_end");
 
-static esp_err_t api_index(httpd_req_t *req)
+/* True when the request advertises gzip in Accept-Encoding. Crude
+ * substring match -- false negatives just mean we ship plain bytes,
+ * which is always safe. False positives on weird tokens like
+ * "x-gzip" don't happen in real-world clients. */
+static bool client_accepts_gzip(httpd_req_t *req)
 {
-    cors_headers(req);
-    httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, index_html_start,
-                           index_html_end - index_html_start);
+    char buf[64];
+    if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", buf, sizeof buf) != ESP_OK)
+        return false;
+    return strstr(buf, "gzip") != NULL;
 }
 
-static esp_err_t api_qrcode_js(httpd_req_t *req)
+/* Send one of two embedded blobs (gzipped or plain) based on the
+ * request's Accept-Encoding. Sets CORS + Content-Type + Vary so
+ * intermediate caches keep the two forms separate. */
+static esp_err_t send_text_asset(httpd_req_t *req,
+                                 const char *content_type,
+                                 const uint8_t *plain, size_t plain_len,
+                                 const uint8_t *gz,    size_t gz_len)
 {
     cors_headers(req);
-    httpd_resp_set_type(req, "application/javascript");
-    return httpd_resp_send(req, qrcode_js_start,
-                           qrcode_js_end - qrcode_js_start);
+    httpd_resp_set_type(req, content_type);
+    httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+    if (client_accepts_gzip(req)) {
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+        return httpd_resp_send(req, (const char *)gz, gz_len);
+    }
+    return httpd_resp_send(req, (const char *)plain, plain_len);
+}
+
+static esp_err_t api_index(httpd_req_t *req)
+{
+    /* Cache for 5 min so reloads within a session are instant; the
+     * ETag (firmware version) lets the browser revalidate cheaply
+     * across longer gaps and forces a re-download after an OTA. */
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=300");
+    const esp_app_desc_t *app = esp_app_get_description();
+    if (app && app->version[0]) {
+        char etag[40];
+        int n = snprintf(etag, sizeof etag, "\"%s\"", app->version);
+        if (n > 0 && n < (int)sizeof etag) {
+            httpd_resp_set_hdr(req, "ETag", etag);
+            char inm[40];
+            if (httpd_req_get_hdr_value_str(req, "If-None-Match",
+                                            inm, sizeof inm) == ESP_OK
+                && strcmp(inm, etag) == 0) {
+                cors_headers(req);
+                httpd_resp_set_status(req, "304 Not Modified");
+                return httpd_resp_send(req, NULL, 0);
+            }
+        }
+    }
+    return send_text_asset(req, "text/html",
+        index_html_start,    index_html_end    - index_html_start,
+        index_html_gz_start, index_html_gz_end - index_html_gz_start);
 }
 
 /* Browsers auto-request /favicon.ico on every page load. Serve the
- * embedded multi-resolution .ico (contains 16/32/48/... sizes) with
- * a long-lived Cache-Control so it's only fetched once. */
+ * embedded multi-resolution .ico with a long-lived Cache-Control so
+ * it's only fetched once. */
 static esp_err_t api_favicon(httpd_req_t *req)
 {
     cors_headers(req);
@@ -879,11 +925,10 @@ static esp_err_t api_icon_woff2(httpd_req_t *req)
 
 static esp_err_t api_icon_json(httpd_req_t *req)
 {
-    cors_headers(req);
-    httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=31536000, immutable");
-    return httpd_resp_send(req, (const char *)icon_json_start,
-                           icon_json_end - icon_json_start);
+    return send_text_asset(req, "application/json",
+        icon_json_start,    icon_json_end    - icon_json_start,
+        icon_json_gz_start, icon_json_gz_end - icon_json_gz_start);
 }
 
 static httpd_handle_t s_http;
@@ -940,10 +985,6 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/", .method = HTTP_GET,
         .handler = api_index, .user_ctx = NULL,
     };
-    static const httpd_uri_t qrcode_route = {
-        .uri = "/qrcode.min.js", .method = HTTP_GET,
-        .handler = api_qrcode_js, .user_ctx = NULL,
-    };
     static const httpd_uri_t icon_woff2_route = {
         .uri = "/fonts/bootstrap-icons.woff2", .method = HTTP_GET,
         .handler = api_icon_woff2, .user_ctx = NULL,
@@ -968,7 +1009,6 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &scan_route);
     httpd_register_uri_handler(s_http, &setup_route);
     httpd_register_uri_handler(s_http, &index_route);
-    httpd_register_uri_handler(s_http, &qrcode_route);
     httpd_register_uri_handler(s_http, &icon_woff2_route);
     httpd_register_uri_handler(s_http, &icon_json_route);
     httpd_register_uri_handler(s_http, &favicon_route);
@@ -980,19 +1020,17 @@ static esp_err_t http_up(uint16_t port)
 
 #define AP_SETUP_SSID "pt700-setup"
 
-extern const char setup_html_start[] asm("_binary_setup_html_start");
-extern const char setup_html_end[]   asm("_binary_setup_html_end");
-
 /* Catch-all GET handler -- serves the setup page for /, captive-portal
  * detection URLs (Apple/Android/Microsoft probes), and any unknown
  * path. With no DNS hijack the popup behaviour is best-effort: probes
- * see non-success HTML and most phones surface a "sign in" notice. */
+ * see non-success HTML and most phones surface a "sign in" notice.
+ * Externs for setup_html_{,gz_}{start,end} live next to the SPA
+ * embeds at the top of this file. */
 static esp_err_t ap_setup_page(httpd_req_t *req)
 {
-    cors_headers(req);
-    httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, setup_html_start,
-                           setup_html_end - setup_html_start);
+    return send_text_asset(req, "text/html",
+        setup_html_start,    setup_html_end    - setup_html_start,
+        setup_html_gz_start, setup_html_gz_end - setup_html_gz_start);
 }
 
 /* Append `s` (`n` bytes) to the response stream as a JSON string

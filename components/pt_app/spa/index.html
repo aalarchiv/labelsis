@@ -288,7 +288,22 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #el-list li.empty .summary::after { content:" — empty"; color:var(--muted); font-style:italic; }
 #el-list li.err     { border-color:var(--err); background:rgba(248,81,73,.06); }
 #el-list li.err .summary { color:var(--err); }
-#el-list .grip { color:var(--muted); cursor:grab; padding:0 .25rem; font-family:"bi"; font-size:1.1rem; line-height:1; }
+/* Pure-CSS 2x3 dot grip handle. Drawn via a tiled radial-gradient
+ * (no font, no SVG, no DOM cost) so we don't drag the 134 KB
+ * bootstrap-icons font into the eager-load path just to render two
+ * columns of dots in the layer list. The bi font is now only fetched
+ * when the icon picker is actually opened. */
+#el-list .grip {
+  display:inline-block;
+  width:8px;  height:14px;
+  vertical-align:middle;
+  cursor:grab;
+  background-image:radial-gradient(circle at 1px 1px, var(--muted) 1px, transparent 1.5px);
+  background-size:4px 5px;
+  background-position:0 1px;
+  background-repeat:repeat;
+  flex:0 0 8px;
+}
 #el-list .grip:active { cursor:grabbing; }
 #el-list .type { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; min-width:48px; }
 #el-list .summary { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -3416,10 +3431,11 @@ function renderLayerList() {
     const errored = !!(el._barcodeError || el._qrError || el._loadError);
     if (empty)   li.classList.add("empty");
     if (errored) li.classList.add("err");
-    /*  = bootstrap-icons "grip-vertical" -- two compact dot
-     * columns, much tighter than the U+22EE "⋮⋮" combo it replaced
-     * (which renders with a wide gap in most fonts). */
-    li.innerHTML = `<span class="grip" title="drag to reorder"></span><span class="type">${el.type}</span><span class="summary"></span>`;
+    /* Empty .grip span -- the dots are drawn by a tiled
+     * radial-gradient in the .grip CSS rule (no font dependency,
+     * no SVG, no DOM cost). Kept empty so screen readers don't
+     * announce the visual handle. */
+    li.innerHTML = `<span class="grip" title="drag to reorder"></span><span class="type">${el.type}</span><span class="summary"></span>`;
     li.querySelector(".summary").textContent = summarise(el);
     li.addEventListener("click", ev => {
       /* Suppress the click that fires at the end of a drag-drop. */
