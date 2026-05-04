@@ -970,26 +970,58 @@ const STRINGS = {
 const I18N_LANG_KEY = "labelsis:lang";
 let currentLang = localStorage.getItem(I18N_LANG_KEY) || I18N_DEFAULT_LANG;
 
+/* Look up a string for the current locale. Falls through:
+ *   currentLang -> default lang (English STRINGS) -> undefined.
+ * Returns undefined when nothing matched, so callers can decide
+ * what to do with a miss (applyI18n falls back to the original
+ * markup; t() below substitutes the key as a last-resort label
+ * for log messages and other call sites that need a string). */
+function tLookup(key) {
+  return (STRINGS[currentLang] && STRINGS[currentLang][key])
+      ?? (STRINGS[I18N_DEFAULT_LANG] && STRINGS[I18N_DEFAULT_LANG][key])
+      ?? undefined;
+}
+
 function t(key, params) {
-  let s = (STRINGS[currentLang] && STRINGS[currentLang][key])
-       ?? STRINGS[I18N_DEFAULT_LANG][key]
-       ?? key;
+  let s = tLookup(key) ?? key;
   if (params) for (const [k, v] of Object.entries(params))
     s = s.replace(`{${k}}`, v);
   return s;
 }
 
 /* Walk every node carrying data-i18n / data-i18n-attr and populate.
- * Idempotent -- safe to call repeatedly (e.g. after locale change). */
+ * Idempotent -- safe to call repeatedly (e.g. after locale change).
+ *
+ * Fallback policy: if no translation exists for a key in the current
+ * locale OR in the default locale, leave the original markup alone.
+ * Stash that original on the first visit (textContent for elements,
+ * the live attribute value for attribute targets) so we can restore
+ * it on later renders even after we've overwritten with a different
+ * locale. The stash is keyed per-key so an element with multiple
+ * data-i18n-attr entries doesn't lose individual fallbacks. */
+const _i18nOriginals = new WeakMap();   /* el -> { text, attrs: {attr: value} } */
+function _origFor(el) {
+  let o = _i18nOriginals.get(el);
+  if (!o) { o = { text: undefined, attrs: {} }; _i18nOriginals.set(el, o); }
+  return o;
+}
+
 function applyI18n(root = document) {
   for (const el of root.querySelectorAll("[data-i18n]")) {
-    el.textContent = t(el.dataset.i18n);
+    const o = _origFor(el);
+    if (o.text === undefined) o.text = el.textContent;
+    const v = tLookup(el.dataset.i18n);
+    el.textContent = (v !== undefined) ? v : o.text;
   }
   for (const el of root.querySelectorAll("[data-i18n-attr]")) {
     /* "attr1:key1,attr2:key2" */
+    const o = _origFor(el);
     for (const pair of el.dataset.i18nAttr.split(",")) {
       const [attr, key] = pair.trim().split(":");
-      if (attr && key) el.setAttribute(attr, t(key));
+      if (!attr || !key) continue;
+      if (!(attr in o.attrs)) o.attrs[attr] = el.getAttribute(attr) ?? "";
+      const v = tLookup(key);
+      el.setAttribute(attr, (v !== undefined) ? v : o.attrs[attr]);
     }
   }
 }
