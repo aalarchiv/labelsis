@@ -8,11 +8,11 @@ so future attempts don't repeat the same dead ends.
 
 The PT-P700 has a side slider with two positions:
 
-- **E** (Edit) — the printer enumerates with USB **printer class**
+- **E** (Edit) - the printer enumerates with USB **printer class**
   (interface class 0x07) under VID 0x04F9 / PID 0x2061. ESC/raster
   commands flow over a bulk-OUT endpoint; status comes back over
   bulk-IN. This is what LabelSis drives.
-- **EL** (Editor Lite, "P-Lite") — the printer enumerates with USB
+- **EL** (Editor Lite, "P-Lite") - the printer enumerates with USB
   **mass storage class** under PID 0x2064 (or 0x2065 for the
   PT-P750W). The mass-storage volume is a small FAT16 disk
   containing Brother's portable Windows tool `PtLite10.EXE` plus

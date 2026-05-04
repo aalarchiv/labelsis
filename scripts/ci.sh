@@ -14,7 +14,7 @@ step "firmware build (esp-idf, both targets)"
 . "$HOME/esp/esp-idf/export.sh" >/dev/null
 for tgt in esp32s3 esp32s2; do
     step "  → $tgt"
-    # set-target rewrites build/ from scratch — that's what we want when
+    # set-target rewrites build/ from scratch - that's what we want when
     # switching target, since the partition layout & toolchain differ.
     idf.py set-target "$tgt" >/dev/null
     idf.py build

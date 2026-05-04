@@ -70,7 +70,7 @@ pt_transport_t pt_transport_mock_init(pt_transport_mock_t *m);
  * configuration (media, errors) is preserved. */
 void pt_transport_mock_reset(pt_transport_mock_t *m);
 
-/* Configure the virtual cartridge — has effect on the next status reply. */
+/* Configure the virtual cartridge - has effect on the next status reply. */
 void pt_transport_mock_set_media(pt_transport_mock_t *m,
                                  uint8_t width_mm,
                                  pt_media_type_t type,

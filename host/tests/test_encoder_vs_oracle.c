@@ -15,7 +15,7 @@
  *      less for the kinds of row data the oracle produces.
  *
  * Direct byte-for-byte diff between our encoder output and the oracle
- * is intentionally not done — both implementations make different
+ * is intentionally not done - both implementations make different
  * (spec-valid) choices on n=2 repeats and chunk sizes; see bd memory
  * "pt700 PACKBITS DIVERGENCE". */
 
@@ -141,7 +141,7 @@ int main(void)
         if (rc != 0) {
             size_t fail_off = (size_t)(-rc - 1);
             fprintf(stderr,
-                    "FAIL: %s — parse failed at offset %zu (byte 0x%02x)\n  context:",
+                    "FAIL: %s - parse failed at offset %zu (byte 0x%02x)\n  context:",
                     f->name, fail_off, fx.data[fail_off]);
             for (size_t k = (fail_off > 8 ? fail_off - 8 : 0);
                  k < fail_off + 8 && k < fx.len; k++)

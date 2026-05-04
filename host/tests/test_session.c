@@ -1,4 +1,4 @@
-/* pt_session tests — drive print jobs through the mock transport and
+/* pt_session tests - drive print jobs through the mock transport and
  * verify the byte stream + completion behaviour. */
 
 #include <stdio.h>
@@ -30,7 +30,7 @@ static void test_print_zero_rows_job(void)
     pt_transport_mock_t mock;
     pt_transport_t t = pt_transport_mock_init(&mock);
 
-    /* Three all-zero rows — drives the zero-row shortcut path (0x5A). */
+    /* Three all-zero rows - drives the zero-row shortcut path (0x5A). */
     uint8_t rows[3 * 16] = {0};
 
     pt_session_options_t opts;
@@ -50,7 +50,7 @@ static void test_print_real_data_job(void)
     pt_transport_mock_t mock;
     pt_transport_t t = pt_transport_mock_init(&mock);
 
-    /* 5 rows of varied data — exercises both packbits and zero-row paths. */
+    /* 5 rows of varied data - exercises both packbits and zero-row paths. */
     uint8_t rows[5 * 16];
     memset(rows, 0, sizeof rows);
     /* Row 0: all zeros. Row 1: a single bit. Row 2: alternating. Row 3: all
@@ -104,7 +104,7 @@ static void test_media_mismatch(void)
 {
     pt_transport_mock_t mock;
     pt_transport_t t = pt_transport_mock_init(&mock);
-    /* Mock has 24mm tape; ask for 12mm — should mismatch. */
+    /* Mock has 24mm tape; ask for 12mm - should mismatch. */
 
     uint8_t rows[16] = {0};
     pt_err_t err = pt_session_print_raster(&t, rows, 1, 12, NULL);
@@ -133,7 +133,7 @@ static void test_byte_stream_structure(void)
     EXPECT(tx[100] == 0x1b && tx[101] == 0x40, "ESC @");
     EXPECT(tx[102] == 0x1b && tx[103] == 0x69 && tx[104] == 0x61
         && tx[105] == 0x01, "switch raster");
-    /* Then ESC i S (3 bytes), but reply is async — let's just verify it
+    /* Then ESC i S (3 bytes), but reply is async - let's just verify it
      * appears next. */
     EXPECT(tx[106] == 0x1b && tx[107] == 0x69 && tx[108] == 0x53,
            "status request");

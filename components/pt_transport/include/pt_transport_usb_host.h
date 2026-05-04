@@ -2,7 +2,7 @@
 #define PT_TRANSPORT_USB_HOST_H
 
 /*
- * pt_transport_usb_host — ESP32-S2 / ESP32-S3 native USB Host transport
+ * pt_transport_usb_host - ESP32-S2 / ESP32-S3 native USB Host transport
  * for the PT-* raster command set.
  *
  * Uses the esp-idf usb_host component. Same VID/PID match as
@@ -41,7 +41,7 @@ void pt_transport_usb_host_close(pt_transport_usb_host_t *u);
 
 /* True when, during the most recent open() probe, a PT-* in P-Lite
  * mode (PIDs 0x2064 / 0x2065) was enumerated. The device exposes USB
- * Mass Storage in that state — no printer interface to bind to — so
+ * Mass Storage in that state - no printer interface to bind to - so
  * open() returns NULL, but a caller can check this to render a
  * specific UI hint instead of generic "no printer". */
 bool pt_transport_usb_host_plite_seen(void);

@@ -80,7 +80,7 @@ static void test_full_job_flow(void)
     pt_transport_t t = pt_transport_mock_init(&mock);
 
     /* Drain the per-status reply we'd otherwise get from the initial
-     * status check by NOT issuing one — this test focuses on the print-
+     * status check by NOT issuing one - this test focuses on the print-
      * complete burst. */
 
     uint8_t buf[64];
@@ -142,7 +142,7 @@ static void test_partial_send(void)
     EXPECT(pt_transport_send(&t, (const uint8_t[]){0x1b}, 1) == 1, "byte 1");
     EXPECT(pt_transport_send(&t, (const uint8_t[]){0x69}, 1) == 1, "byte 2");
 
-    /* No reply yet — command incomplete. */
+    /* No reply yet - command incomplete. */
     uint8_t resp[64];
     size_t  resp_len = 0;
     pt_transport_recv(&t, resp, sizeof resp, &resp_len, 0);

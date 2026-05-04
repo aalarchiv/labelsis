@@ -2,11 +2,11 @@
 #define PT_TRANSPORT_LIBUSB_H
 
 /*
- * pt_transport_libusb — Linux/macOS userspace transport for the PT-*
+ * pt_transport_libusb - Linux/macOS userspace transport for the PT-*
  * raster command set, built on libusb-1.0.
  *
  * Lets us drive the printer from a host laptop without ESP-IDF in the
- * loop — pt_session + pt_protocol get exercised against real hardware
+ * loop - pt_session + pt_protocol get exercised against real hardware
  * before the ESP32-S3 USB host stack is involved, isolating
  * protocol bugs from USB-driver bugs.
  *
