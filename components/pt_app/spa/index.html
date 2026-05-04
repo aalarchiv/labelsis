@@ -361,7 +361,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   <section id="view-status" hidden>
     <div class="panel">
       <h2 data-i18n="panel.about">About</h2>
-      <p class="muted" data-i18n="about.intro"><a href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener">LabelSis</a> - network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</p>
+      <p class="muted"><a href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener">LabelSis</a> <span data-i18n="about.intro">- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</span></p>
       <p class="muted"><span data-i18n="about.firmware">Firmware</span>: <span id="about-fw-version">…</span></p>
       <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
       <dl class="about-licenses">
@@ -815,7 +815,13 @@ const STRINGS = {
     "panel.label":             "Label",
     "panel.status":            "Status",
     "panel.about":             "About",
-    "about.intro":             "LabelSis - network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.",
+    /* about.intro is rendered AFTER the project link in the markup
+     * (the link sits outside the data-i18n span so applyI18n's
+     * textContent assignment can't wipe its <a> tag). The i18n
+     * string therefore starts with the dash and tagline, not with
+     * the project name. */
+    "about.intro":             "- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.",
+    "about.firmware":          "Firmware",
     "about.licenses":          "Third-party components bundled with this firmware:",
     "panel.wifi":              "Wi-Fi",
     "panel.wifi.help":         "Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the labelsis-setup AP for re-onboarding.",

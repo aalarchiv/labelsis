@@ -5,7 +5,7 @@
   "panel.label":             "Etikett",
   "panel.status":            "Status",
   "panel.about":             "Über",
-  "about.intro":             "LabelSis - Netzwerk-Druckserver für die Brother-PT-P700-Familie, ESP32-S3 als USB-Host mit eigener Web-Oberfläche.",
+  "about.intro":             "- Netzwerk-Druckserver für die Brother-PT-P700-Familie, ESP32-S3 als USB-Host mit eigener Web-Oberfläche.",
   "about.firmware":          "Firmware",
   "about.licenses":          "Drittanbieter-Komponenten in dieser Firmware:",
   "panel.wifi":              "WLAN",
