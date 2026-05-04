@@ -37,6 +37,16 @@ app, no cloud account, no telemetry.
 - **Mock dev server** (Python stdlib only) -- iterate the SPA without
   flashing or even owning the printer.
 
+# Integrating into PT700
+
+I integrated the ESP32-S2/ESP32-S3 board into my Brother P-touch PT700 label printer:
+
+![PT700 connection diagram](doc/pt700_esp32s2_connection.jpg)
+
+I used a _Wemos Lolin S2 mini ESP32-S2_ which does not come with an addition USB-serial IC on board, so the device is now "WIFI only".
+
+The PT700 microcontroller needs to detect a voltage on the VBUS pins of the USB port. 3.3V is sufficient for detection.
+
 ## Supported printers
 
 Same protocol family per Brother's SDM v1.11. All must be in normal
