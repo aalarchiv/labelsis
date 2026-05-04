@@ -23,6 +23,11 @@ boards/<name>/
                        (esp-idf reads this via
                        CONFIG_PARTITION_TABLE_CUSTOM_FILENAME, which
                        the per-board sdkconfig.defaults sets.)
+  target               IDF target name on a single line (e.g.
+                       "esp32s2" / "esp32s3"). Read by
+                       scripts/build-release.sh to drive set-target
+                       unattended; manual builds infer the same from
+                       the user's `idf.py set-target` invocation.
 ```
 
 ## Switching profiles after first config

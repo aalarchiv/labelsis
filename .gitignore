@@ -15,6 +15,12 @@ dependencies.lock
 build-host/
 build-oracle/
 
+# Release artifacts (multi-board OTA + USB-flash bundles produced by
+# scripts/build-release.sh). Tagged releases live on GitHub releases,
+# not in the repo.
+release/
+build-release/
+
 # Editor scratch
 .vscode/
 .idea/
