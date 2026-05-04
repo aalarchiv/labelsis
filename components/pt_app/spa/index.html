@@ -384,6 +384,22 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <h2 data-i18n="panel.status">Status</h2>
       <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
     </div>
+    <!-- OTA panel. Hidden until /api/ota/status reports the printer in
+         P-Lite mode -- the slider's physical position is the auth gate
+         (see doc/OTA.md). Renders a file picker, upload progress, and a
+         reboot countdown. -->
+    <div class="panel" id="ota-panel" hidden>
+      <h2 data-i18n="panel.ota">Firmware update</h2>
+      <p class="muted" data-i18n="ota.help">P-Lite mode detected. Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.</p>
+      <div class="row">
+        <input id="ota-file" type="file" accept=".bin,application/octet-stream">
+        <button id="ota-upload" class="secondary" type="button" disabled data-i18n="btn.ota.upload">install</button>
+      </div>
+      <div id="ota-progress" class="muted" hidden>
+        <div class="row"><progress id="ota-bar" value="0" max="100" style="flex:1"></progress><span id="ota-pct">0%</span></div>
+      </div>
+      <div id="ota-log" class="muted" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; min-height:1.4em"></div>
+    </div>
   </section>
   <section id="view-print">
    <div class="col-left">
@@ -818,6 +834,9 @@ const STRINGS = {
     "panel.label":             "Label",
     "panel.status":            "Status",
     "panel.about":             "About",
+    "panel.ota":               "Firmware update",
+    "ota.help":                "P-Lite mode detected. Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
+    "btn.ota.upload":          "install",
     /* about.intro is rendered AFTER the project link in the markup
      * (the link sits outside the data-i18n span so applyI18n's
      * textContent assignment can't wipe its <a> tag). The i18n
@@ -1101,6 +1120,21 @@ async function refreshStatus() {
     renderStatus(null);
     refreshPrintButtons();
   }
+  /* The OTA panel is auth-gated on the printer being in P-Lite mode
+   * (slider physically in EL). Show/hide it tied to the same poll so
+   * sliding the switch back closes the upload window immediately. */
+  syncOtaPanel();
+}
+
+/* Toggle the OTA panel visibility based on current transport state.
+ * Cheap (no network), called from every refreshStatus tick + when a
+ * file is picked. Auth gate is enforced server-side as well -- this
+ * is purely UI nudging. */
+function syncOtaPanel() {
+  const panel = document.getElementById("ota-panel");
+  if (!panel) return;
+  const open = printer && printer.transport === "plite";
+  panel.hidden = !open;
 }
 
 /* /api/info carries per-device identity (vid/pid/serial/product/
@@ -5085,6 +5119,82 @@ function wifiInit() {
   });
   wifiScan();
 }
+
+/* OTA upload. Server enforces P-Lite gate on every byte; this code
+ * only nudges the user (file picker disabled until a file is picked)
+ * and shows progress. fetch() doesn't expose upload progress, so we
+ * use XMLHttpRequest -- the one place in the SPA where it's worth it. */
+function otaLog(msg, ok) {
+  const el = document.getElementById("ota-log");
+  el.textContent = msg;
+  el.className   = (ok === undefined) ? "muted" : (ok ? "kv-ok" : "kv-err");
+}
+
+function otaUpload() {
+  const file = document.getElementById("ota-file").files[0];
+  if (!file) return;
+  const btn  = document.getElementById("ota-upload");
+  const prog = document.getElementById("ota-progress");
+  const bar  = document.getElementById("ota-bar");
+  const pct  = document.getElementById("ota-pct");
+  btn.disabled = true;
+  prog.hidden  = false;
+  otaLog(`uploading ${file.name} (${file.size.toLocaleString()} bytes)…`);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", apiURL("/api/ota"));
+  xhr.setRequestHeader("Content-Type", "application/octet-stream");
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const p = Math.round(100 * e.loaded / e.total);
+    bar.value = p; pct.textContent = `${p}%`;
+  };
+  xhr.onload = () => {
+    let j = null;
+    try { j = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status >= 200 && xhr.status < 300 && j && j.ok) {
+      otaLog(`installed v${j.version} into ${j.slot} - rebooting in ${j.reboot_in_ms}ms`, true);
+      /* Wait a beat past the device's own reboot delay, then start
+       * polling /api/status. Once a 200 comes back, full reload. */
+      setTimeout(otaWaitForReboot, (j.reboot_in_ms || 2000) + 1500);
+    } else {
+      const err = (j && j.error) || `HTTP ${xhr.status}`;
+      otaLog(`failed: ${err}`, false);
+      btn.disabled = false;
+    }
+  };
+  xhr.onerror = () => {
+    otaLog("network error during upload", false);
+    btn.disabled = false;
+  };
+  xhr.send(file);
+}
+
+async function otaWaitForReboot() {
+  otaLog("waiting for device to come back…");
+  const started = Date.now();
+  while (Date.now() - started < 60000) {
+    try {
+      const r = await fetch(apiURL("/api/status"), { cache: "no-store" });
+      if (r.ok || r.status === 503) {
+        otaLog("device is back - reloading SPA", true);
+        setTimeout(() => location.reload(), 800);
+        return;
+      }
+    } catch { /* still rebooting */ }
+    await new Promise(res => setTimeout(res, 1500));
+  }
+  otaLog("device did not come back within 60 s - check serial / power-cycle", false);
+}
+
+function otaInit() {
+  const file = document.getElementById("ota-file");
+  const btn  = document.getElementById("ota-upload");
+  if (!file || !btn) return;
+  file.addEventListener("change", () => { btn.disabled = !file.files[0]; });
+  btn.addEventListener("click", otaUpload);
+}
+otaInit();
 
 /* boot */
 

@@ -72,6 +72,7 @@ list and cabling: **[doc/HARDWARE.md](doc/HARDWARE.md)**.
 ## Documentation
 
 - **[Install](doc/INSTALL.md)** -- flashing, Wi-Fi onboarding, status LED, BOOT-button reset
+- **[OTA](doc/OTA.md)** -- over-the-air updates (gated on the printer's P-Lite slider)
 - **[Usage](doc/USAGE.md)** -- using the SPA, CSV templating, P-Lite handling
 - **[Hardware](doc/HARDWARE.md)** -- devkit notes, cabling, board variants
 - **[Development](doc/DEVELOPMENT.md)** -- mock server, SPA dev tricks, CLI, host tests, architecture

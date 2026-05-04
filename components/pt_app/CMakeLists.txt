@@ -69,6 +69,7 @@ idf_component_register(
         esp_http_server
         esp_app_format
         esp_hw_support
+        app_update
         nvs_flash
         mdns
         esp_driver_gpio

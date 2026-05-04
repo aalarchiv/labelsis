@@ -245,6 +245,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "networks": SCAN_NETWORKS})
             return
 
+        if path == "/api/ota/status":
+            # Mirror the firmware: gate is open iff transport == plite.
+            # Set STATE["transport"] = "plite" at the top of this file
+            # to exercise the OTA UI without a real printer.
+            open_ = STATE["transport"] == "plite"
+            self._send_json(200, {
+                "available":    open_,
+                "reason":       "P-Lite mode" if open_
+                                else "printer must be in P-Lite mode (slide switch to EL)",
+                "running_slot": "ota_0",
+                "next_slot":    "ota_1",
+                "app": {"name": "labelsis", "version": STATE["fw_version"]},
+            })
+            return
+
         self.send_error(404, "not found")
 
     def do_POST(self):
@@ -292,6 +307,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.log_extra(f"ssid={data.get('ssid')!r} (real device would reboot)")
             self._send_json(200, {"ok": True})
+            return
+
+        if path == "/api/ota":
+            if STATE["transport"] != "plite":
+                self._send_json(403, {"ok": False, "error": "not_in_plite"})
+                return
+            # Pretend to "write" the body and reboot. The mock has no
+            # real flash; this is just the round-trip the SPA expects.
+            self.log_extra(f"ota: would write {length} bytes to inactive slot, then reboot")
+            self._send_json(200, {
+                "ok":           True,
+                "slot":         "ota_1",
+                "version":      STATE["fw_version"],
+                "reboot_in_ms": 2000,
+            })
             return
 
         self.send_error(404, "not found")

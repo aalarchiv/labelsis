@@ -945,6 +945,181 @@ static esp_err_t api_icon_json(httpd_req_t *req)
         icon_json_gz_start, icon_json_gz_end - icon_json_gz_start);
 }
 
+/* ----- OTA, gated on physical "printer in P-Lite mode" ----- *
+ *
+ * Auth model: the printer's physical slider in EL position is the
+ * gate. Anyone uploading a new firmware must have walked up to the
+ * printer and slid the switch -- the same threat model as the BOOT-
+ * button Wi-Fi reset, applied to a more discoverable user-facing
+ * control. P-Lite already coincides with "printer cannot print", so
+ * the OTA window is naturally a maintenance window.
+ *
+ * The window stays open as long as the slider stays in EL -- we
+ * trust the user to slide back. If P-Lite ends mid-upload, we abort
+ * the in-flight write so a half-baked image never becomes the boot
+ * target. esp_ota_end() validates SHA256 from the image header; we
+ * additionally verify the new image's project_name is "labelsis"
+ * before flipping the boot partition, so a different ESP32 binary
+ * uploaded by accident bricks nothing. Bootloader rollback (enabled
+ * via CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE) catches a new image
+ * that crashes before it can call esp_ota_mark_app_valid_*. */
+
+#include "esp_ota_ops.h"
+
+static bool ota_gate_open(void)
+{
+    return s_transport_name && strcmp(s_transport_name, "plite") == 0;
+}
+
+static esp_err_t api_ota_status(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    const esp_app_desc_t  *app  = esp_app_get_description();
+    const esp_partition_t *run  = esp_ota_get_running_partition();
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    bool open = ota_gate_open();
+    char body[256];
+    int n = snprintf(body, sizeof body,
+        "{\"available\":%s,\"reason\":\"%s\","
+        "\"running_slot\":\"%s\",\"next_slot\":\"%s\","
+        "\"app\":{\"name\":\"%s\",\"version\":\"%s\"}}",
+        open ? "true" : "false",
+        open ? "P-Lite mode" : "printer must be in P-Lite mode (slide switch to EL)",
+        run  ? run->label  : "?",
+        next ? next->label : "?",
+        app ? app->project_name : "",
+        app ? app->version      : "");
+    return httpd_resp_send(req, body, n);
+}
+
+static esp_err_t ota_fail(httpd_req_t *req, esp_ota_handle_t h,
+                          const char *status, const char *reason)
+{
+    if (h) esp_ota_abort(h);
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, status);
+    char body[128];
+    int n = snprintf(body, sizeof body,
+                     "{\"ok\":false,\"error\":\"%s\"}", reason);
+    return httpd_resp_send(req, body, n);
+}
+
+static esp_err_t api_ota_upload(httpd_req_t *req)
+{
+    if (!ota_gate_open()) {
+        return ota_fail(req, 0, "403 Forbidden", "not_in_plite");
+    }
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    if (!next) {
+        return ota_fail(req, 0, "500 Internal Server Error", "no_ota_slot");
+    }
+    ESP_LOGI(TAG, "ota: starting upload to slot %s (%lu bytes incoming)",
+             next->label, (unsigned long)req->content_len);
+
+    esp_ota_handle_t ota = 0;
+    esp_err_t err = esp_ota_begin(next, OTA_SIZE_UNKNOWN, &ota);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota: esp_ota_begin failed: %s", esp_err_to_name(err));
+        return ota_fail(req, 0, "500 Internal Server Error", "ota_begin");
+    }
+
+    /* Stream the request body straight into flash. 1 KB chunks keep
+     * the stack budget and the per-write erase-cycle overhead modest;
+     * the limiting factor is flash write throughput, not RAM. */
+    char buf[1024];
+    int  remaining = req->content_len;
+    int  written   = 0;
+    while (remaining > 0) {
+        if (!ota_gate_open()) {
+            ESP_LOGW(TAG, "ota: P-Lite ended mid-upload after %d bytes -- aborting", written);
+            return ota_fail(req, ota, "403 Forbidden", "plite_ended");
+        }
+        int want = remaining < (int)sizeof buf ? remaining : (int)sizeof buf;
+        int got  = httpd_req_recv(req, buf, want);
+        if (got <= 0) {
+            ESP_LOGE(TAG, "ota: recv failed at %d bytes (got=%d)", written, got);
+            return ota_fail(req, ota, "400 Bad Request", "recv_failed");
+        }
+        err = esp_ota_write(ota, buf, got);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ota: esp_ota_write failed at %d bytes: %s",
+                     written, esp_err_to_name(err));
+            return ota_fail(req, ota, "500 Internal Server Error", "ota_write");
+        }
+        written   += got;
+        remaining -= got;
+    }
+
+    err = esp_ota_end(ota);
+    if (err != ESP_OK) {
+        /* esp_ota_end validates the SHA-in-header against the bytes we
+         * wrote. ESP_ERR_OTA_VALIDATE_FAILED here means the image is
+         * corrupt or truncated; never accept it. */
+        ESP_LOGE(TAG, "ota: esp_ota_end failed: %s", esp_err_to_name(err));
+        return ota_fail(req, 0, "400 Bad Request",
+                        err == ESP_ERR_OTA_VALIDATE_FAILED
+                            ? "image_validate" : "ota_end");
+    }
+
+    /* After SHA passes, sanity-check that this is actually a LabelSis
+     * binary -- otherwise a stray ESP32 firmware uploaded to /api/ota
+     * could brick the device on next boot. */
+    esp_app_desc_t new_desc;
+    if (esp_ota_get_partition_description(next, &new_desc) == ESP_OK
+        && strcmp(new_desc.project_name, "labelsis") != 0) {
+        ESP_LOGE(TAG, "ota: project_name mismatch \"%s\" != \"labelsis\"",
+                 new_desc.project_name);
+        /* Image is on disk but never made boot target; next OTA will
+         * overwrite the slot. */
+        return ota_fail(req, 0, "400 Bad Request", "wrong_project");
+    }
+
+    err = esp_ota_set_boot_partition(next);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota: set_boot failed: %s", esp_err_to_name(err));
+        return ota_fail(req, 0, "500 Internal Server Error", "set_boot");
+    }
+
+    ESP_LOGI(TAG, "ota: %d bytes accepted, version=\"%s\", booting from %s",
+             written, new_desc.version, next->label);
+
+    /* Send the response BEFORE rebooting so the SPA gets confirmation
+     * (and can show its countdown) instead of a connection-reset. */
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    char body[160];
+    int n = snprintf(body, sizeof body,
+        "{\"ok\":true,\"slot\":\"%s\",\"version\":\"%s\",\"reboot_in_ms\":2000}",
+        next->label, new_desc.version);
+    httpd_resp_send(req, body, n);
+
+    /* Defer the reboot to a small delay so the response actually
+     * lands. esp_restart returns void and triggers SoC reset. */
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    esp_restart();
+    return ESP_OK;   /* unreachable */
+}
+
+/* Called once Wi-Fi STA has an IP AND the HTTP server is up. If the
+ * currently-running app is in PENDING_VERIFY (just OTA'd into), tell
+ * the bootloader the new image is good. Otherwise the bootloader
+ * rolls back to the previous slot on the next reset. */
+static void ota_confirm_running_image(void)
+{
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    if (!run) return;
+    esp_ota_img_states_t st;
+    if (esp_ota_get_state_partition(run, &st) != ESP_OK) return;
+    if (st == ESP_OTA_IMG_PENDING_VERIFY) {
+        if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+            ESP_LOGI(TAG, "ota: confirmed running image (slot %s) -- rollback cancelled",
+                     run->label);
+        }
+    }
+}
+
 static httpd_handle_t s_http;
 
 /* Forward decls: api_scan and api_setup are defined further down with
@@ -961,9 +1136,10 @@ static esp_err_t http_up(uint16_t port)
     /* Wildcard matching enables the OPTIONS catch-all below; specific
      * routes still match exactly. */
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    /* Default is 8; we register 9 (status, info, print, cut, feed,
-     * scan, setup, index, OPTIONS catch-all) and want headroom. */
-    cfg.max_uri_handlers = 16;
+    /* Default is 8; we register 14 routes (status, info, print, cut,
+     * feed, scan, setup, index, fonts*2, favicon, ota*2, OPTIONS
+     * catch-all) and want headroom. */
+    cfg.max_uri_handlers = 20;
 
     if (httpd_start(&s_http, &cfg) != ESP_OK) return ESP_FAIL;
 
@@ -1011,6 +1187,14 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/favicon.ico", .method = HTTP_GET,
         .handler = api_favicon, .user_ctx = NULL,
     };
+    static const httpd_uri_t ota_status_route = {
+        .uri = "/api/ota/status", .method = HTTP_GET,
+        .handler = api_ota_status, .user_ctx = NULL,
+    };
+    static const httpd_uri_t ota_upload_route = {
+        .uri = "/api/ota", .method = HTTP_POST,
+        .handler = api_ota_upload, .user_ctx = NULL,
+    };
     static const httpd_uri_t cors_route = {
         .uri = "/*", .method = HTTP_OPTIONS,
         .handler = cors_preflight, .user_ctx = NULL,
@@ -1026,7 +1210,13 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &icon_woff2_route);
     httpd_register_uri_handler(s_http, &icon_json_route);
     httpd_register_uri_handler(s_http, &favicon_route);
+    httpd_register_uri_handler(s_http, &ota_status_route);
+    httpd_register_uri_handler(s_http, &ota_upload_route);
     httpd_register_uri_handler(s_http, &cors_route);
+    /* HTTP is serving requests now -- if we just OTA'd into this
+     * image, that's enough proof of life to cancel the rollback
+     * watchdog. (No-op on factory boots.) */
+    ota_confirm_running_image();
     return ESP_OK;
 }
 

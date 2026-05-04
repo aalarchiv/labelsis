@@ -1,7 +1,10 @@
-# ESP32-S3-DevKitC-1-N16R8 partition table -- 16 MB flash.
-# Single big factory app; no spiffs / second-nvs partition because no
-# code uses them (all SPA assets live in .rodata via EMBED_FILES).
-# Name,    Type, SubType,  Offset,   Size,
-nvs,       data, nvs,      0x9000,   0x6000,
-phy_init,  data, phy,      0xf000,   0x1000,
-factory,   app,  factory,  0x10000,  0xFF0000,
+# ESP32-S3-DevKitC-1-N16R8 partition table -- 16 MB flash, dual-slot OTA.
+# Two equal app slots (~7.94 MB each); P-Lite-gated OTA writes the
+# inactive slot then sets it as boot target. App partitions need 64 KB
+# alignment on S2/S3 (flash MMU pages); ota_0 starts at 0x20000.
+# Name,    Type, SubType,  Offset,    Size,
+nvs,       data, nvs,      0x9000,    0x6000,
+phy_init,  data, phy,      0xf000,    0x1000,
+otadata,   data, ota,      0x10000,   0x2000,
+ota_0,     app,  ota_0,    0x20000,   0x7F0000,
+ota_1,     app,  ota_1,    0x810000,  0x7F0000,
