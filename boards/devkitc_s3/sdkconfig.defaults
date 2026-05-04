@@ -1,0 +1,19 @@
+# ESP32-S3-DevKitC-1-N16R8 board profile.
+# 16 MB QIO flash + 8 MB octal PSRAM, WS2812 RGB on GPIO 48.
+# Pair with: idf.py -D BOARD=devkitc_s3 set-target esp32s3
+
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/devkitc_s3/partitions.csv"
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# Bluetooth controller + NimBLE host compiled in but unused -- leaves
+# the door open for the future BLE bridge source without a kernel
+# reshuffle. The S2 doesn't have a BT radio so its profile omits this.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y

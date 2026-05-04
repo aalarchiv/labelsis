@@ -4,6 +4,12 @@
 
 #include "pt_app.h"
 
+/* Per-board pin/LED defaults. boards/<name>/board.h defines BOARD_NAME,
+ * BOARD_LED_{TYPE,GPIO,ACTIVE_LOW}, BOARD_RESET_GPIO. The top-level
+ * CMakeLists.txt picks <name> from -D BOARD=... and adds boards/<name>/
+ * to the include path; see boards/README.md for adding a new one. */
+#include "board.h"
+
 /* Real Wi-Fi creds, gitignored -- copy main/wifi_credentials.example.h
  * to main/wifi_credentials.h and fill in your SSID + password. Falls
  * back to placeholder values when absent so CI / sandbox builds still
@@ -19,7 +25,7 @@ static const char *TAG = "labelsis";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "LabelSis print server booting");
+    ESP_LOGI(TAG, "LabelSis print server booting on %s", BOARD_NAME);
 
     pt_app_config_t cfg = {
         .wifi_ssid              = WIFI_SSID,
@@ -29,19 +35,16 @@ void app_main(void)
                                              falls back to mock after the
                                              usb_connect_timeout below */
         .usb_connect_timeout_ms = 5000,
-        .reset_gpio_num         = 0,      /* BOOT button on most devkits;
-                                             5 s hold wipes Wi-Fi creds */
-        /* Status LED. Defaults to the WS2812 RGB pixel on the
-         * ESP32-S3-DevKitC-1 at GPIO 48. For boards with a plain LED
-         * on a regular GPIO use e.g.
-         *     .led = { .type = PT_LED_TYPE_GPIO, .gpio = 2,
-         *              .active_low = false }
-         * Set type to PT_LED_TYPE_NONE to disable the LED entirely.
-         * Cadence/colour table lives in components/pt_app/src/pt_led.c. */
+        .reset_gpio_num         = BOARD_RESET_GPIO,
+        /* Status LED -- board profile picks the type/pin. To disable
+         * entirely on a board that has no usable LED, set
+         *   #define BOARD_LED_TYPE PT_LED_TYPE_NONE
+         * in boards/<name>/board.h. Cadence/colour table lives in
+         * components/pt_app/src/pt_led.c. */
         .led = {
-            .type       = PT_LED_TYPE_RGB,
-            .gpio       = 48,
-            .active_low = false,
+            .type       = BOARD_LED_TYPE,
+            .gpio       = BOARD_LED_GPIO,
+            .active_low = BOARD_LED_ACTIVE_LOW,
         },
     };
     pt_app_run(&cfg);

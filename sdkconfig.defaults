@@ -1,15 +1,7 @@
-# Target-agnostic defaults. Per-SoC settings live in
-# sdkconfig.defaults.esp32s3 and sdkconfig.defaults.esp32s2 - esp-idf
-# auto-merges the matching one based on the current target.
-#
-# To switch targets:    idf.py set-target esp32s3   (or esp32s2)
-# Then rebuild:         idf.py build
-
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
-CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
-
-CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# Truly target-agnostic defaults. Per-board overlays in
+# boards/<name>/sdkconfig.defaults set flash size, partition table,
+# PSRAM, and Bluetooth toggles. Switch boards via:
+#     idf.py -D BOARD=<name> set-target <s2|s3>
 
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y

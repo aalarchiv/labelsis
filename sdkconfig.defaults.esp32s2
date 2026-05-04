@@ -1,3 +1,0 @@
-# ESP32-S2 specific overlay.
-# S2 has the same USB-OTG controller as S3 but NO Bluetooth radio, so
-# there's no NimBLE here. Otherwise builds the same firmware.

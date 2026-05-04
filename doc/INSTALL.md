@@ -17,8 +17,8 @@ Run from a machine with the devkit's UART USB-C plugged in.
 cp main/wifi_credentials.example.h main/wifi_credentials.h
 $EDITOR main/wifi_credentials.h            # set WIFI_SSID / WIFI_PASSWORD
 
-# 3. Target + build + flash + monitor
-idf.py set-target esp32s3
+# 3. Pick board profile + target + build + flash + monitor
+idf.py -D BOARD=devkitc_s3 set-target esp32s3
 idf.py build
 idf.py flash monitor                       # -p /dev/ttyUSB0 if auto-detect picks wrong
                                            # Ctrl+] to exit monitor

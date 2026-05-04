@@ -1,0 +1,13 @@
+# Wemos LOLIN S2 Mini board profile.
+# ESP32-S2FH4: 4 MB embedded flash, no PSRAM, no BT radio,
+# plain LED on GPIO 15.
+# Pair with: idf.py -D BOARD=lolin_s2_mini set-target esp32s2
+
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/lolin_s2_mini/partitions.csv"
+
+# S2FH4 has no PSRAM and the S2 has no BT radio at all -- both
+# Kconfig paths stay at their default "off" so nothing to set here.

@@ -55,9 +55,12 @@ print mode (slider in **E**, not **EL** / P-Lite -- see
 ```sh
 git clone <repo> labelsis && cd labelsis
 . ~/esp/esp-idf/export.sh
-idf.py set-target esp32s3
+idf.py -D BOARD=devkitc_s3 set-target esp32s3
 idf.py flash monitor
 ```
+
+Other boards: pass `-D BOARD=<name>` (with the matching `set-target`).
+Shipped profiles + how to add your own: [boards/README.md](boards/README.md).
 
 Connect a phone or laptop to the **`labelsis-setup`** Wi-Fi the device
 brings up on first boot; the captive-portal page leads you through
