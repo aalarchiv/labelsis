@@ -106,8 +106,12 @@ build_one() {
     idf.py -B "$builddir" -D SDKCONFIG="$sdkconfig" build
 
     # Merged single-image bin for USB flashing convenience.
+    # NOTE: idf.py merge-bin runs esptool from the build dir as cwd,
+    # so a relative -o path resolves there, not at the project root.
+    # Pass an absolute path or merge-bin writes the file at
+    # $builddir/$builddir/... and then can't find it.
     idf.py -B "$builddir" -D SDKCONFIG="$sdkconfig" \
-           merge-bin -o "$builddir/labelsis-merged.bin"
+           merge-bin -o "$repo_root/$builddir/labelsis-merged.bin"
 
     # Stage artifacts.
     local prefix="labelsis-$board-$version"
