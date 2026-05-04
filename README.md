@@ -1,4 +1,4 @@
-# LabelSis
+# :label: LabelSis
 
 Network print server for the **Brother PT-P700 family** of label
 printers, running on **ESP32-S3** with a self-hosted web UI for
@@ -14,6 +14,15 @@ way to put a USB-tethered PT-P700 on the LAN and print to it from any
 browser. **LabelSis** fills that gap: a single ESP32-S3 turns the
 printer into a stand-alone network device with no driver install, no
 app, no cloud account, no telemetry.
+
+## How
+
+  * get an ESP32-S3 (or ESP32-S2)
+  * upload firmware
+  * connect ESP via USB to the P-touch label printer
+  * add power
+  * start designing in web ui
+  * print
 
 ## Highlights
 
@@ -72,6 +81,10 @@ list and cabling: **[doc/HARDWARE.md](doc/HARDWARE.md)**.
 printing on an ESP32-S3 devkit. PT-H500 / PT-E500 / PT-P750W are
 protocol-family matches per the Brother SDM but untested on hardware.
 ESP32-S2 builds clean, untested.
+
+## TODO
+
+ * attach the ESP board neatly to the PT700 printer (currently, it is a mess of wires)
 
 ## Security
 
