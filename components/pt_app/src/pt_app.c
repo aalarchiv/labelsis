@@ -13,6 +13,7 @@
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
+#include "esp_crc.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -873,27 +874,40 @@ static esp_err_t send_text_asset(httpd_req_t *req,
     return httpd_resp_send(req, (const char *)plain, plain_len);
 }
 
+/* CRC32 of the gzipped index.html blob, formatted as a quoted ETag.
+ * Computed once on first request and cached -- the embedded blob
+ * never changes within a single firmware image, so neither does its
+ * CRC. CRC32 (vs git describe) means any rebuild that produced
+ * different bundled bytes invalidates client caches automatically,
+ * even when the working tree was already --dirty so PROJECT_VER did
+ * not move. Collision risk for one resource is ~1 in 4 billion. */
+static const char *index_etag(void)
+{
+    static char etag[12];   /* "\"" + 8 hex + "\"" + NUL */
+    if (etag[0]) return etag;
+    uint32_t crc = esp_crc32_le(0, index_html_gz_start,
+                                index_html_gz_end - index_html_gz_start);
+    snprintf(etag, sizeof etag, "\"%08lx\"", (unsigned long)crc);
+    return etag;
+}
+
 static esp_err_t api_index(httpd_req_t *req)
 {
     /* Cache for 5 min so reloads within a session are instant; the
-     * ETag (firmware version) lets the browser revalidate cheaply
-     * across longer gaps and forces a re-download after an OTA. */
+     * ETag (CRC32 of the bundled SPA) lets the browser revalidate
+     * cheaply across longer gaps and -- crucially -- changes any
+     * time the SPA bytes change, including dirty rebuilds where
+     * the firmware version string did not move. */
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=300");
-    const esp_app_desc_t *app = esp_app_get_description();
-    if (app && app->version[0]) {
-        char etag[40];
-        int n = snprintf(etag, sizeof etag, "\"%s\"", app->version);
-        if (n > 0 && n < (int)sizeof etag) {
-            httpd_resp_set_hdr(req, "ETag", etag);
-            char inm[40];
-            if (httpd_req_get_hdr_value_str(req, "If-None-Match",
-                                            inm, sizeof inm) == ESP_OK
-                && strcmp(inm, etag) == 0) {
-                cors_headers(req);
-                httpd_resp_set_status(req, "304 Not Modified");
-                return httpd_resp_send(req, NULL, 0);
-            }
-        }
+    const char *etag = index_etag();
+    httpd_resp_set_hdr(req, "ETag", etag);
+    char inm[16];
+    if (httpd_req_get_hdr_value_str(req, "If-None-Match",
+                                    inm, sizeof inm) == ESP_OK
+        && strcmp(inm, etag) == 0) {
+        cors_headers(req);
+        httpd_resp_set_status(req, "304 Not Modified");
+        return httpd_resp_send(req, NULL, 0);
     }
     return send_text_asset(req, "text/html",
         index_html_start,    index_html_end    - index_html_start,

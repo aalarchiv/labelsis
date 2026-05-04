@@ -224,8 +224,11 @@ canvas { display:block; image-rendering:pixelated; background:#fff; }
  * line indented under it in muted colour. */
 .about-licenses     { margin:.5rem 0 0; font-size:.85rem; }
 .about-licenses dt  { font-weight:600; }
-.about-licenses dt a, .about-licenses dt a:visited { color:var(--accent); text-decoration:none; }
-.about-licenses dt a:hover { text-decoration:underline; }
+.about-licenses dt a, .about-licenses dt a:visited,
+.about-link, .about-link:visited
+                    { color:var(--accent); text-decoration:none; font-weight:600; }
+.about-licenses dt a:hover, .about-link:hover
+                    { text-decoration:underline; }
 .about-licenses dd  { margin:0 0 .5rem 1rem; color:var(--muted); }
 .color-chip   { display:inline-block; width:.85em; height:.85em; vertical-align:middle; border:1px solid var(--line); border-radius:2px; margin-right:.25em; }
 .kv-ok  { color:var(--ok); }
@@ -361,7 +364,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   <section id="view-status" hidden>
     <div class="panel">
       <h2 data-i18n="panel.about">About</h2>
-      <p class="muted"><a href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener">LabelSis</a> <span data-i18n="about.intro">- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</span></p>
+      <p class="muted"><a class="about-link" href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener">LabelSis</a> <span data-i18n="about.intro">- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</span></p>
       <p class="muted"><span data-i18n="about.firmware">Firmware</span>: <span id="about-fw-version">…</span></p>
       <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
       <dl class="about-licenses">
