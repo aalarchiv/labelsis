@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Configure, build, and test the host-side library and unit tests.
-# Runs without esp-idf — pure host toolchain.
+# Runs without esp-idf - pure host toolchain.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -1,5 +1,5 @@
 # Target-agnostic defaults. Per-SoC settings live in
-# sdkconfig.defaults.esp32s3 and sdkconfig.defaults.esp32s2 — esp-idf
+# sdkconfig.defaults.esp32s3 and sdkconfig.defaults.esp32s2 - esp-idf
 # auto-merges the matching one based on the current target.
 #
 # To switch targets:    idf.py set-target esp32s3   (or esp32s2)

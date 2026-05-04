@@ -19,7 +19,7 @@ int main(void)
 {
     pt_transport_libusb_t *u = pt_transport_libusb_open();
     if (!u) {
-        fprintf(stderr, "no PT-* device — skipping libusb smoke test\n");
+        fprintf(stderr, "no PT-* device - skipping libusb smoke test\n");
         return EXIT_SKIP;
     }
 

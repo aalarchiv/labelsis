@@ -107,7 +107,7 @@ async function save() {
     });
     const j = await r.json();
     if (j.ok) {
-      log("saved — rebooting. reconnect to your Wi-Fi and try http://labelsis.local/", true);
+      log("saved - rebooting. reconnect to your Wi-Fi and try http://labelsis.local/", true);
     } else {
       log(`error: ${j.error}`, false);
       btn.disabled = false;

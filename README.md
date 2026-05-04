@@ -4,7 +4,7 @@
 > printers, running on **ESP32-S3** with a self-hosted web UI for
 > label design.
 >
-> *(LabelSis = "label this" said to your **sis**ter — Brother's other
+> *(LabelSis = "label this" said to your **sis**ter - Brother's other
 > sibling.)*
 
 ![Screenshot of the LabelSis label designer](doc/Screenshot.png)

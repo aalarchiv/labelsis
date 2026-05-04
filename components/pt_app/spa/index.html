@@ -286,7 +286,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
  * either set. Both cues are subtle but readable so the user
  * spots forgotten / invalid layers in a busy list. */
 #el-list li.empty   { opacity:.55; }
-#el-list li.empty .summary::after { content:" — empty"; color:var(--muted); font-style:italic; }
+#el-list li.empty .summary::after { content:" - empty"; color:var(--muted); font-style:italic; }
 #el-list li.err     { border-color:var(--err); background:rgba(248,81,73,.06); }
 #el-list li.err .summary { color:var(--err); }
 /* Pure-CSS 2x3 dot grip handle. Drawn via a tiled radial-gradient
@@ -361,20 +361,20 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   <section id="view-status" hidden>
     <div class="panel">
       <h2 data-i18n="panel.about">About</h2>
-      <p class="muted" data-i18n="about.intro">LabelSis — network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</p>
+      <p class="muted" data-i18n="about.intro"><a href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener">LabelSis</a> - network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</p>
       <p class="muted"><span data-i18n="about.firmware">Firmware</span>: <span id="about-fw-version">…</span></p>
       <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
       <dl class="about-licenses">
         <dt><a href="https://github.com/espressif/esp-idf" target="_blank" rel="noopener">ESP-IDF</a></dt>
-        <dd>Apache-2.0 — © Espressif Systems (Shanghai) CO LTD</dd>
+        <dd>Apache-2.0 - © Espressif Systems (Shanghai) CO LTD</dd>
         <dt><a href="https://components.espressif.com/components/espressif/mdns" target="_blank" rel="noopener">espressif/mdns</a></dt>
-        <dd>Apache-2.0 — © Espressif Systems (Shanghai) CO LTD</dd>
+        <dd>Apache-2.0 - © Espressif Systems (Shanghai) CO LTD</dd>
         <dt><a href="https://github.com/marella/material-icons" target="_blank" rel="noopener">Material Icons (filled)</a></dt>
-        <dd>Apache-2.0 — © Google</dd>
+        <dd>Apache-2.0 - © Google</dd>
         <dt><a href="https://github.com/davidshimjs/qrcodejs" target="_blank" rel="noopener">qrcodejs</a></dt>
-        <dd>MIT — © 2012 davidshimjs</dd>
+        <dd>MIT - © 2012 davidshimjs</dd>
         <dt><a href="https://github.com/MultiMote/niimblue" target="_blank" rel="noopener">niimblue</a></dt>
-        <dd>MIT — © 2024 MultiMote (canvas/barcode/dither algorithms ported)</dd>
+        <dd>MIT - © 2024 MultiMote (canvas/barcode/dither algorithms ported)</dd>
       </dl>
     </div>
     <div class="panel">
@@ -388,7 +388,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <div class="panel-header">
         <h2 data-i18n="panel.label">Label</h2>
         <select id="lib-select" data-i18n-attr="title:lib.option.placeholder" title="load saved label">
-          <option value="" data-i18n="lib.option.placeholder">— load saved label —</option>
+          <option value="" data-i18n="lib.option.placeholder">- load saved label -</option>
         </select>
         <span class="spacer"></span>
         <span class="more-row inline-actions">
@@ -461,7 +461,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <div id="props-text" hidden>
         <div class="row">
           <label data-i18n="field.text">text</label>
-          <input id="text-content" type="text" placeholder='Type text — use {column} for CSV substitution'>
+          <input id="text-content" type="text" placeholder='Type text - use {column} for CSV substitution'>
         </div>
         <div class="row">
           <label data-i18n="field.font">font</label>
@@ -613,7 +613,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
       <div id="props-transform" hidden style="margin-top:.75rem; padding-top:.75rem; border-top:1px solid var(--line);">
         <div class="row">
-          <label data-i18n="field.size" title="visible bounding box in printer dots (180 dpi) — width × height">size dots</label>
+          <label data-i18n="field.size" title="visible bounding box in printer dots (180 dpi) - width × height">size dots</label>
           <input id="el-w" type="number" min="1" step="1" class="compact-input" title="visible width (dots, 180 dpi)">
           <button id="aspect-lock" class="secondary" type="button" aria-pressed="true" aria-label="lock aspect ratio" title="lock aspect ratio: when on, w and h scale together; when off, mid-edge handles stretch one axis">🔒</button>
           <input id="el-h" type="number" min="1" step="1" class="compact-input" title="visible height (dots, 180 dpi)">
@@ -646,7 +646,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
    <div class="col-right">
     <div class="panel" id="layers-panel" hidden>
-      <h2><span data-i18n="panel.layers">Layers</span> <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;" data-i18n="panel.layers.hint">— top of canvas first; drag to reorder</span></h2>
+      <h2><span data-i18n="panel.layers">Layers</span> <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;" data-i18n="panel.layers.hint">- top of canvas first; drag to reorder</span></h2>
       <ul id="el-list" style="list-style:none; padding:0; margin:0;"></ul>
     </div>
 
@@ -684,7 +684,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       </div>
       <div class="row" style="margin-top:.5rem;">
         <button id="tpl-prev" class="secondary" type="button">prev</button>
-        <span class="muted" id="tpl-rowinfo">—</span>
+        <span class="muted" id="tpl-rowinfo">-</span>
         <button id="tpl-next" class="secondary" type="button">next</button>
         <span class="spacer"></span>
         <button id="csv-import" class="secondary" type="button">import…</button>
@@ -721,7 +721,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <input id="icon-search" type="search" placeholder="search…" data-i18n-attr="placeholder:dialog.icon.search" autocomplete="off">
       <div id="icon-grid" class="grid" role="listbox" aria-label="icon grid"></div>
       <div class="footer">
-        <span class="count" id="icon-count">—</span>
+        <span class="count" id="icon-count">-</span>
         <span class="spacer" style="flex:1"></span>
         <button class="secondary" type="button" id="icon-cancel" data-i18n="btn.cancel">cancel</button>
       </div>
@@ -815,7 +815,7 @@ const STRINGS = {
     "panel.label":             "Label",
     "panel.status":            "Status",
     "panel.about":             "About",
-    "about.intro":             "LabelSis — network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.",
+    "about.intro":             "LabelSis - network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.",
     "about.licenses":          "Third-party components bundled with this firmware:",
     "panel.wifi":              "Wi-Fi",
     "panel.wifi.help":         "Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the labelsis-setup AP for re-onboarding.",
@@ -836,7 +836,7 @@ const STRINGS = {
     "btn.clear":               "clear",
     "panel.element":           "Element",
     "panel.layers":            "Layers",
-    "panel.layers.hint":       "— top of canvas first; drag to reorder",
+    "panel.layers.hint":       "- top of canvas first; drag to reorder",
     "panel.tpl":               "Template & CSV data",
     "panel.props.empty":       "Click an element on the canvas to edit it, or hit + text to add one.",
     "props.title.text":        "Text",
@@ -861,7 +861,7 @@ const STRINGS = {
     "field.fill.dots":         "dots ·",
     "field.fill.dense_dots":   "dense dots ⠿",
     "field.fill.none":         "outline only",
-    "lib.option.placeholder":  "— load saved label —",
+    "lib.option.placeholder":  "- load saved label -",
     "lib.btn.save":            "save as…",
     "lib.btn.update":          "update",
     "lib.btn.delete":          "delete",
@@ -906,10 +906,10 @@ const STRINGS = {
     "field.flip.h":            "↔ horizontal",
     "field.flip.v":            "↕ vertical",
     "field.blend":             "blend",
-    "field.blend.and":         "AND (intersect — ink only where both layers have ink)",
-    "field.blend.or":          "OR (stack, default — ink from either layer)",
-    "field.blend.xor":         "XOR (cancel — ink where exactly one layer has ink)",
-    "field.blend.not":         "NOT (subtract — punch this layer out of what's below)",
+    "field.blend.and":         "AND (intersect - ink only where both layers have ink)",
+    "field.blend.or":          "OR (stack, default - ink from either layer)",
+    "field.blend.xor":         "XOR (cancel - ink where exactly one layer has ink)",
+    "field.blend.not":         "NOT (subtract - punch this layer out of what's below)",
     "field.blend.hint":        "binary blend with the layers below",
     "field.algorithm":         "algorithm",
     "field.algorithm.atkinson":         "Atkinson",
@@ -930,7 +930,7 @@ const STRINGS = {
     "field.qr.module.hint":    "(dots per cell)",
     "msg.loading":             "loading…",
     "msg.printing":            "printing…",
-    "msg.print.done":          "done — {rows} rows",
+    "msg.print.done":          "done - {rows} rows",
     "msg.print.error":         "error: {error}",
   },
 };
@@ -1154,8 +1154,8 @@ function colorChip(name, fallback) {
 function transportLabel(tx) {
   if (tx === "usb_host") return ["real PT-* printer (USB)", "kv-ok"];
   if (tx === "mock")     return ["mock backend (no printer attached)", "kv-err"];
-  if (tx === "plite")    return ["P-Lite mode — slide switch to E or hold the PLite button 2 s", "kv-err"];
-  if (tx === "waiting")  return ["no printer attached — design works, print waits for hot-plug", "kv-err"];
+  if (tx === "plite")    return ["P-Lite mode - slide switch to E or hold the PLite button 2 s", "kv-err"];
+  if (tx === "waiting")  return ["no printer attached - design works, print waits for hot-plug", "kv-err"];
   if (tx === "libusb")   return ["libusb (host-side test transport)", "kv-ok"];
   return [tx || "?", "kv-err"];
 }
@@ -2399,7 +2399,7 @@ function redraw(forPrint = false) {
     ctx.font = "bold 11px sans-serif";
     ctx.textBaseline = "top";
     ctx.textAlign = "right";
-    ctx.fillText("⚠ label too wide — clipped", x - 4, y + 3);
+    ctx.fillText("⚠ label too wide - clipped", x - 4, y + 3);
     ctx.restore();
   }
 
@@ -2921,7 +2921,7 @@ function csvRender() {
     allBtn.textContent = `Print all ${total} labels`;
     allBtn.hidden = false;
   } else {
-    info.textContent = "—";
+    info.textContent = "-";
     allBtn.textContent = "Print all rows";
     allBtn.hidden = true;
   }
@@ -3174,7 +3174,7 @@ async function doPrintAll() {
         seq++;
       }
     }
-    log(`batch done — ${ok} printed${fail ? `, ${fail} failed` : ""}`, !fail);
+    log(`batch done - ${ok} printed${fail ? `, ${fail} failed` : ""}`, !fail);
   } catch (e) { /* already logged */ }
   finally {
     csvBatchCtx = null;
@@ -5011,7 +5011,7 @@ async function wifiSave() {
     });
     const j = await r.json();
     if (j.ok) {
-      wifiLog("saved — rebooting. Reload http://labelsis.local/ once it's back.", true);
+      wifiLog("saved - rebooting. Reload http://labelsis.local/ once it's back.", true);
     } else {
       wifiLog(`error: ${j.error}`, false);
       btn.disabled = false;

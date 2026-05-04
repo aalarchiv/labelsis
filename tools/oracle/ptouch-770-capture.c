@@ -1,5 +1,5 @@
 /*
- * ptouch-770-capture — derived from ptouch-770-write.c.
+ * ptouch-770-capture - derived from ptouch-770-write.c.
  *
  * Upstream: refs/ptouch-770/ptouch-770-write.c (GPL-2.0+).
  *
@@ -7,7 +7,7 @@
  *   - No udev / device discovery: writes the would-be USB byte stream to a
  *     regular file path passed on the command line.
  *   - Status reads stubbed out: get_printer_status() is replaced by a
- *     no-op that returns a caller-supplied media_width — there is no
+ *     no-op that returns a caller-supplied media_width - there is no
  *     printer on the other end of the file descriptor.
  *   - Optional --no-compression flag: emits raw 16-byte rasters via
  *     `g 0x10 0x00 <data>` instead of the PackBits-compressed `g <len_lo>
@@ -153,7 +153,7 @@ static int write_persist(int h, const void *buffer, size_t size)
     return (int)offset;
 }
 
-/* PackBits encoder copied from upstream — same byte output. */
+/* PackBits encoder copied from upstream - same byte output. */
 static int write_rle(int h, const unsigned char *data, size_t size)
 {
     /* Empty column shorthand: 0x5A. */
@@ -241,7 +241,7 @@ int main(int argc, char **argv)
     init_buf[101] = 0x40;
     if (write_persist(h, init_buf, 102) != 102) goto fail;
 
-    /* No status read here — bytes match upstream because the read does
+    /* No status read here - bytes match upstream because the read does
      * not produce output of its own. */
 
     /* Switch dynamic mode → raster. */

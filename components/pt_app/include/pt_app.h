@@ -2,7 +2,7 @@
 #define PT_APP_H
 
 /*
- * pt_app — MVP HTTP print-server glue for the PT-* on ESP32-S2/S3.
+ * pt_app - MVP HTTP print-server glue for the PT-* on ESP32-S2/S3.
  * Brings up Wi-Fi STA, opens a transport (real USB host or mock),
  * starts an esp_http_server, and registers the JSON API endpoints
  * pt_session is exposed through.

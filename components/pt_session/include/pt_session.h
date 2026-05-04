@@ -2,10 +2,10 @@
 #define PT_SESSION_H
 
 /*
- * pt_session — drive a complete print job over a pt_transport_t.
+ * pt_session - drive a complete print job over a pt_transport_t.
  *
  * Combines pt_protocol (byte encoding/decoding) with a pt_transport_t
- * (send/recv to a real or virtual printer). Transport-agnostic — works
+ * (send/recv to a real or virtual printer). Transport-agnostic - works
  * with mock, libusb, or esp-idf usb_host backends.
  *
  * Flow per SDM §5.1 (concurrent over USB):
@@ -25,14 +25,14 @@
 extern "C" {
 #endif
 
-/* Observer callback fired for every decoded status message — both the
+/* Observer callback fired for every decoded status message - both the
  * one returned by pt_session_query_status and every message read inside
  * pt_session_print_raster's wait-for-completion loop. Use it for
  * verbose logging or to push live status to a UI. NULL = no observer. */
 typedef void (*pt_status_observer_fn)(const pt_status_t *s, void *user);
 
 /* Diagnostic callback for events that don't correspond to a received
- * status message — e.g. an outgoing ESC i S poll. Lets pt_send -v
+ * status message - e.g. an outgoing ESC i S poll. Lets pt_send -v
  * surface what pt_session is doing internally without breaking
  * pt_session's "no I/O" rule (the callback is the I/O, not us). */
 typedef void (*pt_event_fn)(const char *msg, void *user);

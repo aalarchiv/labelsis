@@ -2,15 +2,15 @@
 #define PT_TRANSPORT_H
 
 /*
- * pt_transport — abstract bidirectional byte channel to a PT-* printer.
+ * pt_transport - abstract bidirectional byte channel to a PT-* printer.
  *
  * Higher layers (pt_session, future BLE bridge, the firmware's web app)
  * call pt_transport_send/recv. Concrete implementations plug in a
  * pt_transport_t with their own send/recv function pointers + ctx.
  *
  * Implementations:
- *   - mock     (Phase 3, both host & target) — virtual printer state machine
- *   - usb_host (Phase 3, esp32-s3 only)      — bulk endpoints on VID 0x04F9
+ *   - mock     (Phase 3, both host & target) - virtual printer state machine
+ *   - usb_host (Phase 3, esp32-s3 only)      - bulk endpoints on VID 0x04F9
  */
 
 #include <stddef.h>
@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 /* Send len bytes. Returns the number of bytes sent (>= 0) or a negative
- * implementation-specific error code. Short writes are not allowed —
+ * implementation-specific error code. Short writes are not allowed -
  * implementations must either send everything or return an error. */
 typedef int (*pt_send_fn)(void *ctx, const uint8_t *data, size_t len);
 
