@@ -29,4 +29,16 @@ endif()
 # (or run scripts/idf-env.sh) so IDF_PATH is set.
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
+# LabelSis needs the ESP USB-OTG host peripheral, which only the S2/S3
+# carry. Plain esp32 (the IDF default when no `set-target` has run)
+# silently lacks the `usb_host.h` headers and produces an obscure
+# "Missing usb/usb_host.h" build error 30 seconds in. Catch it at
+# configure time with a message that points at the fix instead.
+if(NOT IDF_TARGET STREQUAL "esp32s2" AND NOT IDF_TARGET STREQUAL "esp32s3")
+    message(FATAL_ERROR
+        "LabelSis requires the ESP32-S2 or ESP32-S3 (USB-OTG host).\n"
+        "Current IDF_TARGET=\"${IDF_TARGET}\" has no host peripheral.\n"
+        "Fix: rm -rf build sdkconfig && idf.py set-target esp32s3")
+endif()
+
 project(labelsis)
