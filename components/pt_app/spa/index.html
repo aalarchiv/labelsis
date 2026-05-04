@@ -960,6 +960,8 @@ const STRINGS = {
     "msg.printing":            "printing…",
     "msg.print.done":          "done - {rows} rows",
     "msg.print.error":         "error: {error}",
+    "msg.printer.online":      "printer online",
+    "msg.printer.offline":     "printer offline ({why})",
   },
 };
 
@@ -1118,12 +1120,42 @@ async function refreshStatus() {
     printer = null;
     setConnState(null);
     renderStatus(null);
-    refreshPrintButtons();
   }
+  /* Re-evaluate after every poll, not just on the network-error path.
+   * Otherwise a printer that goes online -> 503 (waiting / plite) keeps
+   * the print buttons clickable until something else nudges the
+   * refresh -- and the user only finds out after the print fails. */
+  refreshPrintButtons();
   /* The OTA panel is auth-gated on the printer being in P-Lite mode
    * (slider physically in EL). Show/hide it tied to the same poll so
    * sliding the switch back closes the upload window immediately. */
   syncOtaPanel();
+  /* Make state transitions loud across the whole UI surface: tab title
+   * (visible even when the SPA isn't focused) plus a one-line log
+   * message on the edge so a glancing user notices. */
+  syncOnlineCues(printer);
+}
+
+/* Track edge transitions between "online" and "not online" so we only
+ * log once per change, not on every 3-s poll. */
+let _lastOnline = null;        /* null = no prior poll, true|false otherwise */
+const TITLE_BASE = document.title;
+function syncOnlineCues(j) {
+  const online = !!(j && j.ok && j.transport === "usb_host"
+                    && !j.error1 && !j.error2);
+  document.title = online ? TITLE_BASE : "● " + TITLE_BASE;
+  if (_lastOnline === null) { _lastOnline = online; return; }
+  if (online === _lastOnline) return;
+  _lastOnline = online;
+  if (online) {
+    log(t("msg.printer.online"), true);
+  } else {
+    /* "transport" carries the most actionable diagnostic: waiting (no
+     * USB), plite (slider wrong), mock (firmware fallback), or
+     * undefined when /api/status itself failed. */
+    const why = (j && j.transport) || "unreachable";
+    log(t("msg.printer.offline", { why }), false);
+  }
 }
 
 /* Toggle the OTA panel visibility based on current transport state.

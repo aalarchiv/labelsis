@@ -115,5 +115,7 @@
   "msg.loading":             "lade…",
   "msg.printing":            "drucke…",
   "msg.print.done":          "fertig - {rows} Zeilen",
-  "msg.print.error":         "Fehler: {error}"
+  "msg.print.error":         "Fehler: {error}",
+  "msg.printer.online":      "Drucker verbunden",
+  "msg.printer.offline":     "Drucker getrennt ({why})"
 }
