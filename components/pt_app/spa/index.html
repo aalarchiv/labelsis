@@ -1105,11 +1105,29 @@ const TAPES = {
 let printer    = null;  // last /api/status response
 let deviceInfo = null;  // last /api/info  response (cached, refreshed on demand)
 
+/* Sticky tape-width fallback. When the printer is offline (and so the
+ * canvas can't size itself from /api/status), fall back to the last
+ * width the user actually printed against rather than always 24 mm.
+ * Persists across reloads so the canvas matches the user's typical
+ * setup the moment the SPA opens. Defaults to 24 mm on first run
+ * (widest tape -- safest "design now, fits anything narrower"). */
+const LAST_TAPE_KEY = "labelsis:lastTapeMm";
+let lastSeenTapeMm = parseInt(localStorage.getItem(LAST_TAPE_KEY) || "24", 10);
+if (!Number.isFinite(lastSeenTapeMm) || !TAPES[lastSeenTapeMm]) lastSeenTapeMm = 24;
+
 async function refreshStatus() {
   try {
     const r = await fetch(apiURL("/api/status"));
     const j = await r.json();
     printer = j;
+    /* Cache the live tape width on every successful poll so a later
+     * reload-while-offline picks the right canvas size. Only writes
+     * when the value actually changed -- avoids spamming localStorage
+     * once per 3-s tick. */
+    if (j && j.ok && TAPES[j.media_width_mm] && j.media_width_mm !== lastSeenTapeMm) {
+      lastSeenTapeMm = j.media_width_mm;
+      try { localStorage.setItem(LAST_TAPE_KEY, String(lastSeenTapeMm)); } catch {}
+    }
     setConnState(j);
     renderStatus(j);
     redraw();
@@ -2369,7 +2387,12 @@ function redraw(forPrint = false) {
   if (!forPrint) saveSession();
   const c    = document.getElementById("preview");
   const ctx  = c.getContext("2d");
-  const tape = printer && printer.ok ? TAPES[printer.media_width_mm] : TAPES[24];
+  /* Live tape width when /api/status answered with one; otherwise the
+   * last width we saw on this browser (sticky via localStorage), or
+   * 24 mm on a brand-new install. See LAST_TAPE_KEY. */
+  const tape = printer && printer.ok && TAPES[printer.media_width_mm]
+    ? TAPES[printer.media_width_mm]
+    : TAPES[lastSeenTapeMm];
   const printPx  = tape ? tape.print  : 128;
   const marginPx = tape ? tape.margin : 0;
   /* Per-side breakdown within the canvas (head extent):
