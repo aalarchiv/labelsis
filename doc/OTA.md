@@ -3,16 +3,11 @@
 ## How
 
 The HTTP API is unauthenticated by design (see [README §Security](../README.md#security)),
-so the OTA endpoint can't accept "anyone with network reach". Instead
-the auth gate is **the printer's P-Lite slider**: the device only
-accepts a firmware image while the slider is physically in the **EL**
-position. Same threat model as the BOOT-button Wi-Fi reset, applied
-to a more discoverable, user-facing control. The OTA window
-coincides with "printer can't print anyway", which makes it a
-natural maintenance moment.
+so the OTA endpoint can't accept "anyone with network reach".
 
-Models without a P-Lite slider (handhelds: PT-H500, PT-E500) cannot
-OTA -- re-flash via USB.
+LabelSis uses P-Lite mode as an auth gate: **OTA is possible when in P-Lite mode.**
+
+When switched to P-Lite mode, an OTA option appears on the status/about page.
 
 ## Steps
 
