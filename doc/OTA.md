@@ -5,9 +5,21 @@
 The HTTP API is unauthenticated by design (see [README §Security](../README.md#security)),
 so the OTA endpoint can't accept "anyone with network reach".
 
-LabelSis uses P-Lite mode as an auth gate: **OTA is possible when in P-Lite mode.**
+LabelSis has two physical-state-proves-intent gates that open the
+OTA endpoint. Either one is enough; both close on reboot.
 
-When switched to P-Lite mode, an OTA option appears on the status/about page.
+1. **Printer in P-Lite mode** -- slider in EL position. The default
+   path on a deployed device. The window naturally coincides with
+   "printer cannot print", so it doubles as a maintenance moment.
+2. **BOOT button override** -- hold the device's BOOT button for
+   3-5 seconds and release. The OTA gate toggles open. Useful on a
+   dev board with no printer connected, or on a model whose printer
+   has no P-Lite slider (handhelds). Hold the same button past 5 s
+   without releasing and you get the older Wi-Fi-reset gesture
+   instead (creds wiped + reboot).
+
+While either gate is open, an OTA section appears on the SPA's
+Status view.
 
 ## Steps
 
@@ -50,8 +62,8 @@ When switched to P-Lite mode, an OTA option appears on the status/about page.
 
 | Result | Meaning |
 |---|---|
-| `403 not_in_plite` | Slider isn't in EL when the upload starts. |
-| `403 plite_ended` | Slider returned to E while the upload was in flight. Half-written image discarded. |
+| `403 gate_closed` | Neither gate is open at upload start. Slide to EL, or hold BOOT 3-5 s + release. |
+| `403 gate_closed_mid_upload` | The gate that was open dropped while the upload was in flight (slider back to E, or BOOT toggled off). Half-written image discarded; retry. |
 | `400 image_validate` | SHA256 from the image header didn't match the bytes received -- truncated upload, network corruption, or a non-IDF binary. |
 | `400 wrong_project` | Image is structurally valid but its `project_name` is not "labelsis". Image is on disk but never set as boot target; next OTA overwrites it. |
 | `500 ota_*` | Flash hardware error or out-of-space. Check `idf.py monitor` for the underlying esp-idf log line. |

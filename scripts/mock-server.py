@@ -206,13 +206,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             # Mirror the firmware: when no real printer is attached the
             # transport is "waiting" / "plite" and we return 503 with
-            # the transport name, no status fields.
+            # the transport name, no status fields. ota_available
+            # mirrors ota_gate_open: P-Lite mode OR the explicit
+            # OTA_BUTTON_GATE override flag (set on the mock STATE
+            # dict to simulate the BOOT-button toggle).
+            ota_av = (STATE["transport"] == "plite"
+                      or STATE.get("ota_button_gate", False))
             if STATE["transport"] in ("waiting", "plite"):
                 self._send_json(503, {"ok": False,
-                                      "transport": STATE["transport"],
-                                      "error": "no_printer"})
+                                      "transport":     STATE["transport"],
+                                      "ota_available": ota_av,
+                                      "error":         "no_printer"})
                 return
-            self._send_json(200, {**STATE, "ok": True})
+            self._send_json(200, {**STATE, "ok": True, "ota_available": ota_av})
             return
 
         if path == "/api/info":

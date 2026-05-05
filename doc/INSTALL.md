@@ -84,12 +84,20 @@ RGB pixel on GPIO 48.
 A single-GPIO LED is distinguished by cadence alone (colour collapses
 to "on/off"). Set `.led.type = PT_LED_TYPE_NONE` to disable.
 
-## BOOT button = Wi-Fi reset
+## BOOT button -- two gestures
 
-The devkit's BOOT button (GPIO 0) is the Wi-Fi-reset trigger. **Hold
-it for 5+ seconds** while the device is running -- NVS creds get wiped
-and the board reboots into AP-mode onboarding. Tap-press is harmless
-(must be a sustained hold during runtime, not at reset).
+The devkit's BOOT button (GPIO 0) drives two actions, distinguished by
+how long you hold it (release time matters):
+
+| Gesture | What happens |
+|---|---|
+| Hold 3-5 s, then **release** | Toggle the OTA gate. Lets a dev board test OTA without a printer attached. The Status view's "Firmware update" panel appears; press again to close. |
+| Hold 5+ s **without releasing** | NVS Wi-Fi creds wiped, board reboots into AP-mode onboarding. |
+| Tap (< 3 s) | Ignored (avoids accidental triggers; BOOT is also the bootloader-mode pin on power-on). |
+
+The serial log announces the disarm window: hold past 3 s and you'll
+see `button: held 3050 ms -- release now to toggle OTA gate, or keep
+holding past 5000 ms to wipe creds`.
 
 To use a different GPIO, change `pt_app_config.reset_gpio_num` in
 `main/main.c`. Negative value disables it.

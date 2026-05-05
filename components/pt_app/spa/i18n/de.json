@@ -6,7 +6,7 @@
   "panel.status":            "Status",
   "panel.about":             "Über",
   "panel.ota":               "Firmware-Update",
-  "ota.help":                "P-Lite-Modus erkannt. LabelSis-Firmware-Image (.bin) wählen und hochladen. Das Gerät startet ins neue Image; lässt es sich nicht starten, rollt der Bootloader automatisch zurück.",
+  "ota.help":                "OTA-Gate offen (Drucker im P-Lite-Modus oder BOOT-Taste umgeschaltet). LabelSis-Firmware-Image (.bin) wählen und hochladen. Das Gerät startet ins neue Image; lässt es sich nicht starten, rollt der Bootloader automatisch zurück.",
   "btn.ota.upload":          "installieren",
   "about.intro":             "- Netzwerk-Druckserver für die Brother-PT-P700-Familie, ESP32-S3 als USB-Host mit eigener Web-Oberfläche.",
   "about.firmware":          "Firmware",

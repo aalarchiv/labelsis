@@ -402,7 +402,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
          reboot countdown. -->
     <div class="panel" id="ota-panel" hidden>
       <h2 data-i18n="panel.ota">Firmware update</h2>
-      <p class="muted" data-i18n="ota.help">P-Lite mode detected. Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.</p>
+      <p class="muted" data-i18n="ota.help">OTA gate is open (printer in P-Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.</p>
       <div class="row">
         <input id="ota-file" type="file" accept=".bin,application/octet-stream">
         <button id="ota-upload" class="secondary" type="button" disabled data-i18n="btn.ota.upload">install</button>
@@ -846,7 +846,7 @@ const STRINGS = {
     "panel.status":            "Status",
     "panel.about":             "About",
     "panel.ota":               "Firmware update",
-    "ota.help":                "P-Lite mode detected. Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
+    "ota.help":                "OTA gate is open (printer in P-Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
     "btn.ota.upload":          "install",
     /* about.intro is rendered AFTER the project link in the markup
      * (the link sits outside the data-i18n span so applyI18n's
@@ -1195,15 +1195,17 @@ function syncOnlineCues(j) {
   }
 }
 
-/* Toggle the OTA panel visibility based on current transport state.
+/* Toggle the OTA panel visibility based on the OTA gate state.
  * Cheap (no network), called from every refreshStatus tick + when a
- * file is picked. Auth gate is enforced server-side as well -- this
- * is purely UI nudging. */
+ * file is picked. The firmware reports `ota_available` directly in
+ * /api/status across all paths (success, 503, busy) so the SPA
+ * doesn't need a separate /api/ota/status poll just to know whether
+ * to render the panel. Auth gate is enforced server-side as well --
+ * this is purely UI nudging. */
 function syncOtaPanel() {
   const panel = document.getElementById("ota-panel");
   if (!panel) return;
-  const open = printer && printer.transport === "plite";
-  panel.hidden = !open;
+  panel.hidden = !(printer && printer.ota_available);
 }
 
 /* /api/info carries per-device identity (vid/pid/serial/product/

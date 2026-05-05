@@ -253,15 +253,28 @@ static esp_err_t credlist_set_last_used(const char *ssid)
     return credlist_save(&cl);
 }
 
-/* reset button */
+/* BOOT button -- two gestures share one input. The release moment is
+ * what disambiguates: if the user releases between OTA_HOLD_MS and
+ * RESET_HOLD_MS, we toggle the OTA gate (lets a dev board test OTA
+ * without a printer attached). If they keep holding past RESET_HOLD_MS
+ * we wipe Wi-Fi creds and reboot (unchanged behaviour for the long
+ * hold). Releases under OTA_HOLD_MS are ignored to swallow accidental
+ * taps -- BOOT is also the bootloader-mode pin on power-on, so people
+ * tend to press it. */
 
-#define RESET_HOLD_MS  5000   /* duration to qualify as a long press */
+#define OTA_HOLD_MS    3000   /* min hold-then-release to toggle OTA gate */
+#define RESET_HOLD_MS  5000   /* sustained hold past this = wipe creds */
 #define RESET_POLL_MS  50     /* GPIO sample period */
 
-/* Polls an active-low input. Holding it for RESET_HOLD_MS clears creds
- * and reboots -- next boot enters AP-mode onboarding. We sample rather
- * than use an ISR because debounce + duration tracking is simpler in a
- * task, and the work is trivial (20 reads/s, costs ~nothing). */
+/* True when the BOOT button has flipped the OTA gate open. Mirrors
+ * the role of "printer in P-Lite" mode: while either is true, the
+ * /api/ota endpoint accepts uploads. Volatile because the button
+ * task writes it and the HTTP handler thread reads it; bool is
+ * word-sized atomic on Xtensa, so no further locking needed. */
+static volatile bool s_ota_button_gate = false;
+
+static bool ota_button_gate_active(void) { return s_ota_button_gate; }
+
 static void reset_button_task(void *arg)
 {
     int gpio = (int)(intptr_t)arg;
@@ -277,19 +290,36 @@ static void reset_button_task(void *arg)
         vTaskDelete(NULL);
     }
 
-    TickType_t pressed_at = 0;
+    TickType_t pressed_at      = 0;
+    bool       wipe_arm_logged = false;
     while (1) {
         bool       down = (gpio_get_level(gpio) == 0);
         TickType_t now  = xTaskGetTickCount();
         if (down && pressed_at == 0) {
-            pressed_at = now;
-        } else if (!down) {
+            pressed_at      = now;
+            wipe_arm_logged = false;
+        } else if (down) {
+            TickType_t held = now - pressed_at;
+            if (held >= pdMS_TO_TICKS(RESET_HOLD_MS)) {
+                ESP_LOGW(TAG, "reset: long press on gpio %d -- clearing creds", gpio);
+                credlist_clear();
+                vTaskDelay(pdMS_TO_TICKS(100));
+                esp_restart();
+            } else if (held >= pdMS_TO_TICKS(OTA_HOLD_MS) && !wipe_arm_logged) {
+                ESP_LOGI(TAG, "button: held %lu ms -- release now to toggle OTA gate, "
+                              "or keep holding past %d ms to wipe creds",
+                         (unsigned long)pdTICKS_TO_MS(held), RESET_HOLD_MS);
+                wipe_arm_logged = true;
+            }
+        } else if (!down && pressed_at != 0) {
+            TickType_t held = now - pressed_at;
             pressed_at = 0;
-        } else if ((now - pressed_at) >= pdMS_TO_TICKS(RESET_HOLD_MS)) {
-            ESP_LOGW(TAG, "reset: long press on gpio %d -- clearing creds", gpio);
-            credlist_clear();
-            vTaskDelay(pdMS_TO_TICKS(100));
-            esp_restart();
+            if (held >= pdMS_TO_TICKS(OTA_HOLD_MS)) {
+                s_ota_button_gate = !s_ota_button_gate;
+                ESP_LOGW(TAG, "button: OTA gate %s",
+                         s_ota_button_gate ? "OPEN -- /api/ota now accepts uploads"
+                                           : "closed");
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(RESET_POLL_MS));
     }
@@ -449,6 +479,11 @@ static pt_transport_t            s_transport;
 static pt_transport_mock_t       s_mock;
 static pt_transport_usb_host_t  *s_usb;
 static const char               *s_transport_name = "waiting";
+
+/* Forward decl: api_status reports the OTA gate state alongside
+ * transport so the SPA's existing status poll can surface the OTA
+ * panel. The function lives down with the OTA handlers. */
+static bool ota_gate_open(void);
 
 /* Forward decl: api_status / api_print etc. read this to short-circuit
  * with a "no printer attached" response when no real device is open. */
@@ -636,11 +671,18 @@ static esp_err_t api_status(httpd_req_t *req)
      * "waiting" / "P-Lite" instead of a misleading green dot. The
      * background transport_retry_task is polling in parallel; once a
      * printer attaches the next status poll returns real data. */
+    /* ota_available is reported on every code path so the SPA can
+     * show / hide the OTA panel directly off /api/status without
+     * needing a separate /api/ota/status poll. The OTA gate has
+     * two openers (P-Lite mode, BOOT-button override); see
+     * ota_gate_open. */
+    const char *ota_av = ota_gate_open() ? "true" : "false";
     if (!transport_ready()) {
-        char body[96];
+        char body[160];
         int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"transport\":\"%s\",\"error\":\"no_printer\"}",
-                         s_transport_name);
+                         "{\"ok\":false,\"transport\":\"%s\","
+                         "\"ota_available\":%s,\"error\":\"no_printer\"}",
+                         s_transport_name, ota_av);
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_send(req, body, n);
     }
@@ -648,25 +690,31 @@ static esp_err_t api_status(httpd_req_t *req)
      * fail fast as "busy" rather than holding the connection while the
      * print finishes. */
     if (!SESSION_LOCK(500)) {
+        char body[120];
+        int n = snprintf(body, sizeof body,
+                         "{\"ok\":false,\"transport\":\"busy\","
+                         "\"ota_available\":%s,\"error\":\"busy\"}",
+                         ota_av);
         httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"transport\":\"busy\",\"error\":\"busy\"}");
+        return httpd_resp_send(req, body, n);
     }
     pt_status_t st;
     pt_err_t err = pt_session_query_status(&s_transport, &st, NULL);
     SESSION_UNLOCK();
 
-    char body[384];
+    char body[416];
     int  n;
     if (err != PT_OK) {
         n = snprintf(body, sizeof body,
-                     "{\"ok\":false,\"transport\":\"%s\",\"error\":\"%s\"}",
-                     s_transport_name, err_kind(err));
+                     "{\"ok\":false,\"transport\":\"%s\","
+                     "\"ota_available\":%s,\"error\":\"%s\"}",
+                     s_transport_name, ota_av, err_kind(err));
         httpd_resp_set_status(req, "503 Service Unavailable");
     } else {
         n = snprintf(body, sizeof body,
             "{\"ok\":true,"
             "\"transport\":\"%s\","
+            "\"ota_available\":%s,"
             "\"model\":%u,"
             "\"media_width_mm\":%u,"
             "\"media_type\":%u,"
@@ -676,7 +724,7 @@ static esp_err_t api_status(httpd_req_t *req)
             "\"error2\":%u,"
             "\"status_type\":%u,"
             "\"phase_type\":%u}",
-            s_transport_name,
+            s_transport_name, ota_av,
             (unsigned)st.model,
             (unsigned)st.media_width_mm,
             (unsigned)st.media_type,
@@ -1143,9 +1191,14 @@ static esp_err_t api_icon_json(httpd_req_t *req)
 
 #include "esp_ota_ops.h"
 
-static bool ota_gate_open(void)
+static bool ota_plite_gate(void)
 {
     return s_transport_name && strcmp(s_transport_name, "plite") == 0;
+}
+
+static bool ota_gate_open(void)
+{
+    return ota_button_gate_active() || ota_plite_gate();
 }
 
 static esp_err_t api_ota_status(httpd_req_t *req)
@@ -1156,13 +1209,22 @@ static esp_err_t api_ota_status(httpd_req_t *req)
     const esp_partition_t *run  = esp_ota_get_running_partition();
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     bool open = ota_gate_open();
-    char body[256];
+    /* Reason text aimed at whoever just hit the panel: name the
+     * actual gate that's open (so the user knows why), or both
+     * options to open it when neither is engaged. */
+    const char *reason;
+    if (ota_button_gate_active() && ota_plite_gate())     reason = "P-Lite mode + BOOT button gate";
+    else if (ota_button_gate_active())                    reason = "BOOT button gate (hold 3-5 s + release to close)";
+    else if (ota_plite_gate())                            reason = "P-Lite mode";
+    else reason = "printer must be in P-Lite mode (slide switch to EL), "
+                  "or hold the BOOT button 3-5 s and release";
+    char body[320];
     int n = snprintf(body, sizeof body,
         "{\"available\":%s,\"reason\":\"%s\","
         "\"running_slot\":\"%s\",\"next_slot\":\"%s\","
         "\"app\":{\"name\":\"%s\",\"version\":\"%s\"}}",
         open ? "true" : "false",
-        open ? "P-Lite mode" : "printer must be in P-Lite mode (slide switch to EL)",
+        reason,
         run  ? run->label  : "?",
         next ? next->label : "?",
         app ? app->project_name : "",
@@ -1186,7 +1248,7 @@ static esp_err_t ota_fail(httpd_req_t *req, esp_ota_handle_t h,
 static esp_err_t api_ota_upload(httpd_req_t *req)
 {
     if (!ota_gate_open()) {
-        return ota_fail(req, 0, "403 Forbidden", "not_in_plite");
+        return ota_fail(req, 0, "403 Forbidden", "gate_closed");
     }
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     if (!next) {
@@ -1210,8 +1272,8 @@ static esp_err_t api_ota_upload(httpd_req_t *req)
     int  written   = 0;
     while (remaining > 0) {
         if (!ota_gate_open()) {
-            ESP_LOGW(TAG, "ota: P-Lite ended mid-upload after %d bytes -- aborting", written);
-            return ota_fail(req, ota, "403 Forbidden", "plite_ended");
+            ESP_LOGW(TAG, "ota: gate closed mid-upload after %d bytes -- aborting", written);
+            return ota_fail(req, ota, "403 Forbidden", "gate_closed_mid_upload");
         }
         int want = remaining < (int)sizeof buf ? remaining : (int)sizeof buf;
         int got  = httpd_req_recv(req, buf, want);
