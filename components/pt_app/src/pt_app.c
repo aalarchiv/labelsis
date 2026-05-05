@@ -1304,6 +1304,12 @@ static httpd_handle_t s_http;
  * too so the SPA's Wi-Fi tab can re-provision in place. */
 static esp_err_t api_scan(httpd_req_t *req);
 static esp_err_t api_setup(httpd_req_t *req);
+/* Wi-Fi list endpoints live with api_setup further down (they share
+ * NVS plumbing); declare here so http_up can reference them. */
+static esp_err_t api_wifi_list(httpd_req_t *req);
+static esp_err_t api_wifi_add(httpd_req_t *req);
+static esp_err_t api_wifi_delete(httpd_req_t *req);
+static esp_err_t api_wifi_order(httpd_req_t *req);
 
 static esp_err_t http_up(uint16_t port)
 {
