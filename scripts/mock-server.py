@@ -79,6 +79,15 @@ SCAN_NETWORKS = [
     {"ssid": "neighbour-3F", "rssi": -78, "auth": 3},
 ]
 
+# Configured AP list (mirrors NVS on the firmware). Order is priority;
+# WIFI_LAST_USED is the SSID the device last successfully connected
+# to (tried first on boot).
+WIFI_APS = [
+    {"ssid": "Home Wi-Fi", "password": "hunter2"},
+    {"ssid": "Office",     "password": "officepw"},
+]
+WIFI_LAST_USED = "Home Wi-Fi"
+
 CORS = {
     "Access-Control-Allow-Origin":  "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -245,6 +254,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "networks": SCAN_NETWORKS})
             return
 
+        if path == "/api/wifi/aps":
+            self._send_json(200, {
+                "ok":  True,
+                "aps": [{"ssid": a["ssid"],
+                         "last_used": a["ssid"] == WIFI_LAST_USED}
+                        for a in WIFI_APS],
+            })
+            return
+
         if path == "/api/ota/status":
             # Mirror the firmware: gate is open iff transport == plite.
             # Set STATE["transport"] = "plite" at the top of this file
@@ -263,6 +281,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404, "not found")
 
     def do_POST(self):
+        # /api/wifi/aps/{add,delete,order} mutate the in-memory AP list,
+        # so the global declaration must cover the whole function.
+        global WIFI_APS, WIFI_LAST_USED
         path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length", "0") or 0)
         body = self.rfile.read(length) if length > 0 else b""
@@ -299,13 +320,54 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True})
             return
 
-        if path == "/api/setup":
+        if path in ("/api/setup", "/api/wifi/aps/add"):
             try:
                 data = json.loads(body) if body else {}
             except json.JSONDecodeError:
                 self._send_json(400, {"ok": False, "error": "bad_json"})
                 return
-            self.log_extra(f"ssid={data.get('ssid')!r} (real device would reboot)")
+            ssid = data.get("ssid")
+            password = data.get("password", "")
+            if not ssid:
+                self._send_json(400, {"ok": False, "error": "missing_ssid"})
+                return
+            existing = next((a for a in WIFI_APS if a["ssid"] == ssid), None)
+            if existing:
+                existing["password"] = password
+                self.log_extra(f"wifi: replaced password for {ssid!r}")
+            elif len(WIFI_APS) >= 8:
+                self._send_json(507, {"ok": False, "error": "list_full"})
+                return
+            else:
+                WIFI_APS.append({"ssid": ssid, "password": password})
+                self.log_extra(f"wifi: added {ssid!r}")
+            self._send_json(200, {"ok": True})
+            return
+
+        if path == "/api/wifi/aps/delete":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._send_json(400, {"ok": False, "error": "bad_json"})
+                return
+            ssid = data.get("ssid")
+            if not ssid:
+                self._send_json(400, {"ok": False, "error": "missing_ssid"})
+                return
+            WIFI_APS = [a for a in WIFI_APS if a["ssid"] != ssid]
+            if WIFI_LAST_USED == ssid:
+                WIFI_LAST_USED = ""
+            self.log_extra(f"wifi: deleted {ssid!r}")
+            self._send_json(200, {"ok": True})
+            return
+
+        if path == "/api/wifi/aps/order":
+            wanted = [s for s in body.decode().split("\n") if s]
+            existing = {a["ssid"]: a for a in WIFI_APS}
+            new_order = [existing[s] for s in wanted if s in existing]
+            tail      = [a for a in WIFI_APS if a["ssid"] not in wanted]
+            WIFI_APS  = new_order + tail
+            self.log_extra(f"wifi: reordered -> {[a['ssid'] for a in WIFI_APS]}")
             self._send_json(200, {"ok": True})
             return
 

@@ -37,58 +37,220 @@
 
 static const char *TAG = "pt_app";
 
-/* Wi-Fi creds (NVS) */
-
-/* Persist Wi-Fi creds in NVS so first-boot provisioning (whether via
- * compiled-in cfg or AP-mode onboarding) is durable across reboots.
- * Buffers sized for the IEEE 802.11 SSID (32 bytes + NUL) and the
- * WPA2 PSK string form (64 chars + NUL). */
-#define CREDS_NS    "pt_app"
-#define CREDS_SSID  "ssid"
-#define CREDS_PASS  "pass"
+/* Wi-Fi creds (NVS) -- ordered list of APs.
+ *
+ * Persisted as a single blob under "wifi_v1" so add / delete / reorder
+ * are atomic NVS writes. Index 0 is highest priority; on boot we try
+ * last_used first (if it's still in the list), then walk the list in
+ * order. This is a portable device, so different sites (home, office,
+ * workshop) want to coexist. AP-mode onboarding only kicks in when
+ * EVERY entry fails.
+ *
+ * The legacy single-cred schema (CREDS_NS / CREDS_SSID / CREDS_PASS,
+ * the "pt_app/ssid" + "pt_app/pass" keys) is migrated into a
+ * single-entry list on first boot of new firmware -- see credlist_load.
+ *
+ * Buffer sizes per IEEE 802.11 SSID (32 bytes + NUL) and the WPA2 PSK
+ * string form (64 chars + NUL). Cap at MAX_APS so the blob is fixed
+ * size (~820 B); plenty for a portable device's typical few sites. */
+#define CREDS_NS         "pt_app"
+#define CREDS_LEGACY_SSID "ssid"
+#define CREDS_LEGACY_PASS "pass"
+#define CREDS_BLOB_KEY    "wifi_v1"
+#define MAX_APS           8
 
 typedef struct {
     char ssid[33];
     char password[65];
-} wifi_creds_t;
+} wifi_ap_t;
 
-static esp_err_t creds_load(wifi_creds_t *out)
+typedef struct {
+    uint8_t   version;             /* = 1 */
+    uint8_t   count;               /* 0..MAX_APS */
+    uint8_t   reserved[2];
+    char      last_used[33];       /* SSID of last successful connect; "" = none */
+    wifi_ap_t aps[MAX_APS];        /* aps[0] = highest priority */
+} wifi_creds_blob_t;
+
+/* Migrate legacy single-cred (pt_app/ssid + pt_app/pass) into a
+ * single-entry list. Called from credlist_load when the new blob is
+ * absent but the legacy keys are present. Erases the legacy keys
+ * after a successful migration so the next boot is clean. */
+static void credlist_migrate_legacy(wifi_creds_blob_t *out)
 {
     nvs_handle_t h;
-    esp_err_t err = nvs_open(CREDS_NS, NVS_READONLY, &h);
-    if (err != ESP_OK) return err;
-    size_t sz = sizeof out->ssid;
-    err = nvs_get_str(h, CREDS_SSID, out->ssid, &sz);
-    if (err == ESP_OK) {
-        sz = sizeof out->password;
-        err = nvs_get_str(h, CREDS_PASS, out->password, &sz);
+    if (nvs_open(CREDS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+
+    char ssid[33] = {0}, pass[65] = {0};
+    size_t sz = sizeof ssid;
+    if (nvs_get_str(h, CREDS_LEGACY_SSID, ssid, &sz) == ESP_OK && ssid[0]) {
+        sz = sizeof pass;
+        nvs_get_str(h, CREDS_LEGACY_PASS, pass, &sz);  /* may be empty for open APs */
+
+        memset(out, 0, sizeof *out);
+        out->version = 1;
+        out->count   = 1;
+        strncpy(out->aps[0].ssid,     ssid, sizeof out->aps[0].ssid     - 1);
+        strncpy(out->aps[0].password, pass, sizeof out->aps[0].password - 1);
+        strncpy(out->last_used,       ssid, sizeof out->last_used       - 1);
+
+        nvs_set_blob(h, CREDS_BLOB_KEY, out, sizeof *out);
+        nvs_erase_key(h, CREDS_LEGACY_SSID);
+        nvs_erase_key(h, CREDS_LEGACY_PASS);
+        nvs_commit(h);
+        ESP_LOGI(TAG, "wifi: migrated legacy creds (ssid=%s) into list", ssid);
     }
     nvs_close(h);
-    return err;
 }
 
-static esp_err_t creds_save(const char *ssid, const char *password)
+static esp_err_t credlist_load(wifi_creds_blob_t *out)
+{
+    memset(out, 0, sizeof *out);
+    nvs_handle_t h;
+    if (nvs_open(CREDS_NS, NVS_READONLY, &h) != ESP_OK) {
+        /* No NVS namespace yet -- maybe legacy keys exist via a
+         * read-write open. Try migrate path. */
+        credlist_migrate_legacy(out);
+        return out->count ? ESP_OK : ESP_ERR_NOT_FOUND;
+    }
+    size_t sz = sizeof *out;
+    esp_err_t err = nvs_get_blob(h, CREDS_BLOB_KEY, out, &sz);
+    nvs_close(h);
+    if (err == ESP_OK && out->version == 1 && out->count <= MAX_APS) {
+        return ESP_OK;
+    }
+    /* Either the blob is absent, or its shape doesn't match -- in
+     * either case fall back to the legacy migration path. */
+    credlist_migrate_legacy(out);
+    return out->count ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+static esp_err_t credlist_save(const wifi_creds_blob_t *in)
 {
     nvs_handle_t h;
     esp_err_t err = nvs_open(CREDS_NS, NVS_READWRITE, &h);
     if (err != ESP_OK) return err;
-    err = nvs_set_str(h, CREDS_SSID, ssid);
-    if (err == ESP_OK) err = nvs_set_str(h, CREDS_PASS, password);
+    err = nvs_set_blob(h, CREDS_BLOB_KEY, in, sizeof *in);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;
 }
 
-static esp_err_t creds_clear(void)
+static esp_err_t credlist_clear(void)
 {
     nvs_handle_t h;
     esp_err_t err = nvs_open(CREDS_NS, NVS_READWRITE, &h);
     if (err != ESP_OK) return err;
-    nvs_erase_key(h, CREDS_SSID);
-    nvs_erase_key(h, CREDS_PASS);
+    nvs_erase_key(h, CREDS_BLOB_KEY);
+    /* Also wipe the legacy keys in case a long-running deployment
+     * never went through the migration. */
+    nvs_erase_key(h, CREDS_LEGACY_SSID);
+    nvs_erase_key(h, CREDS_LEGACY_PASS);
     err = nvs_commit(h);
     nvs_close(h);
     return err;
+}
+
+/* Look up by SSID; returns -1 if not in the list. */
+static int credlist_find(const wifi_creds_blob_t *cl, const char *ssid)
+{
+    for (int i = 0; i < cl->count; i++) {
+        if (strcmp(cl->aps[i].ssid, ssid) == 0) return i;
+    }
+    return -1;
+}
+
+/* Add a new AP, or replace the password of an existing one. New
+ * entries land at the end (lowest priority); the user can reorder
+ * via /api/wifi/aps/order. Returns ESP_ERR_NO_MEM when the list is
+ * already full. */
+static esp_err_t credlist_add(const char *ssid, const char *password)
+{
+    if (!ssid || !ssid[0]) return ESP_ERR_INVALID_ARG;
+    wifi_creds_blob_t cl;
+    if (credlist_load(&cl) != ESP_OK) {
+        memset(&cl, 0, sizeof cl);
+        cl.version = 1;
+    }
+    int idx = credlist_find(&cl, ssid);
+    if (idx >= 0) {
+        strncpy(cl.aps[idx].password, password ? password : "",
+                sizeof cl.aps[idx].password - 1);
+        cl.aps[idx].password[sizeof cl.aps[idx].password - 1] = '\0';
+    } else {
+        if (cl.count >= MAX_APS) return ESP_ERR_NO_MEM;
+        idx = cl.count++;
+        memset(&cl.aps[idx], 0, sizeof cl.aps[idx]);
+        strncpy(cl.aps[idx].ssid, ssid, sizeof cl.aps[idx].ssid - 1);
+        strncpy(cl.aps[idx].password, password ? password : "",
+                sizeof cl.aps[idx].password - 1);
+    }
+    return credlist_save(&cl);
+}
+
+/* Idempotent: deleting an SSID that isn't in the list returns OK. */
+static esp_err_t credlist_delete(const char *ssid)
+{
+    if (!ssid || !ssid[0]) return ESP_ERR_INVALID_ARG;
+    wifi_creds_blob_t cl;
+    if (credlist_load(&cl) != ESP_OK) return ESP_OK;
+    int idx = credlist_find(&cl, ssid);
+    if (idx < 0) return ESP_OK;
+    /* Shift remaining entries down. */
+    for (int i = idx; i < cl.count - 1; i++) cl.aps[i] = cl.aps[i + 1];
+    memset(&cl.aps[cl.count - 1], 0, sizeof cl.aps[0]);
+    cl.count--;
+    if (strcmp(cl.last_used, ssid) == 0) cl.last_used[0] = '\0';
+    return credlist_save(&cl);
+}
+
+/* Reorder by SSIDs in `order` (newline-separated, parsed by caller).
+ * SSIDs in `order` move to the head of the list, in the given order;
+ * remaining entries (those not named) keep their relative order at
+ * the tail. Unknown SSIDs in `order` are ignored. */
+static esp_err_t credlist_reorder(const char *order_buf, size_t len)
+{
+    wifi_creds_blob_t cl;
+    if (credlist_load(&cl) != ESP_OK) return ESP_ERR_NOT_FOUND;
+
+    wifi_ap_t reordered[MAX_APS] = {0};
+    bool      consumed[MAX_APS]  = {0};
+    int       n = 0;
+
+    /* First pass: walk the order list, picking up matching APs. */
+    const char *p   = order_buf;
+    const char *end = order_buf + len;
+    while (p < end && n < cl.count) {
+        const char *line_end = memchr(p, '\n', end - p);
+        if (!line_end) line_end = end;
+        size_t llen = line_end - p;
+        if (llen > 0 && llen < sizeof reordered[0].ssid) {
+            char ssid[33] = {0};
+            memcpy(ssid, p, llen);
+            int idx = credlist_find(&cl, ssid);
+            if (idx >= 0 && !consumed[idx]) {
+                reordered[n++]  = cl.aps[idx];
+                consumed[idx]   = true;
+            }
+        }
+        p = (line_end < end) ? line_end + 1 : end;
+    }
+    /* Second pass: append any APs the caller didn't name. */
+    for (int i = 0; i < cl.count; i++) {
+        if (!consumed[i]) reordered[n++] = cl.aps[i];
+    }
+    memcpy(cl.aps, reordered, sizeof cl.aps);
+    return credlist_save(&cl);
+}
+
+static esp_err_t credlist_set_last_used(const char *ssid)
+{
+    wifi_creds_blob_t cl;
+    if (credlist_load(&cl) != ESP_OK) return ESP_ERR_NOT_FOUND;
+    if (strcmp(cl.last_used, ssid) == 0) return ESP_OK;  /* no-op */
+    memset(cl.last_used, 0, sizeof cl.last_used);
+    strncpy(cl.last_used, ssid, sizeof cl.last_used - 1);
+    return credlist_save(&cl);
 }
 
 /* reset button */
@@ -125,7 +287,7 @@ static void reset_button_task(void *arg)
             pressed_at = 0;
         } else if ((now - pressed_at) >= pdMS_TO_TICKS(RESET_HOLD_MS)) {
             ESP_LOGW(TAG, "reset: long press on gpio %d -- clearing creds", gpio);
-            creds_clear();
+            credlist_clear();
             vTaskDelay(pdMS_TO_TICKS(100));
             esp_restart();
         }
@@ -217,9 +379,24 @@ static esp_err_t wifi_init_once(void)
     return ESP_OK;
 }
 
+/* Bring up STA against a single SSID. Re-entrant: when called a second
+ * time (because the previous AP failed and we're trying the next in
+ * the priority list) it stops the radio first, reconfigures, and
+ * starts cleanly. The connect/fail event bits are reset so a stale
+ * FAIL_BIT from the previous attempt doesn't short-circuit the next
+ * wait. */
 static esp_err_t wifi_sta_up(const char *ssid, const char *password)
 {
     if (wifi_init_once() != ESP_OK) return ESP_FAIL;
+
+    /* Tear down any previous STA attempt cleanly. ESP_OK if not
+     * started, ESP_ERR_WIFI_NOT_STARTED otherwise -- both fine. */
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+
+    s_retry_count = 0;
+    xEventGroupClearBits(s_wifi_event_group,
+                         WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
 
     wifi_config_t sta = {
         .sta = {
@@ -1136,10 +1313,10 @@ static esp_err_t http_up(uint16_t port)
     /* Wildcard matching enables the OPTIONS catch-all below; specific
      * routes still match exactly. */
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    /* Default is 8; we register 14 routes (status, info, print, cut,
-     * feed, scan, setup, index, fonts*2, favicon, ota*2, OPTIONS
-     * catch-all) and want headroom. */
-    cfg.max_uri_handlers = 20;
+    /* Default is 8; we register 18 routes (status, info, print, cut,
+     * feed, scan, setup, index, fonts*2, favicon, ota*2, wifi*4,
+     * OPTIONS catch-all) and want headroom. */
+    cfg.max_uri_handlers = 24;
 
     if (httpd_start(&s_http, &cfg) != ESP_OK) return ESP_FAIL;
 
@@ -1195,6 +1372,22 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/ota", .method = HTTP_POST,
         .handler = api_ota_upload, .user_ctx = NULL,
     };
+    static const httpd_uri_t wifi_list_route = {
+        .uri = "/api/wifi/aps", .method = HTTP_GET,
+        .handler = api_wifi_list, .user_ctx = NULL,
+    };
+    static const httpd_uri_t wifi_add_route = {
+        .uri = "/api/wifi/aps/add", .method = HTTP_POST,
+        .handler = api_wifi_add, .user_ctx = NULL,
+    };
+    static const httpd_uri_t wifi_delete_route = {
+        .uri = "/api/wifi/aps/delete", .method = HTTP_POST,
+        .handler = api_wifi_delete, .user_ctx = NULL,
+    };
+    static const httpd_uri_t wifi_order_route = {
+        .uri = "/api/wifi/aps/order", .method = HTTP_POST,
+        .handler = api_wifi_order, .user_ctx = NULL,
+    };
     static const httpd_uri_t cors_route = {
         .uri = "/*", .method = HTTP_OPTIONS,
         .handler = cors_preflight, .user_ctx = NULL,
@@ -1212,6 +1405,10 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &favicon_route);
     httpd_register_uri_handler(s_http, &ota_status_route);
     httpd_register_uri_handler(s_http, &ota_upload_route);
+    httpd_register_uri_handler(s_http, &wifi_list_route);
+    httpd_register_uri_handler(s_http, &wifi_add_route);
+    httpd_register_uri_handler(s_http, &wifi_delete_route);
+    httpd_register_uri_handler(s_http, &wifi_order_route);
     httpd_register_uri_handler(s_http, &cors_route);
     /* HTTP is serving requests now -- if we just OTA'd into this
      * image, that's enough proof of life to cancel the rollback
@@ -1322,49 +1519,161 @@ static bool extract_str(const char *body, const char *key,
     return true;
 }
 
-/* POST /api/setup body: {"ssid":"...","password":"..."}. Persists creds
- * to NVS, replies, then reboots so the next boot enters STA mode. */
-static esp_err_t api_setup(httpd_req_t *req)
+/* Read the full request body into `body` (NUL-terminated).
+ * Returns 0 on success or a negative errno-style code. */
+static int read_json_body(httpd_req_t *req, char *body, size_t cap)
+{
+    int total = req->content_len;
+    if (total <= 0 || total >= (int)cap) return -1;
+    int rcvd = 0;
+    while (rcvd < total) {
+        int n = httpd_req_recv(req, body + rcvd, total - rcvd);
+        if (n <= 0) return -2;
+        rcvd += n;
+    }
+    body[rcvd] = '\0';
+    return 0;
+}
+
+static esp_err_t json_error(httpd_req_t *req, const char *status, const char *err)
 {
     cors_headers(req);
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "application/json");
+    char body[96];
+    snprintf(body, sizeof body, "{\"ok\":false,\"error\":\"%s\"}", err);
+    return httpd_resp_sendstr(req, body);
+}
+
+/* POST /api/setup -- onboarding entry point. Body: {ssid, password}.
+ * Adds the AP to the list (or replaces its password if SSID exists),
+ * replies, then reboots so the next boot tries it for real. Used
+ * during AP-mode onboarding; in STA mode use /api/wifi/aps/add to
+ * add another AP without rebooting. */
+static esp_err_t api_setup(httpd_req_t *req)
+{
     char body[300];
-    int  total = req->content_len;
-    if (total <= 0 || total >= (int)sizeof body) {
-        httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"bad_body\"}");
+    if (read_json_body(req, body, sizeof body) != 0)
+        return json_error(req, "400 Bad Request", "bad_body");
+
+    char ssid[33] = {0}, password[65] = {0};
+    bool got_ssid = extract_str(body, "ssid",     ssid,     sizeof ssid);
+    extract_str(body, "password", password, sizeof password);
+    if (!got_ssid || ssid[0] == '\0')
+        return json_error(req, "400 Bad Request", "missing_ssid");
+
+    esp_err_t err = credlist_add(ssid, password);
+    if (err == ESP_ERR_NO_MEM)
+        return json_error(req, "507 Insufficient Storage", "list_full");
+    if (err != ESP_OK)
+        return json_error(req, "500 Internal Server Error", "nvs_save");
+
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+
+    ESP_LOGI(TAG, "wifi: added \"%s\" to list -- rebooting", ssid);
+    /* Let the response FIN onto the wire before we drop the AP. */
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+/* GET /api/wifi/aps -- list configured APs (no passwords). */
+static esp_err_t api_wifi_list(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+
+    wifi_creds_blob_t cl = {0};
+    credlist_load(&cl);   /* empty list still produces valid JSON */
+
+    /* Cap-bounded buffer: 8 entries * ~80 chars each + chrome <~ 800 */
+    char body[1024];
+    int  off = 0;
+    off += snprintf(body + off, sizeof body - off, "{\"ok\":true,\"aps\":[");
+    for (int i = 0; i < cl.count && off < (int)sizeof body - 64; i++) {
+        bool last = (strcmp(cl.aps[i].ssid, cl.last_used) == 0);
+        /* JSON-escape the SSID's quote/backslash. SSIDs are arbitrary
+         * bytes per IEEE 802.11 but practical APs avoid control chars. */
+        char esc[2 * sizeof cl.aps[i].ssid];
+        int  e = 0;
+        for (const char *s = cl.aps[i].ssid; *s && e < (int)sizeof esc - 2; s++) {
+            if (*s == '"' || *s == '\\') esc[e++] = '\\';
+            esc[e++] = *s;
+        }
+        esc[e] = '\0';
+        off += snprintf(body + off, sizeof body - off,
+                        "%s{\"ssid\":\"%s\",\"last_used\":%s}",
+                        i ? "," : "", esc, last ? "true" : "false");
     }
+    off += snprintf(body + off, sizeof body - off, "]}");
+    return httpd_resp_send(req, body, off);
+}
+
+/* POST /api/wifi/aps/add -- {ssid, password}. SSID match replaces
+ * password; otherwise appends. No reboot -- the user can stay
+ * connected to the current AP while editing the list. */
+static esp_err_t api_wifi_add(httpd_req_t *req)
+{
+    char body[300];
+    if (read_json_body(req, body, sizeof body) != 0)
+        return json_error(req, "400 Bad Request", "bad_body");
+    char ssid[33] = {0}, password[65] = {0};
+    bool got_ssid = extract_str(body, "ssid",     ssid,     sizeof ssid);
+    extract_str(body, "password", password, sizeof password);
+    if (!got_ssid || ssid[0] == '\0')
+        return json_error(req, "400 Bad Request", "missing_ssid");
+
+    esp_err_t err = credlist_add(ssid, password);
+    if (err == ESP_ERR_NO_MEM) return json_error(req, "507 Insufficient Storage", "list_full");
+    if (err != ESP_OK)         return json_error(req, "500 Internal Server Error", "nvs_save");
+
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+/* POST /api/wifi/aps/delete -- {ssid}. Idempotent. */
+static esp_err_t api_wifi_delete(httpd_req_t *req)
+{
+    char body[200];
+    if (read_json_body(req, body, sizeof body) != 0)
+        return json_error(req, "400 Bad Request", "bad_body");
+    char ssid[33] = {0};
+    if (!extract_str(body, "ssid", ssid, sizeof ssid) || !ssid[0])
+        return json_error(req, "400 Bad Request", "missing_ssid");
+
+    if (credlist_delete(ssid) != ESP_OK)
+        return json_error(req, "500 Internal Server Error", "nvs_save");
+
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+/* POST /api/wifi/aps/order -- text/plain body, newline-separated SSIDs
+ * in priority order. SSIDs not named keep their relative order at the
+ * tail. Cheaper to parse than a JSON array; the SPA's list view sends
+ * `ssids.join("\n")`. */
+static esp_err_t api_wifi_order(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total < 0 || total > 8 * 33 + 16)
+        return json_error(req, "400 Bad Request", "bad_body");
+    char body[8 * 33 + 16];
     int rcvd = 0;
     while (rcvd < total) {
         int n = httpd_req_recv(req, body + rcvd, total - rcvd);
         if (n <= 0) return ESP_FAIL;
         rcvd += n;
     }
-    body[rcvd] = '\0';
+    if (credlist_reorder(body, rcvd) != ESP_OK)
+        return json_error(req, "500 Internal Server Error", "nvs_save");
 
-    char ssid[33] = {0}, password[65] = {0};
-    bool got_ssid = extract_str(body, "ssid",     ssid,     sizeof ssid);
-    extract_str(body, "password", password, sizeof password);  /* may be empty for open APs */
-    if (!got_ssid || ssid[0] == '\0') {
-        httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"missing_ssid\"}");
-    }
-
-    if (creds_save(ssid, password) != ESP_OK) {
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"nvs_save\"}");
-    }
-
+    cors_headers(req);
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"ok\":true}");
-
-    ESP_LOGI(TAG, "wifi: creds saved (ssid=%s) -- rebooting", ssid);
-    /* Let the response FIN onto the wire before we drop the AP. */
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-    return ESP_OK;
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
 static esp_err_t http_ap_up(void)
@@ -1439,35 +1748,57 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
      * a board that would otherwise wedge in a connect/AP loop. */
     reset_button_up(cfg->reset_gpio_num);
 
-    /* Resolve Wi-Fi creds: NVS wins if present, else fall back to the
-     * compiled-in cfg (and persist on first successful connect). */
-    wifi_creds_t stored = {0};
-    bool have_stored = (creds_load(&stored) == ESP_OK
-                        && stored.ssid[0] != '\0');
-    bool have_cfg    = (cfg->wifi_ssid && cfg->wifi_password
-                        && cfg->wifi_ssid[0] && cfg->wifi_password[0]);
+    /* Resolve Wi-Fi creds: prefer the NVS list. If it's empty AND the
+     * caller passed a compiled-in fallback, seed the list with that.
+     * Boot iterates the list: last_used first (if still in the list),
+     * then index order. AP-mode onboarding only runs when EVERY entry
+     * fails. */
+    wifi_creds_blob_t cl = {0};
+    bool have_list = (credlist_load(&cl) == ESP_OK && cl.count > 0);
+    bool have_cfg  = (cfg->wifi_ssid && cfg->wifi_password
+                      && cfg->wifi_ssid[0] && cfg->wifi_password[0]);
+    if (!have_list && have_cfg) {
+        ESP_LOGI(TAG, "wifi: list empty, seeding from compiled-in cfg (%s)",
+                 cfg->wifi_ssid);
+        credlist_add(cfg->wifi_ssid, cfg->wifi_password);
+        credlist_load(&cl);
+        have_list = (cl.count > 0);
+    }
 
-    const char *ssid     = have_stored ? stored.ssid     : have_cfg ? cfg->wifi_ssid     : NULL;
-    const char *password = have_stored ? stored.password : have_cfg ? cfg->wifi_password : NULL;
+    bool connected = false;
+    if (have_list) {
+        /* Build try-order: last_used (if in list) first, then in
+         * priority order. Indices into cl.aps[]. */
+        int order[MAX_APS], n = 0;
+        int last_idx = (cl.last_used[0]) ? credlist_find(&cl, cl.last_used) : -1;
+        if (last_idx >= 0) order[n++] = last_idx;
+        for (int i = 0; i < cl.count; i++) {
+            if (i != last_idx) order[n++] = i;
+        }
 
-    bool ap_mode = (ssid == NULL);
-    if (ssid) {
-        ESP_LOGI(TAG, "wifi: connecting to %s (%s)",
-                 ssid, have_stored ? "from NVS" : "from cfg");
         pt_led_set(PT_LED_STA_CONNECTING);
-        if (wifi_sta_up(ssid, password) != ESP_OK) {
-            ESP_LOGW(TAG, "wifi: STA failed -- entering AP onboarding");
-            ap_mode = true;
-        } else if (!have_stored) {
-            if (creds_save(ssid, password) == ESP_OK) {
-                ESP_LOGI(TAG, "wifi: persisted creds to NVS");
-            } else {
-                ESP_LOGW(TAG, "wifi: failed to persist creds to NVS");
+        for (int j = 0; j < n; j++) {
+            const wifi_ap_t *ap = &cl.aps[order[j]];
+            ESP_LOGI(TAG, "wifi: trying %s (%s)",
+                     ap->ssid,
+                     order[j] == last_idx ? "last used" :
+                     j == 0               ? "highest priority" : "next in order");
+            if (wifi_sta_up(ap->ssid, ap->password) == ESP_OK) {
+                ESP_LOGI(TAG, "wifi: associated to %s", ap->ssid);
+                credlist_set_last_used(ap->ssid);
+                connected = true;
+                break;
             }
+            ESP_LOGW(TAG, "wifi: %s failed", ap->ssid);
+        }
+        if (!connected) {
+            ESP_LOGW(TAG, "wifi: all %d configured APs failed -- entering AP onboarding",
+                     cl.count);
         }
     } else {
-        ESP_LOGW(TAG, "wifi: no creds -- entering AP onboarding");
+        ESP_LOGW(TAG, "wifi: no APs configured -- entering AP onboarding");
     }
+    bool ap_mode = !connected;
 
     if (ap_mode) {
         pt_led_set(PT_LED_AP_ONBOARDING);

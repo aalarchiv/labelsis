@@ -243,6 +243,18 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #ctx-menu button { display:block; width:100%; text-align:left; background:transparent; color:var(--fg); padding:.5rem .75rem; border-radius:3px; font-weight:normal; }
 #ctx-menu button:hover { background:rgba(88,166,255,.12); }
 #log, #wifi-log { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; color:var(--muted); margin-top:.5rem; min-height:1.4em; }
+/* Wi-Fi network list (Settings tab). One row per saved AP; the
+ * priority number on the right tracks list position. The .wifi-active
+ * dot mirrors the title-bar's "online" dot for the AP we last
+ * connected to (which the boot loop tries first). */
+.wifi-aps   { list-style:none; padding:0; margin:.25rem 0 .5rem; display:flex; flex-direction:column; gap:.25rem; }
+.wifi-row   { display:flex; align-items:center; gap:.5rem; padding:.4rem .5rem; background:var(--bg); border:1px solid var(--line); border-radius:4px; }
+.wifi-ssid  { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wifi-pri   { color:var(--muted); font-variant-numeric:tabular-nums; min-width:1.5em; text-align:right; }
+.wifi-active { color:var(--ok); }
+.wifi-row button { padding:.2rem .55rem; min-width:2em; }
+.wifi-empty { padding:.5rem; color:var(--muted); font-style:italic; }
+.wifi-sep   { border:0; border-top:1px solid var(--line); margin:.5rem 0; }
 /* CSV editor: a single contenteditable div where each line renders
  * as its own child <div>. The first child is bold (header), the
  * line containing the caret / last clicked is highlighted (active
@@ -749,8 +761,11 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
   <section id="view-settings" hidden>
     <div class="panel">
-      <h2 data-i18n="panel.wifi">Wi-Fi</h2>
-      <p class="muted" data-i18n="panel.wifi.help">Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the labelsis-setup AP for re-onboarding.</p>
+      <h2 data-i18n="panel.wifi">Wi-Fi networks</h2>
+      <p class="muted" data-i18n="panel.wifi.help">LabelSis tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.</p>
+      <ul id="wifi-aps" class="wifi-aps"></ul>
+      <hr class="wifi-sep">
+      <p class="muted" data-i18n="panel.wifi.add">Add a network:</p>
       <div class="row">
         <label data-i18n="field.wifi.network">network</label>
         <select id="wifi-ssid-select"><option value="">(scanning…)</option></select>
@@ -766,12 +781,8 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="wifi-reveal" class="secondary" type="button" data-i18n="btn.wifi.show">show</button>
       </div>
       <div class="row">
-        <label data-i18n="field.wifi.confirm">confirm</label>
-        <input id="wifi-password2" type="password" placeholder="re-enter">
-      </div>
-      <div class="row">
         <span class="spacer"></span>
-        <button id="wifi-save" data-i18n="btn.wifi.save">save &amp; reboot</button>
+        <button id="wifi-save" data-i18n="btn.wifi.save">add</button>
       </div>
       <div id="wifi-log"></div>
     </div>
@@ -845,8 +856,9 @@ const STRINGS = {
     "about.intro":             "- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.",
     "about.firmware":          "Firmware",
     "about.licenses":          "Third-party components bundled with this firmware:",
-    "panel.wifi":              "Wi-Fi",
-    "panel.wifi.help":         "Pick a network and enter the password. Saving reboots the device into the new network. If it can't connect, the next boot brings up the labelsis-setup AP for re-onboarding.",
+    "panel.wifi":              "Wi-Fi networks",
+    "panel.wifi.help":         "LabelSis tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.",
+    "panel.wifi.add":          "Add a network:",
     "panel.api-host":          "API host",
     "panel.api-host.help":     "When the SPA is loaded outside the device (localhost dev server), set this to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this.",
     "panel.language":          "Language",
@@ -859,7 +871,7 @@ const STRINGS = {
     "field.lang":              "UI language",
     "btn.wifi.rescan":         "rescan",
     "btn.wifi.show":           "show",
-    "btn.wifi.save":           "save & reboot",
+    "btn.wifi.save":           "add",
     "btn.save":                "save",
     "btn.clear":               "clear",
     "panel.element":           "Element",
@@ -962,6 +974,13 @@ const STRINGS = {
     "msg.print.error":         "error: {error}",
     "msg.printer.online":      "printer online",
     "msg.printer.offline":     "printer offline ({why})",
+    "msg.wifi.empty":          "(no networks configured -- add one below)",
+    "msg.wifi.last_used":      "last used (tried first on boot)",
+    "msg.wifi.pick_ssid":      "pick or type an SSID first",
+    "msg.wifi.saving":         "saving…",
+    "msg.wifi.added":          "added \"{ssid}\"",
+    "msg.wifi.deleted":        "deleted \"{ssid}\"",
+    "msg.wifi.confirm_delete": "Remove network \"{ssid}\"?",
   },
 };
 
@@ -5126,30 +5145,93 @@ async function wifiScan() {
 async function wifiSave() {
   const ssid = document.getElementById("wifi-ssid-text").value.trim()
             || document.getElementById("wifi-ssid-select").value;
-  const password  = document.getElementById("wifi-password").value;
-  const password2 = document.getElementById("wifi-password2").value;
-  if (!ssid) { wifiLog("pick or type an SSID first", false); return; }
-  if (password !== password2) { wifiLog("passwords don't match", false); return; }
+  const password = document.getElementById("wifi-password").value;
+  if (!ssid) { wifiLog(t("msg.wifi.pick_ssid"), false); return; }
   const btn = document.getElementById("wifi-save");
   btn.disabled = true;
-  wifiLog("saving…");
+  wifiLog(t("msg.wifi.saving"));
   try {
-    const r = await fetch(apiURL("/api/setup"), {
+    const r = await fetch(apiURL("/api/wifi/aps/add"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ssid, password }),
     });
     const j = await r.json();
     if (j.ok) {
-      wifiLog("saved - rebooting. Reload http://labelsis.local/ once it's back.", true);
+      wifiLog(t("msg.wifi.added", { ssid }), true);
+      document.getElementById("wifi-ssid-text").value = "";
+      document.getElementById("wifi-password").value  = "";
+      document.getElementById("wifi-ssid-select").value = "";
+      refreshWifiList();
     } else {
       wifiLog(`error: ${j.error}`, false);
-      btn.disabled = false;
     }
   } catch (e) {
     wifiLog(`network: ${e.message}`, false);
-    btn.disabled = false;
   }
+  btn.disabled = false;
+}
+
+async function refreshWifiList() {
+  const ul = document.getElementById("wifi-aps");
+  if (!ul) return;
+  let aps = [];
+  try {
+    const r = await fetch(apiURL("/api/wifi/aps"));
+    const j = await r.json();
+    if (j.ok) aps = j.aps;
+  } catch { /* offline -- list stays as last fetched */ return; }
+  ul.innerHTML = "";
+  if (aps.length === 0) {
+    ul.innerHTML = `<li class="wifi-empty muted">${t("msg.wifi.empty")}</li>`;
+    return;
+  }
+  for (let i = 0; i < aps.length; i++) {
+    const a = aps[i];
+    const li = document.createElement("li");
+    li.className = "wifi-row";
+    /* Active marker uses the same ● + colour pattern as the title bar. */
+    const dot   = a.last_used ? `<span class="wifi-active" title="${t("msg.wifi.last_used")}">●</span>` : "";
+    const ssid  = escapeHtml(a.ssid);
+    const upDis = i === 0          ? "disabled" : "";
+    const dnDis = i === aps.length - 1 ? "disabled" : "";
+    li.innerHTML = `
+      <span class="wifi-ssid">${dot} ${ssid}</span>
+      <span class="wifi-pri">${i + 1}</span>
+      <button class="secondary wifi-up"   data-ssid="${ssid}" ${upDis}>↑</button>
+      <button class="secondary wifi-down" data-ssid="${ssid}" ${dnDis}>↓</button>
+      <button class="secondary wifi-del"  data-ssid="${ssid}" title="${t("btn.delete")}">✕</button>
+    `;
+    ul.appendChild(li);
+  }
+}
+
+async function wifiReorder(newOrder) {
+  try {
+    const r = await fetch(apiURL("/api/wifi/aps/order"), {
+      method:  "POST",
+      headers: { "Content-Type": "text/plain" },
+      body:    newOrder.join("\n"),
+    });
+    const j = await r.json();
+    if (!j.ok) wifiLog(`error: ${j.error}`, false);
+  } catch (e) { wifiLog(`network: ${e.message}`, false); }
+  refreshWifiList();
+}
+
+async function wifiDelete(ssid) {
+  if (!confirm(t("msg.wifi.confirm_delete", { ssid }))) return;
+  try {
+    const r = await fetch(apiURL("/api/wifi/aps/delete"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ssid }),
+    });
+    const j = await r.json();
+    if (!j.ok) wifiLog(`error: ${j.error}`, false);
+    else       wifiLog(t("msg.wifi.deleted", { ssid }), true);
+  } catch (e) { wifiLog(`network: ${e.message}`, false); }
+  refreshWifiList();
 }
 
 function wifiLog(msg, ok) {
@@ -5168,11 +5250,30 @@ function wifiInit() {
   document.getElementById("wifi-reveal").addEventListener("click", () => {
     wifiRevealed = !wifiRevealed;
     const t = wifiRevealed ? "text" : "password";
-    document.getElementById("wifi-password").type  = t;
-    document.getElementById("wifi-password2").type = t;
+    document.getElementById("wifi-password").type = t;
     document.getElementById("wifi-reveal").textContent = wifiRevealed ? "hide" : "show";
   });
+  /* Event delegation for the dynamically-rendered list rows. One
+   * listener on the <ul> instead of N per row. */
+  document.getElementById("wifi-aps").addEventListener("click", async ev => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+    const rows = [...document.querySelectorAll("#wifi-aps .wifi-row")];
+    const order = rows.map(r => r.querySelector(".wifi-up").dataset.ssid);
+    const ssid = btn.dataset.ssid;
+    const idx  = order.indexOf(ssid);
+    if (btn.classList.contains("wifi-up")   && idx > 0) {
+      [order[idx - 1], order[idx]] = [order[idx], order[idx - 1]];
+      await wifiReorder(order);
+    } else if (btn.classList.contains("wifi-down") && idx < order.length - 1) {
+      [order[idx], order[idx + 1]] = [order[idx + 1], order[idx]];
+      await wifiReorder(order);
+    } else if (btn.classList.contains("wifi-del")) {
+      await wifiDelete(ssid);
+    }
+  });
   wifiScan();
+  refreshWifiList();
 }
 
 /* OTA upload. Server enforces P-Lite gate on every byte; this code
