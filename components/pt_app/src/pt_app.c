@@ -262,9 +262,12 @@ static esp_err_t credlist_set_last_used(const char *ssid)
  * taps -- BOOT is also the bootloader-mode pin on power-on, so people
  * tend to press it. */
 
-#define OTA_HOLD_MS    3000   /* min hold-then-release to toggle OTA gate */
-#define RESET_HOLD_MS  5000   /* sustained hold past this = wipe creds */
-#define RESET_POLL_MS  50     /* GPIO sample period */
+#define OTA_HOLD_MS    3000    /* min hold-then-release to toggle OTA gate */
+#define RESET_HOLD_MS  30000   /* sustained hold past this = wipe creds.
+                                * Deliberately long: wipe is destructive
+                                * and brushing against the BOOT button
+                                * for a few seconds shouldn't trip it. */
+#define RESET_POLL_MS  50      /* GPIO sample period */
 
 /* True when the BOOT button has flipped the OTA gate open. Mirrors
  * the role of "printer in P-Lite" mode: while either is true, the
@@ -306,9 +309,10 @@ static void reset_button_task(void *arg)
                 vTaskDelay(pdMS_TO_TICKS(100));
                 esp_restart();
             } else if (held >= pdMS_TO_TICKS(OTA_HOLD_MS) && !wipe_arm_logged) {
-                ESP_LOGI(TAG, "button: held %lu ms -- release now to toggle OTA gate, "
-                              "or keep holding past %d ms to wipe creds",
-                         (unsigned long)pdTICKS_TO_MS(held), RESET_HOLD_MS);
+                ESP_LOGI(TAG, "button: held %lu ms -- release any time before %d s "
+                              "to toggle OTA gate; keep holding to %d s to wipe creds",
+                         (unsigned long)pdTICKS_TO_MS(held),
+                         RESET_HOLD_MS / 1000, RESET_HOLD_MS / 1000);
                 wipe_arm_logged = true;
             }
         } else if (!down && pressed_at != 0) {
@@ -1214,10 +1218,10 @@ static esp_err_t api_ota_status(httpd_req_t *req)
      * options to open it when neither is engaged. */
     const char *reason;
     if (ota_button_gate_active() && ota_plite_gate())     reason = "P-Lite mode + BOOT button gate";
-    else if (ota_button_gate_active())                    reason = "BOOT button gate (hold 3-5 s + release to close)";
+    else if (ota_button_gate_active())                    reason = "BOOT button gate (hold 3-29 s + release to close)";
     else if (ota_plite_gate())                            reason = "P-Lite mode";
     else reason = "printer must be in P-Lite mode (slide switch to EL), "
-                  "or hold the BOOT button 3-5 s and release";
+                  "or hold the BOOT button 3-29 s and release";
     char body[320];
     int n = snprintf(body, sizeof body,
         "{\"available\":%s,\"reason\":\"%s\","

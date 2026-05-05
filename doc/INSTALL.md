@@ -91,13 +91,13 @@ how long you hold it (release time matters):
 
 | Gesture | What happens |
 |---|---|
-| Hold 3-5 s, then **release** | Toggle the OTA gate. Lets a dev board test OTA without a printer attached. The Status view's "Firmware update" panel appears; press again to close. |
-| Hold 5+ s **without releasing** | NVS Wi-Fi creds wiped, board reboots into AP-mode onboarding. |
+| Hold 3-30 s, then **release** | Toggle the OTA gate. Lets a dev board test OTA without a printer attached. The Status view's "Firmware update" panel appears; press again to close. |
+| Hold **30+ s without releasing** | NVS Wi-Fi creds wiped, board reboots into AP-mode onboarding. Deliberately long because the action is destructive. |
 | Tap (< 3 s) | Ignored (avoids accidental triggers; BOOT is also the bootloader-mode pin on power-on). |
 
 The serial log announces the disarm window: hold past 3 s and you'll
-see `button: held 3050 ms -- release now to toggle OTA gate, or keep
-holding past 5000 ms to wipe creds`.
+see `button: held 3050 ms -- release any time before 30 s to toggle
+OTA gate; keep holding to 30 s to wipe creds`.
 
 To use a different GPIO, change `pt_app_config.reset_gpio_num` in
 `main/main.c`. Negative value disables it.
