@@ -37,7 +37,7 @@ app, no cloud account, no telemetry.
 - **Mock dev server** (Python stdlib only) -- iterate the SPA without
   flashing or even owning the printer.
 
-# Integrating into PT700
+## Integrating into PT700
 
 I integrated the ESP32-S2/ESP32-S3 board into my Brother P-touch PT700 label printer:
 
