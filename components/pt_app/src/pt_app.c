@@ -52,12 +52,14 @@ static const char *TAG = "pt_app";
  *
  * Buffer sizes per IEEE 802.11 SSID (32 bytes + NUL) and the WPA2 PSK
  * string form (64 chars + NUL). Cap at MAX_APS so the blob is fixed
- * size (~820 B); plenty for a portable device's typical few sites. */
+ * size; 4 covers the typical portable use (home, office, hotspot,
+ * workshop) without bloating NVS. */
 #define CREDS_NS         "pt_app"
 #define CREDS_LEGACY_SSID "ssid"
 #define CREDS_LEGACY_PASS "pass"
 #define CREDS_BLOB_KEY    "wifi_v1"
-#define MAX_APS           8
+#define PRESCAN_KEY       "wifi_prescan"   /* uint8 0/1; default 0 */
+#define MAX_APS           4
 
 typedef struct {
     char ssid[33];
@@ -120,7 +122,10 @@ static esp_err_t credlist_load(wifi_creds_blob_t *out)
         return ESP_OK;
     }
     /* Either the blob is absent, or its shape doesn't match -- in
-     * either case fall back to the legacy migration path. */
+     * either case fall back to the legacy migration path. Wipe out
+     * first so a corrupt-but-right-sized blob (or a downgrade from a
+     * larger MAX_APS) can't leak its bytes into the fallback. */
+    memset(out, 0, sizeof *out);
     credlist_migrate_legacy(out);
     return out->count ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
@@ -224,6 +229,7 @@ static esp_err_t credlist_reorder(const char *order_buf, size_t len)
         const char *line_end = memchr(p, '\n', end - p);
         if (!line_end) line_end = end;
         size_t llen = line_end - p;
+        if (llen > 0 && p[llen - 1] == '\r') llen--;   /* tolerate CRLF */
         if (llen > 0 && llen < sizeof reordered[0].ssid) {
             char ssid[33] = {0};
             memcpy(ssid, p, llen);
@@ -251,6 +257,32 @@ static esp_err_t credlist_set_last_used(const char *ssid)
     memset(cl.last_used, 0, sizeof cl.last_used);
     strncpy(cl.last_used, ssid, sizeof cl.last_used - 1);
     return credlist_save(&cl);
+}
+
+/* Pre-scan toggle. When enabled, the boot loop scans the band first
+ * and only attempts APs whose SSIDs are visible in the scan -- this
+ * avoids paying the 15 s connect timeout for each unreachable entry
+ * when the user has moved to a new site. Default off because hidden
+ * APs (no probe response) wouldn't show up and would be skipped. */
+static bool prescan_load_enabled(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(CREDS_NS, NVS_READONLY, &h) != ESP_OK) return false;
+    uint8_t v = 0;
+    nvs_get_u8(h, PRESCAN_KEY, &v);
+    nvs_close(h);
+    return v != 0;
+}
+
+static esp_err_t prescan_save_enabled(bool enabled)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(CREDS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, PRESCAN_KEY, enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
 }
 
 /* BOOT button -- two gestures share one input. The release moment is
@@ -346,7 +378,13 @@ static void reset_button_up(int gpio)
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
-#define WIFI_MAX_RETRIES   8
+#define WIFI_MAX_RETRIES   3
+/* Per-AP wait. With multi-AP, this is the budget we burn per
+ * unreachable entry, so keep it tight; a healthy WPA2 association
+ * completes in <5 s. Worst case 4 unreachable APs = 60 s before the
+ * captive-portal AP comes up. Pre-scan (opt-in) skips this entirely
+ * for SSIDs that aren't on air. */
+#define WIFI_STA_WAIT_MS   15000
 
 static EventGroupHandle_t s_wifi_event_group;
 static int                s_retry_count;
@@ -413,6 +451,50 @@ static esp_err_t wifi_init_once(void)
     return ESP_OK;
 }
 
+/* Pre-scan: spin up the radio in STA mode, run a blocking active scan,
+ * mark which entries of `cl` were heard on air. Caller is responsible
+ * for the subsequent connect attempt (which restarts the radio with
+ * a fresh STA config). Returns ESP_OK with `visible[]` populated on
+ * success, or ESP_FAIL if the scan itself errored -- callers should
+ * fall back to "try every AP" in that case. */
+static esp_err_t prescan_filter(const wifi_creds_blob_t *cl,
+                                bool *visible_out)
+{
+    memset(visible_out, 0, sizeof(bool) * MAX_APS);
+    if (cl->count == 0) return ESP_OK;
+    if (wifi_init_once() != ESP_OK) return ESP_FAIL;
+
+    /* Make sure the radio is started in pure STA mode. esp_wifi_start
+     * after a stop is a no-op-ish init; safe to call. */
+    esp_wifi_stop();
+    if (esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK) return ESP_FAIL;
+    if (esp_wifi_start() != ESP_OK)                 return ESP_FAIL;
+
+    wifi_scan_config_t scfg = {0};   /* all channels, all SSIDs, active */
+    esp_err_t err = esp_wifi_scan_start(&scfg, true /* blocking */);
+    if (err != ESP_OK) return ESP_FAIL;
+
+    uint16_t n = 0;
+    esp_wifi_scan_get_ap_num(&n);
+    if (n == 0) return ESP_OK;       /* nothing on air -- visible[] all false */
+
+    wifi_ap_record_t *recs = calloc(n, sizeof *recs);
+    if (!recs) return ESP_ERR_NO_MEM;
+    err = esp_wifi_scan_get_ap_records(&n, recs);
+    if (err != ESP_OK) { free(recs); return ESP_FAIL; }
+
+    for (int i = 0; i < cl->count; i++) {
+        for (uint16_t j = 0; j < n; j++) {
+            if (strcmp(cl->aps[i].ssid, (const char *)recs[j].ssid) == 0) {
+                visible_out[i] = true;
+                break;
+            }
+        }
+    }
+    free(recs);
+    return ESP_OK;
+}
+
 /* Bring up STA against a single SSID. Re-entrant: when called a second
  * time (because the previous AP failed and we're trying the next in
  * the priority list) it stops the radio first, reconfigures, and
@@ -446,7 +528,7 @@ static esp_err_t wifi_sta_up(const char *ssid, const char *password)
 
     EventBits_t bits = xEventGroupWaitBits(
         s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
+        pdFALSE, pdFALSE, pdMS_TO_TICKS(WIFI_STA_WAIT_MS));
     return (bits & WIFI_CONNECTED_BIT) ? ESP_OK : ESP_FAIL;
 }
 
@@ -1376,6 +1458,7 @@ static esp_err_t api_wifi_list(httpd_req_t *req);
 static esp_err_t api_wifi_add(httpd_req_t *req);
 static esp_err_t api_wifi_delete(httpd_req_t *req);
 static esp_err_t api_wifi_order(httpd_req_t *req);
+static esp_err_t api_wifi_prescan(httpd_req_t *req);
 
 static esp_err_t http_up(uint16_t port)
 {
@@ -1460,6 +1543,10 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/wifi/aps/order", .method = HTTP_POST,
         .handler = api_wifi_order, .user_ctx = NULL,
     };
+    static const httpd_uri_t wifi_prescan_route = {
+        .uri = "/api/wifi/prescan", .method = HTTP_POST,
+        .handler = api_wifi_prescan, .user_ctx = NULL,
+    };
     static const httpd_uri_t cors_route = {
         .uri = "/*", .method = HTTP_OPTIONS,
         .handler = cors_preflight, .user_ctx = NULL,
@@ -1481,6 +1568,7 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &wifi_add_route);
     httpd_register_uri_handler(s_http, &wifi_delete_route);
     httpd_register_uri_handler(s_http, &wifi_order_route);
+    httpd_register_uri_handler(s_http, &wifi_prescan_route);
     httpd_register_uri_handler(s_http, &cors_route);
     /* HTTP is serving requests now -- if we just OTA'd into this
      * image, that's enough proof of life to cancel the rollback
@@ -1651,7 +1739,8 @@ static esp_err_t api_setup(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* GET /api/wifi/aps -- list configured APs (no passwords). */
+/* GET /api/wifi/aps -- list configured APs (no passwords) plus the
+ * prescan toggle (so the SPA renders consistent state in one fetch). */
 static esp_err_t api_wifi_list(httpd_req_t *req)
 {
     cors_headers(req);
@@ -1659,9 +1748,10 @@ static esp_err_t api_wifi_list(httpd_req_t *req)
 
     wifi_creds_blob_t cl = {0};
     credlist_load(&cl);   /* empty list still produces valid JSON */
+    bool prescan = prescan_load_enabled();
 
-    /* Cap-bounded buffer: 8 entries * ~80 chars each + chrome <~ 800 */
-    char body[1024];
+    /* Cap-bounded buffer: MAX_APS entries * ~80 chars each + chrome */
+    char body[768];
     int  off = 0;
     off += snprintf(body + off, sizeof body - off, "{\"ok\":true,\"aps\":[");
     for (int i = 0; i < cl.count && off < (int)sizeof body - 64; i++) {
@@ -1679,7 +1769,9 @@ static esp_err_t api_wifi_list(httpd_req_t *req)
                         "%s{\"ssid\":\"%s\",\"last_used\":%s}",
                         i ? "," : "", esc, last ? "true" : "false");
     }
-    off += snprintf(body + off, sizeof body - off, "]}");
+    off += snprintf(body + off, sizeof body - off,
+                    "],\"prescan\":%s,\"max_aps\":%d}",
+                    prescan ? "true" : "false", MAX_APS);
     return httpd_resp_send(req, body, off);
 }
 
@@ -1743,6 +1835,30 @@ static esp_err_t api_wifi_order(httpd_req_t *req)
     if (credlist_reorder(body, rcvd) != ESP_OK)
         return json_error(req, "500 Internal Server Error", "nvs_save");
 
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+/* POST /api/wifi/prescan -- {enabled:bool}. Persisted to NVS; takes
+ * effect on next boot (the boot loop reads it before the try-list). */
+static esp_err_t api_wifi_prescan(httpd_req_t *req)
+{
+    char body[64];
+    if (read_json_body(req, body, sizeof body) != 0)
+        return json_error(req, "400 Bad Request", "bad_body");
+    /* Accept either bare-bool ({"enabled":true}) -- extract_str is
+     * string-only, so look for the literal "true"/"false" tokens. */
+    bool enabled;
+    if      (strstr(body, "\"enabled\":true"))  enabled = true;
+    else if (strstr(body, "\"enabled\":false")) enabled = false;
+    else return json_error(req, "400 Bad Request", "missing_enabled");
+
+    if (prescan_save_enabled(enabled) != ESP_OK)
+        return json_error(req, "500 Internal Server Error", "nvs_save");
+
+    ESP_LOGI(TAG, "wifi: prescan %s (effective on next boot)",
+             enabled ? "enabled" : "disabled");
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"ok\":true}");
@@ -1849,12 +1965,39 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         }
 
         pt_led_set(PT_LED_STA_CONNECTING);
+
+        /* Optional pre-scan: skip APs that aren't on air, so we don't
+         * burn 15 s per missing entry. Off by default; opted in by the
+         * user via /api/wifi/prescan. If the scan itself errors, fall
+         * through to "try every AP" so a flaky radio doesn't strand
+         * the device in AP mode. */
+        bool visible[MAX_APS] = {0};
+        bool filter           = false;
+        if (prescan_load_enabled()) {
+            ESP_LOGI(TAG, "wifi: pre-scan enabled -- scanning band first");
+            if (prescan_filter(&cl, visible) == ESP_OK) {
+                int seen = 0;
+                for (int i = 0; i < cl.count; i++) if (visible[i]) seen++;
+                ESP_LOGI(TAG, "wifi: prescan -- %d/%d configured APs on air",
+                         seen, cl.count);
+                filter = true;
+            } else {
+                ESP_LOGW(TAG, "wifi: prescan failed -- trying every AP");
+            }
+        }
+
         for (int j = 0; j < n; j++) {
-            const wifi_ap_t *ap = &cl.aps[order[j]];
+            int idx = order[j];
+            if (filter && !visible[idx]) {
+                ESP_LOGI(TAG, "wifi: skipping %s (not visible in prescan)",
+                         cl.aps[idx].ssid);
+                continue;
+            }
+            const wifi_ap_t *ap = &cl.aps[idx];
             ESP_LOGI(TAG, "wifi: trying %s (%s)",
                      ap->ssid,
-                     order[j] == last_idx ? "last used" :
-                     j == 0               ? "highest priority" : "next in order");
+                     idx == last_idx     ? "last used" :
+                     j   == 0            ? "highest priority" : "next in order");
             if (wifi_sta_up(ap->ssid, ap->password) == ESP_OK) {
                 ESP_LOGI(TAG, "wifi: associated to %s", ap->ssid);
                 credlist_set_last_used(ap->ssid);
@@ -1864,8 +2007,8 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
             ESP_LOGW(TAG, "wifi: %s failed", ap->ssid);
         }
         if (!connected) {
-            ESP_LOGW(TAG, "wifi: all %d configured APs failed -- entering AP onboarding",
-                     cl.count);
+            ESP_LOGW(TAG, "wifi: %d configured APs %s-- entering AP onboarding",
+                     cl.count, filter ? "filtered/failed " : "failed ");
         }
     } else {
         ESP_LOGW(TAG, "wifi: no APs configured -- entering AP onboarding");

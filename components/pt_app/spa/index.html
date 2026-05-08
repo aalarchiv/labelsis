@@ -764,6 +764,13 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <h2 data-i18n="panel.wifi">Wi-Fi networks</h2>
       <p class="muted" data-i18n="panel.wifi.help">LabelSis tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.</p>
       <ul id="wifi-aps" class="wifi-aps"></ul>
+      <div class="row wifi-prescan-row">
+        <label for="wifi-prescan" style="flex:1">
+          <input type="checkbox" id="wifi-prescan">
+          <span data-i18n="field.wifi.prescan">scan band first, skip APs not on air</span>
+        </label>
+      </div>
+      <p class="muted wifi-prescan-help" data-i18n="panel.wifi.prescan.help">Cuts boot time when configured networks aren't reachable. Off by default because hidden SSIDs (no probe response) wouldn't show up and would be skipped.</p>
       <hr class="wifi-sep">
       <p class="muted" data-i18n="panel.wifi.add">Add a network:</p>
       <div class="row">
@@ -858,6 +865,7 @@ const STRINGS = {
     "about.licenses":          "Third-party components bundled with this firmware:",
     "panel.wifi":              "Wi-Fi networks",
     "panel.wifi.help":         "LabelSis tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.",
+    "panel.wifi.prescan.help": "Cuts boot time when configured networks aren't reachable. Off by default because hidden SSIDs (no probe response) wouldn't show up and would be skipped.",
     "panel.wifi.add":          "Add a network:",
     "panel.api-host":          "API host",
     "panel.api-host.help":     "When the SPA is loaded outside the device (localhost dev server), set this to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this.",
@@ -867,6 +875,7 @@ const STRINGS = {
     "field.wifi.ssid":         "or type",
     "field.wifi.password":     "password",
     "field.wifi.confirm":      "confirm",
+    "field.wifi.prescan":      "scan band first, skip APs not on air",
     "field.api-host":          "API host",
     "field.lang":              "UI language",
     "btn.wifi.rescan":         "rescan",
@@ -981,6 +990,9 @@ const STRINGS = {
     "msg.wifi.added":          "added \"{ssid}\"",
     "msg.wifi.deleted":        "deleted \"{ssid}\"",
     "msg.wifi.confirm_delete": "Remove network \"{ssid}\"?",
+    "msg.wifi.full":           "List is full ({n} max). Remove one before adding another.",
+    "msg.wifi.prescan.on":     "Pre-scan enabled (takes effect on next reboot)",
+    "msg.wifi.prescan.off":    "Pre-scan disabled (takes effect on next reboot)",
   },
 };
 
@@ -5178,11 +5190,16 @@ async function refreshWifiList() {
   const ul = document.getElementById("wifi-aps");
   if (!ul) return;
   let aps = [];
+  let prescan = false;
   try {
     const r = await fetch(apiURL("/api/wifi/aps"));
     const j = await r.json();
-    if (j.ok) aps = j.aps;
+    if (j.ok) { aps = j.aps; prescan = !!j.prescan; }
   } catch { /* offline -- list stays as last fetched */ return; }
+  /* Sync the toggle's UI state to whatever the device persisted, so a
+   * page reload from a different tab can't show stale checkbox state. */
+  const cb = document.getElementById("wifi-prescan");
+  if (cb) cb.checked = prescan;
   ul.innerHTML = "";
   if (aps.length === 0) {
     ul.innerHTML = `<li class="wifi-empty muted">${t("msg.wifi.empty")}</li>`;
@@ -5221,6 +5238,27 @@ async function wifiReorder(newOrder) {
   refreshWifiList();
 }
 
+async function wifiSetPrescan(enabled) {
+  try {
+    const r = await fetch(apiURL("/api/wifi/prescan"), {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ enabled }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      wifiLog(t(enabled ? "msg.wifi.prescan.on" : "msg.wifi.prescan.off"), true);
+    } else {
+      wifiLog(`error: ${j.error}`, false);
+      /* Revert the checkbox if the server refused. */
+      document.getElementById("wifi-prescan").checked = !enabled;
+    }
+  } catch (e) {
+    wifiLog(`network: ${e.message}`, false);
+    document.getElementById("wifi-prescan").checked = !enabled;
+  }
+}
+
 async function wifiDelete(ssid) {
   if (!confirm(t("msg.wifi.confirm_delete", { ssid }))) return;
   try {
@@ -5254,6 +5292,9 @@ function wifiInit() {
     const t = wifiRevealed ? "text" : "password";
     document.getElementById("wifi-password").type = t;
     document.getElementById("wifi-reveal").textContent = wifiRevealed ? "hide" : "show";
+  });
+  document.getElementById("wifi-prescan").addEventListener("change", e => {
+    wifiSetPrescan(e.target.checked);
   });
   /* Event delegation for the dynamically-rendered list rows. One
    * listener on the <ul> instead of N per row. */

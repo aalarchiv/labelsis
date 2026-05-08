@@ -87,6 +87,8 @@ WIFI_APS = [
     {"ssid": "Office",     "password": "officepw"},
 ]
 WIFI_LAST_USED = "Home Wi-Fi"
+WIFI_PRESCAN   = False
+WIFI_MAX       = 4         # mirror MAX_APS in pt_app.c
 
 CORS = {
     "Access-Control-Allow-Origin":  "*",
@@ -266,6 +268,8 @@ class Handler(BaseHTTPRequestHandler):
                 "aps": [{"ssid": a["ssid"],
                          "last_used": a["ssid"] == WIFI_LAST_USED}
                         for a in WIFI_APS],
+                "prescan": WIFI_PRESCAN,
+                "max_aps": WIFI_MAX,
             })
             return
 
@@ -289,7 +293,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # /api/wifi/aps/{add,delete,order} mutate the in-memory AP list,
         # so the global declaration must cover the whole function.
-        global WIFI_APS, WIFI_LAST_USED
+        global WIFI_APS, WIFI_LAST_USED, WIFI_PRESCAN
         path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length", "0") or 0)
         body = self.rfile.read(length) if length > 0 else b""
@@ -341,7 +345,7 @@ class Handler(BaseHTTPRequestHandler):
             if existing:
                 existing["password"] = password
                 self.log_extra(f"wifi: replaced password for {ssid!r}")
-            elif len(WIFI_APS) >= 8:
+            elif len(WIFI_APS) >= WIFI_MAX:
                 self._send_json(507, {"ok": False, "error": "list_full"})
                 return
             else:
@@ -368,12 +372,26 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/wifi/aps/order":
-            wanted = [s for s in body.decode().split("\n") if s]
+            wanted = [s.rstrip("\r") for s in body.decode().split("\n") if s.rstrip("\r")]
             existing = {a["ssid"]: a for a in WIFI_APS}
             new_order = [existing[s] for s in wanted if s in existing]
             tail      = [a for a in WIFI_APS if a["ssid"] not in wanted]
             WIFI_APS  = new_order + tail
             self.log_extra(f"wifi: reordered -> {[a['ssid'] for a in WIFI_APS]}")
+            self._send_json(200, {"ok": True})
+            return
+
+        if path == "/api/wifi/prescan":
+            try:
+                data = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._send_json(400, {"ok": False, "error": "bad_json"})
+                return
+            if "enabled" not in data:
+                self._send_json(400, {"ok": False, "error": "missing_enabled"})
+                return
+            WIFI_PRESCAN = bool(data["enabled"])
+            self.log_extra(f"wifi: prescan {'enabled' if WIFI_PRESCAN else 'disabled'}")
             self._send_json(200, {"ok": True})
             return
 

@@ -13,6 +13,7 @@
   "about.licenses":          "Drittanbieter-Komponenten in dieser Firmware:",
   "panel.wifi":              "WLAN-Netzwerke",
   "panel.wifi.help":         "Beim Start versucht LabelSis jedes gespeicherte Netzwerk der Reihe nach (zuletzt benutztes zuerst). Der AP-Onboarding-Modus startet nur, wenn alle fehlschlagen. Netzwerke für jeden Standort (zuhause, Büro, Werkstatt) hinterlegen, dann wählt das Gerät automatisch das jeweils erreichbare.",
+  "panel.wifi.prescan.help": "Verkürzt die Bootzeit, wenn konfigurierte Netzwerke nicht erreichbar sind. Standardmäßig aus, weil versteckte SSIDs (ohne Probe-Antwort) nicht erkannt und deshalb übersprungen würden.",
   "panel.wifi.add":          "Netzwerk hinzufügen:",
   "panel.api-host":          "API-Host",
   "panel.api-host.help":     "Wenn die SPA außerhalb des Geräts geladen wird (lokaler Dev-Server), hier die Geräte-URL setzen, damit die Seite das Gerät über CORS erreicht. Der eingebettete Build verwendet die gleiche Origin und ignoriert dies.",
@@ -106,6 +107,7 @@
   "field.wifi.ssid":         "oder eintippen",
   "field.wifi.password":     "Passwort",
   "field.wifi.confirm":      "bestätigen",
+  "field.wifi.prescan":      "Band zuerst scannen, nicht erreichbare APs überspringen",
   "field.api-host":          "API-Host",
   "field.lang":              "UI-Sprache",
   "btn.wifi.rescan":         "neu suchen",
@@ -125,5 +127,8 @@
   "msg.wifi.saving":         "speichere…",
   "msg.wifi.added":          "„{ssid}“ hinzugefügt",
   "msg.wifi.deleted":        "„{ssid}“ gelöscht",
-  "msg.wifi.confirm_delete": "Netzwerk „{ssid}“ löschen?"
+  "msg.wifi.confirm_delete": "Netzwerk „{ssid}“ löschen?",
+  "msg.wifi.full":           "Liste voll (max. {n}). Bitte erst einen Eintrag entfernen.",
+  "msg.wifi.prescan.on":     "Pre-Scan aktiviert (wirkt beim nächsten Start)",
+  "msg.wifi.prescan.off":    "Pre-Scan deaktiviert (wirkt beim nächsten Start)"
 }
