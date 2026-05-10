@@ -1324,10 +1324,10 @@ static esp_err_t api_ota_status(httpd_req_t *req)
      * options to open it when neither is engaged. */
     const char *reason;
     if (ota_button_gate_active() && ota_plite_gate())     reason = "P-Lite mode + BOOT button gate";
-    else if (ota_button_gate_active())                    reason = "BOOT button gate (hold 3-29 s + release to close)";
+    else if (ota_button_gate_active())                    reason = "BOOT button gate (hold 2-30 s + release to close)";
     else if (ota_plite_gate())                            reason = "P-Lite mode";
     else reason = "printer must be in P-Lite mode (slide switch to EL), "
-                  "or hold the BOOT button 3-29 s and release";
+                  "or hold the BOOT button 2-30 s and release (device must be online)";
     char body[320];
     int n = snprintf(body, sizeof body,
         "{\"available\":%s,\"reason\":\"%s\","

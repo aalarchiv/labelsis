@@ -230,6 +230,13 @@ canvas { display:block; image-rendering:pixelated; background:#fff; }
 .about-licenses dt a:hover, .about-link:hover
                     { text-decoration:underline; }
 .about-licenses dd  { margin:0 0 .5rem 1rem; color:var(--muted); }
+/* About panel header: title on the left, app icon top-right. The
+ * icon doubles as a homepage link; same destination as the inline
+ * "LabelSis" link in the body but more visually anchored. */
+.about-header     { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:.5rem; }
+.about-icon-link  { flex-shrink:0; line-height:0; opacity:.92; transition:opacity .15s; }
+.about-icon-link:hover { opacity:1; }
+.about-icon       { width:64px; height:64px; display:block; }
 .color-chip   { display:inline-block; width:.85em; height:.85em; vertical-align:middle; border:1px solid var(--line); border-radius:2px; margin-right:.25em; }
 .kv-ok  { color:var(--ok); }
 .kv-err { color:var(--err); }
@@ -375,7 +382,16 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 <main>
   <section id="view-status" hidden>
     <div class="panel">
-      <h2 data-i18n="panel.about">About</h2>
+      <div class="about-header">
+        <h2 data-i18n="panel.about" style="margin:0;">About</h2>
+        <a href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener"
+           class="about-icon-link" aria-label="LabelSis homepage"
+           data-i18n-attr="title:about.icon.tooltip"
+           title="LabelSis -- open the project page on GitHub">
+          <img class="about-icon" alt="LabelSis"
+               src="data:image/png;base64,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">
+        </a>
+      </div>
       <p class="muted"><a class="about-link" href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener">LabelSis</a> <span data-i18n="about.intro">- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</span></p>
       <p class="muted"><span data-i18n="about.firmware">Firmware</span>: <span id="about-fw-version">…</span></p>
       <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
@@ -434,20 +450,42 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="zoom-reset" class="secondary" type="button" hidden title="reset zoom">fit</button>
       </div>
       <div class="row canvas-opts" style="margin-top:.5rem; flex-wrap:wrap; gap:.5rem .75rem;">
-        <label data-i18n="field.length">length</label>
-        <select id="opt-len-mode" style="max-width:90px; min-width:80px;">
+        <label data-i18n="field.length"
+               data-i18n-attr="title:field.length.help"
+               title="auto: tape length grows to fit the design. fixed: cap at the value below; design is clipped if it overflows.">length</label>
+        <select id="opt-len-mode" style="max-width:90px; min-width:80px;"
+                data-i18n-attr="title:field.length.help"
+                title="auto: tape length grows to fit the design. fixed: cap at the value below; design is clipped if it overflows.">
           <option value="auto"  data-i18n="field.length.auto">auto</option>
           <option value="fixed" data-i18n="field.length.fixed">fixed</option>
         </select>
-        <input id="opt-len-mm" type="number" min="5" max="500" step="1" value="30" style="max-width:80px; min-width:60px;">
+        <input id="opt-len-mm" type="number" min="5" max="500" step="1" value="30" style="max-width:80px; min-width:60px;"
+               data-i18n-attr="title:field.length.mm.help"
+               title="Label length in millimetres (only used when length = fixed).">
         <span class="muted" style="font-size:.85rem;">mm</span>
         <span style="flex:1; min-width:0;"></span>
-        <label><input id="opt-colors" type="checkbox"> <span data-i18n="field.colors">colors</span></label>
-        <label><input id="opt-rulers" type="checkbox"> <span data-i18n="field.rulers">rulers</span></label>
-        <label><input id="opt-grid"   type="checkbox"> <span data-i18n="field.grid">grid</span></label>
-        <label><input id="opt-center" type="checkbox"> <span data-i18n="field.center">center</span></label>
-        <label data-i18n="field.origin">origin</label>
-        <select id="opt-origin" style="max-width:130px; min-width:100px;">
+        <label data-i18n-attr="title:field.colors.help"
+               title="Render the canvas in the actual tape + ink colours from the loaded cartridge so the on-screen preview matches the print.">
+          <input id="opt-colors" type="checkbox"> <span data-i18n="field.colors">colors</span>
+        </label>
+        <label data-i18n-attr="title:field.rulers.help"
+               title="Show millimetre rulers on the canvas edges for layout reference. Doesn't affect the print.">
+          <input id="opt-rulers" type="checkbox"> <span data-i18n="field.rulers">rulers</span>
+        </label>
+        <label data-i18n-attr="title:field.grid.help"
+               title="Show a 1 mm grid overlay on the canvas. Visual aid only -- doesn't snap and doesn't print.">
+          <input id="opt-grid"   type="checkbox"> <span data-i18n="field.grid">grid</span>
+        </label>
+        <label data-i18n-attr="title:field.center.help"
+               title="Auto-shift the design to the canvas centre on every edit. Convenient for symmetric labels; turn off when manually placing elements.">
+          <input id="opt-center" type="checkbox"> <span data-i18n="field.center">center</span>
+        </label>
+        <label data-i18n="field.origin"
+               data-i18n-attr="title:field.origin.help"
+               title="Where (0, 0) lives on the canvas. The selected element's x/y coordinates are measured from this anchor.">origin</label>
+        <select id="opt-origin" style="max-width:130px; min-width:100px;"
+                data-i18n-attr="title:field.origin.help"
+                title="Where (0, 0) lives on the canvas. The selected element's x/y coordinates are measured from this anchor.">
           <option value="tl" data-i18n="field.origin.tl">top-left</option>
           <option value="tc" data-i18n="field.origin.tc">top-center</option>
           <option value="cl" data-i18n="field.origin.cl">center-left</option>
@@ -476,9 +514,15 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       </div>
       <!-- Group: print actions -->
       <div class="row group-start" style="margin-top:.5rem">
-        <label><input id="print-auto-cut" type="checkbox" checked> <span data-i18n="field.auto-cut">auto cut</span></label>
-        <label><input id="print-mirror"   type="checkbox"> <span data-i18n="field.mirror">mirror</span></label>
-        <label><input id="print-chain"    type="checkbox"> <span data-i18n="field.chain">chain</span></label>
+        <label data-i18n-attr="title:field.auto-cut.help" title="Cut the tape after each label. Brother printers feed ~25 mm of leader tape after each cut, which gets wasted -- leave off if you're printing a single label and don't want the leader to bin.">
+          <input id="print-auto-cut" type="checkbox"> <span data-i18n="field.auto-cut">auto cut</span>
+        </label>
+        <label data-i18n-attr="title:field.mirror.help" title="Print the design horizontally mirrored. Mainly useful for transparent tape applied behind glass / window decals so it reads correctly from the front.">
+          <input id="print-mirror"   type="checkbox"> <span data-i18n="field.mirror">mirror</span>
+        </label>
+        <label data-i18n-attr="title:field.chain.help" title="Suppress feed + cut at the end of this print. The next print will start exactly where this one ended -- saves the leader on each label. The tape stays inside the printer until you cut it manually or print again with auto cut on.">
+          <input id="print-chain"    type="checkbox"> <span data-i18n="field.chain">chain</span>
+        </label>
         <span class="spacer"></span>
         <button id="print"     data-i18n="btn.print">Print</button>
         <button id="print-all" class="secondary" hidden data-i18n="btn.print.all">Print all rows</button>
@@ -863,6 +907,7 @@ const STRINGS = {
     "about.intro":             "- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.",
     "about.firmware":          "Firmware",
     "about.licenses":          "Third-party components bundled with this firmware:",
+    "about.icon.tooltip":      "LabelSis -- open the project page on GitHub",
     "panel.wifi":              "Wi-Fi networks",
     "panel.wifi.help":         "LabelSis tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.",
     "panel.wifi.prescan.help": "Cuts boot time when configured networks aren't reachable. Off by default because hidden SSIDs (no probe response) wouldn't show up and would be skipped.",
@@ -931,18 +976,28 @@ const STRINGS = {
     "field.length":            "length",
     "field.length.auto":       "auto",
     "field.length.fixed":      "fixed",
+    "field.length.help":       "auto: tape length grows to fit the design. fixed: cap at the value below; design is clipped if it overflows.",
+    "field.length.mm.help":    "Label length in millimetres (only used when length = fixed).",
     "field.colors":            "colors",
+    "field.colors.help":       "Render the canvas in the actual tape + ink colours from the loaded cartridge so the on-screen preview matches the print.",
     "field.rulers":             "rulers",
+    "field.rulers.help":        "Show millimetre rulers on the canvas edges for layout reference. Doesn't affect the print.",
     "field.grid":               "grid",
+    "field.grid.help":          "Show a 1 mm grid overlay on the canvas. Visual aid only -- doesn't snap and doesn't print.",
     "field.center":             "center",
+    "field.center.help":        "Auto-shift the design to the canvas centre on every edit. Convenient for symmetric labels; turn off when manually placing elements.",
     "field.origin":            "origin",
+    "field.origin.help":       "Where (0, 0) lives on the canvas. The selected element's x/y coordinates are measured from this anchor.",
     "field.origin.tl":         "top-left",
     "field.origin.tc":         "top-center",
     "field.origin.cl":         "center-left",
     "field.origin.c":          "center",
     "field.auto-cut":          "auto cut",
+    "field.auto-cut.help":     "Cut the tape after each label. Brother printers feed ~25 mm of leader tape after each cut, which gets wasted -- leave off if you're printing a single label and don't want the leader to bin.",
     "field.mirror":            "mirror",
+    "field.mirror.help":       "Print the design horizontally mirrored. Mainly useful for transparent tape applied behind glass / window decals so it reads correctly from the front.",
     "field.chain":             "chain",
+    "field.chain.help":        "Suppress feed + cut at the end of this print. The next print will start exactly where this one ended -- saves the leader on each label. The tape stays inside the printer until you cut it manually or print again with auto cut on.",
     "field.text":              "text",
     "field.font":              "font",
     "field.style":             "style",
