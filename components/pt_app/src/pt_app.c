@@ -1496,20 +1496,18 @@ static esp_err_t http_up(uint16_t port)
      * feed, scan, setup, index, fonts*2, favicon, ota*2, wifi*5,
      * OPTIONS catch-all) and want headroom. */
     cfg.max_uri_handlers = 24;
-    /* Default max_open_sockets is 7. The SPA polls /api/status every
-     * 3 s; with HTTP/1.1 keep-alive plus the initial page-load burst
-     * (HTML + qrcode.js + icon font + codepoints.json + favicon) the
-     * pool can pin under load and the browser starves new requests --
-     * notably the multi-MB POST /api/ota. 13 leaves room for two
-     * tabs of polling plus a parallel OTA upload. */
-    cfg.max_open_sockets = 13;
-    /* Tighten the per-connection idle window so keep-alive sockets
-     * don't squat on the pool between polls. The SPA polls every 3 s,
-     * so 5 s of idle is a comfortable floor that still amortises the
-     * TCP setup cost across a poll pair, while quickly reclaiming
-     * sockets held by departed tabs / dropped Wi-Fi clients. */
-    cfg.recv_wait_timeout = 5;
-    cfg.send_wait_timeout = 5;
+    /* Leave max_open_sockets at the default 7. esp_http_server caps
+     * it at CONFIG_LWIP_MAX_SOCKETS - 3, which is 7 with the default
+     * lwIP build; asking for more makes httpd_start error out and
+     * the device boots without HTTP -- a self-bricking foot-gun on
+     * an OTA target. The real socket-starvation fix is in two
+     * complementary places: api_status now sends Connection: close
+     * (sockets recycle every poll, no keep-alive squat) and the SPA
+     * pauses its 3 s polling for the duration of an OTA upload
+     * (no parallel GETs to fill the pool while the POST streams).
+     * If we ever need a bigger pool, bump CONFIG_LWIP_MAX_SOCKETS
+     * in the board sdkconfig first. */
+    /* recv/send_wait_timeout default to 5 s -- fine for our needs. */
 
     if (httpd_start(&s_http, &cfg) != ESP_OK) return ESP_FAIL;
 
