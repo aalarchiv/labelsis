@@ -31,6 +31,15 @@ app, no cloud account, no telemetry.
   HTML/CSS/JS, no install, runs straight from device flash.
 - **Captive-portal Wi-Fi onboarding** -- phones land on the setup
   page automatically; no need to know an IP.
+- **Multi-AP Wi-Fi list** -- up to 4 saved networks tried in
+  last-used-then-priority order on boot; AP-mode onboarding only
+  when every entry fails. Optional pre-scan skips APs not on air.
+  Designed for a portable device that travels between sites.
+- **Over-the-air firmware update** -- `POST /api/ota` from the SPA
+  Status panel or the `scripts/labelsis-ota.py` CLI. Two physical
+  gates open the endpoint (printer in P-Lite mode, or hold-and-
+  release the device's BOOT button 2-30 s). Bootloader rolls back
+  if the new image fails to confirm.
 - **Status LED** (single GPIO or WS2812 RGB) -- glance at the device,
   don't grep serial logs.
 - **mDNS** at `labelsis.local`; falls back gracefully when blocked.
@@ -91,10 +100,12 @@ list and cabling: **[doc/HARDWARE.md](doc/HARDWARE.md)**.
 
 ## Status
 
-**Beta.** Works on a real PT-P700 over Wi-Fi for label design and
-printing on an ESP32-S3 devkit. PT-H500 / PT-E500 / PT-P750W are
-protocol-family matches per the Brother SDM but untested on hardware.
-ESP32-S2 builds clean, untested.
+**Beta.** Works on a real PT-P700 over Wi-Fi for label design,
+printing, and OTA on both the **ESP32-S3-DevKitC-1** (reference) and
+the **Wemos LOLIN S2 Mini** (deployed -- this device is the one
+shown integrated into the PT700 above). PT-H500 / PT-E500 / PT-P750W
+are protocol-family matches per the Brother SDM but untested on
+hardware.
 
 ## TODO
 

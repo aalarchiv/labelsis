@@ -89,7 +89,7 @@ Same protocol path as the firmware, just a different transport
 ## Files of interest
 
 - `main/main.c` -- startup glue, `pt_app_config_t` defaults
-- `components/pt_app/src/pt_app.c` -- Wi-Fi + HTTP API + AP onboarding + mDNS
+- `components/pt_app/src/pt_app.c` -- Wi-Fi + HTTP API + AP onboarding + mDNS + OTA
 - `components/pt_app/src/pt_dns.c` -- captive-portal DNS hijack (AP mode only)
 - `components/pt_app/src/pt_led.c` -- status LED state machine
 - `components/pt_app/spa/index.html` -- the SPA (vanilla HTML/CSS/JS)
@@ -98,6 +98,17 @@ Same protocol path as the firmware, just a different transport
 - `components/pt_transport/src/libusb.c` -- Linux/macOS userspace transport
 - `components/pt_protocol/` -- raster encoders + status decoder + geometry
 - `tools/cli/pt_send.c` -- Linux command-line printer driver
+
+## OTA + release scripts
+
+- `scripts/labelsis-ota.py` -- stdlib-only Python CLI that POSTs a
+  built image to `/api/ota`, with progress, slot-flip detection, and
+  reboot confirmation. Useful for headless / scripted flashing or
+  when the SPA can't reach the device. See [doc/OTA.md](OTA.md).
+- `scripts/build-release.sh` -- bundles every supported board into
+  `release/<version>/` with both the OTA image (`*.bin`) and the
+  merged single-image USB-flash blob (`*-merged.bin`), plus per-
+  board `flash.sh` and a `SHA256SUMS` manifest.
 
 ## Verifying tape geometry against Brother's source
 

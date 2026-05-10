@@ -24,12 +24,14 @@ idf.py flash monitor                       # -p /dev/ttyUSB0 if auto-detect pick
                                            # Ctrl+] to exit monitor
 ```
 
-Healthy boot log:
+Healthy boot log (first boot, AP list seeded from compiled-in cfg):
 
 ```
-I (...) pt_app: wifi: connecting to <SSID> (from cfg)
+I (...) pt_app: reset: gpio 0, OTA-toggle 2 s, wipe-creds 30 s
+I (...) pt_app: wifi: list empty, seeding from compiled-in cfg (<SSID>)
+I (...) pt_app: wifi: trying <SSID> (last used)
 I (...) pt_app: got IP: 192.168.x.y
-I (...) pt_app: wifi: persisted creds to NVS
+I (...) pt_app: wifi: associated to <SSID>
 I (...) pt_usb: PT-* paired: vid=04f9 pid=2061 intf=0 in=0x81 out=0x02
 I (...) pt_app: transport: usb_host (PT-* attached)
 I (...) pt_app: mdns: labelsis.local up

@@ -35,9 +35,15 @@ Status view.
 2. Slide the printer's switch from **E** to **EL**. The Status view
    lights up a "Firmware update" panel.
 
-3. Pick the `labelsis.bin` file and click **install**. Progress bar
-   shows the upload; the device reboots into the new image and the
-   SPA reloads automatically once it can reach the device again.
+3. Pick the `labelsis.bin` file and click **install**. The panel
+   walks you through every phase: **gate check**, **upload**
+   (progress bar), **verifying image on device + rebooting**
+   (spinner), **waiting for device to come back** (countdown +
+   spinner), and finally **slot-flip confirmation** (the panel
+   reads `running_slot` from `/api/ota/status` before and after,
+   so a silently-rejected upload is reported instead of looking
+   like success). The SPA reloads automatically once the new
+   image is live.
 
 4. Slide the switch back to **E** so printing resumes.
 
@@ -90,6 +96,8 @@ for full options.
 
 If the new image somehow boots far enough to confirm itself as valid
 but is then unusable (e.g., wrong board profile), Wi-Fi reset (BOOT
-button held 5 s) wipes Wi-Fi creds and brings up captive-portal
-onboarding -- enough to get the device addressable again so you can
-OTA back. If it doesn't even get that far, re-flash via USB.
+button held **30 s+** without releasing) wipes Wi-Fi creds and brings
+up captive-portal onboarding -- enough to get the device addressable
+again so you can OTA back. The wipe gesture intentionally ignores
+the device-online guard so a Wi-Fi-bricked board can still recover.
+If it doesn't even get that far, re-flash via USB.
