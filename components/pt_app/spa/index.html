@@ -237,6 +237,22 @@ canvas { display:block; image-rendering:pixelated; background:#fff; }
 .about-icon-link  { flex-shrink:0; line-height:0; opacity:.92; transition:opacity .15s; }
 .about-icon-link:hover { opacity:1; }
 .about-icon       { width:64px; height:64px; display:block; }
+/* Inline busy spinner -- shown in the OTA log row during the
+ * post-upload "verify + reboot" gap so the user has a visual
+ * heartbeat instead of a blank line that looks frozen. Pure CSS;
+ * no extra asset to embed. */
+.ota-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: middle;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ota-spin .9s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes ota-spin { to { transform: rotate(360deg); } }
 .color-chip   { display:inline-block; width:.85em; height:.85em; vertical-align:middle; border:1px solid var(--line); border-radius:2px; margin-right:.25em; }
 .kv-ok  { color:var(--ok); }
 .kv-err { color:var(--err); }
@@ -426,7 +442,10 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <div id="ota-progress" class="muted" hidden>
         <div class="row"><progress id="ota-bar" value="0" max="100" style="flex:1"></progress><span id="ota-pct">0%</span></div>
       </div>
-      <div id="ota-log" class="muted" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; min-height:1.4em"></div>
+      <div id="ota-log-row" class="row" style="gap:.5rem; min-height:1.4em;">
+        <span id="ota-spinner" class="ota-spinner" hidden aria-hidden="true"></span>
+        <span id="ota-log" class="muted" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.8rem; flex:1;"></span>
+      </div>
     </div>
   </section>
   <section id="view-print">
@@ -5410,7 +5429,22 @@ function otaLog(msg, ok) {
   el.className   = (ok === undefined) ? "muted" : (ok ? "kv-ok" : "kv-err");
 }
 
-function otaUpload() {
+/* Show / hide the inline busy spinner in the OTA log row. Used during
+ * the silent gaps -- post-upload SHA verify, then post-reboot wait
+ * for the device to come back -- so the panel doesn't look frozen. */
+function otaSpinner(on) {
+  const el = document.getElementById("ota-spinner");
+  if (el) el.hidden = !on;
+}
+
+/* Snapshot of the running_slot before the OTA. After the device
+ * comes back, we compare against this -- if it flipped (ota_0 ->
+ * ota_1 or vice versa) the install genuinely took. Version strings
+ * alone are unreliable when the source tree didn't change between
+ * builds (git describe yields the same dirty-tag both times). */
+let otaPreSlot = null;
+
+async function otaUpload() {
   const file = document.getElementById("ota-file").files[0];
   if (!file) return;
   const btn  = document.getElementById("ota-upload");
@@ -5419,7 +5453,8 @@ function otaUpload() {
   const pct  = document.getElementById("ota-pct");
   btn.disabled = true;
   prog.hidden  = false;
-  otaLog(`uploading ${file.name} (${file.size.toLocaleString()} bytes)…`);
+  bar.value = 0; pct.textContent = "0%";
+  otaSpinner(false);
 
   /* Pause the 3-s status poll AND cancel any in-flight status fetch.
    * The flag alone wouldn't help -- a fetch already past Firefox's
@@ -5429,6 +5464,26 @@ function otaUpload() {
   otaInFlight = true;
   if (statusAbortCtl) { try { statusAbortCtl.abort(); } catch {} statusAbortCtl = null; }
 
+  /* Capture the pre-OTA slot so otaWaitForReboot can prove the
+   * install happened by checking that running_slot flipped.
+   * Best-effort: if the device is unreachable here, fail fast
+   * before wasting a multi-MB upload. */
+  otaLog("checking gate…");
+  try {
+    const r = await fetch(apiURL("/api/ota/status"));
+    const j = await r.json();
+    if (!j.available) {
+      otaLog(`OTA gate closed: ${j.reason || "(unknown reason)"}`, false);
+      btn.disabled = false; otaInFlight = false; return;
+    }
+    otaPreSlot = j.running_slot || null;
+  } catch (e) {
+    otaLog(`cannot reach device: ${e.message}`, false);
+    btn.disabled = false; otaInFlight = false; return;
+  }
+
+  otaLog(`uploading ${file.name} (${file.size.toLocaleString()} bytes)…`);
+
   const xhr = new XMLHttpRequest();
   xhr.open("POST", apiURL("/api/ota"));
   xhr.setRequestHeader("Content-Type", "application/octet-stream");
@@ -5436,49 +5491,93 @@ function otaUpload() {
     if (!e.lengthComputable) return;
     const p = Math.round(100 * e.loaded / e.total);
     bar.value = p; pct.textContent = `${p}%`;
+    if (p >= 100) {
+      /* All bytes handed to the kernel. Now we wait on the device:
+       * SHA verify (~few seconds on real flash), set_boot_partition,
+       * and the firmware's 2 s reboot delay. Show a spinner so the
+       * silent gap doesn't look frozen. */
+      otaLog("verifying image on device + rebooting…");
+      otaSpinner(true);
+    }
   };
   xhr.onload = () => {
     let j = null;
     try { j = JSON.parse(xhr.responseText); } catch {}
     if (xhr.status >= 200 && xhr.status < 300 && j && j.ok) {
-      otaLog(`installed v${j.version} into ${j.slot} - rebooting in ${j.reboot_in_ms}ms`, true);
+      otaLog(`installed v${j.version} into ${j.slot} - rebooting in ${j.reboot_in_ms} ms`, true);
+      otaSpinner(true);
       /* Wait a beat past the device's own reboot delay, then start
-       * polling /api/status. Once a 200 comes back, full reload.
-       * otaInFlight stays true through the wait -- otaWaitForReboot
-       * does its own fetches and we don't want refreshStatus
-       * competing with it for sockets. location.reload() at the end
-       * blows away the flag anyway. */
+       * polling /api/status. Once a 200/503 comes back, confirm
+       * via slot-flip and reload. otaInFlight stays true through
+       * the wait -- otaWaitForReboot does its own fetches and we
+       * don't want refreshStatus competing for sockets. */
       setTimeout(otaWaitForReboot, (j.reboot_in_ms || 2000) + 1500);
     } else {
       const err = (j && j.error) || `HTTP ${xhr.status}`;
       otaLog(`failed: ${err}`, false);
+      otaSpinner(false);
       btn.disabled = false;
       otaInFlight = false;          /* resume status polling */
     }
   };
   xhr.onerror = () => {
-    otaLog("network error during upload", false);
-    btn.disabled = false;
-    otaInFlight = false;             /* resume status polling */
+    /* The actual cause of "network error" here is most often the
+     * firmware sending its 200 + esp_restart()ing before the FIN
+     * flushes -- so the install probably succeeded. Don't claim
+     * failure; instead poll /api/status and check via slot-flip. */
+    otaLog("upload finished, no clean response (typical -- device " +
+           "may have rebooted before FIN). checking install via " +
+           "/api/status…");
+    otaSpinner(true);
+    setTimeout(otaWaitForReboot, 3500);
   };
   xhr.send(file);
 }
 
 async function otaWaitForReboot() {
   otaLog("waiting for device to come back…");
+  otaSpinner(true);
   const started = Date.now();
-  while (Date.now() - started < 60000) {
+  let elapsed = 0;
+  while ((elapsed = Date.now() - started) < 60000) {
     try {
       const r = await fetch(apiURL("/api/status"), { cache: "no-store" });
       if (r.ok || r.status === 503) {
-        otaLog("device is back - reloading SPA", true);
+        /* Device is reachable. Confirm the install by checking
+         * whether running_slot flipped -- the only unambiguous
+         * signal that the new image actually booted (vs the device
+         * staying on the old image because the OTA was rejected). */
+        let postSlot = null;
+        try {
+          const sr = await fetch(apiURL("/api/ota/status"));
+          const sj = await sr.json();
+          postSlot = sj && sj.running_slot || null;
+        } catch {}
+        const flipped = otaPreSlot && postSlot && postSlot !== otaPreSlot;
+        otaSpinner(false);
+        if (otaPreSlot && postSlot && !flipped) {
+          otaLog(`install was rejected by the firmware -- still running ` +
+                 `from ${postSlot}. check serial logs (image_validate / ` +
+                 `wrong_project / ota_write).`, false);
+          document.getElementById("ota-upload").disabled = false;
+          otaInFlight = false;
+          return;
+        }
+        otaLog(`device is back (slot ${postSlot || "?"}) -- reloading…`, true);
         setTimeout(() => location.reload(), 800);
         return;
       }
     } catch { /* still rebooting */ }
+    /* Update the wait countdown so the user knows we're working
+     * (even with the spinner there, an explicit time helps them
+     * judge whether to power-cycle). */
+    otaLog(`waiting for device to come back… (${Math.round(elapsed/1000)} s)`);
     await new Promise(res => setTimeout(res, 1500));
   }
+  otaSpinner(false);
   otaLog("device did not come back within 60 s - check serial / power-cycle", false);
+  document.getElementById("ota-upload").disabled = false;
+  otaInFlight = false;
 }
 
 function otaInit() {
