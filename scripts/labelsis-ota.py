@@ -95,10 +95,31 @@ def upload(host: str, port: int, path: Path, timeout: float, chunk: int) -> int:
                     last_pct = pct
         print()  # newline after progress
 
+        # The firmware now (a) runs esp_ota_end's SHA verify -- a few seconds
+        # on real flash for a 1.5 MB image, (b) sends the 200 response, then
+        # (c) sleeps 2 s and esp_restart()s. Show that we're waiting for
+        # the verify+respond step instead of looking hung. Tighter timeout
+        # here than the upload phase: if the response doesn't land in 30 s,
+        # the device most likely rebooted before the FIN flushed -- treat
+        # as "probably succeeded" and check via status poll.
+        print("waiting for verify + response (≤30 s)…", flush=True)
+        c.sock.settimeout(30.0)
         r    = c.getresponse()
         body = r.read().decode("utf-8", "replace")
+    except (socket.timeout, TimeoutError):
+        # Likely: response was sent but the reboot interrupted the FIN.
+        # Confirm by polling /api/status -- if the device comes back with
+        # the new image's version, we're done.
+        print()
+        print("no response within 30 s -- device may have rebooted before FIN.")
+        print("polling /api/status to confirm…")
+        try: c.close()
+        except Exception: pass
+        return _wait_for_reboot(host, port)
     except (socket.error, http.client.HTTPException) as e:
         print(f"\nerror: network failure during upload: {e}", file=sys.stderr)
+        try: c.close()
+        except Exception: pass
         return 4
     finally:
         try: c.close()
@@ -114,7 +135,12 @@ def upload(host: str, port: int, path: Path, timeout: float, chunk: int) -> int:
         print(f"installed v{j.get('version', '?')} into {j.get('slot', '?')}")
         print(f"device rebooting in {ms} ms; rollback watchdog cancels on next "
               f"successful boot.")
-        return 0
+        # Wait briefly past the firmware's own reboot-in-ms grace, then
+        # poll /api/status until the device is responsive again. The SPA
+        # does the same thing -- gives the user a clear "back online"
+        # signal instead of leaving them to guess.
+        time.sleep(ms / 1000.0 + 1.5)
+        return _wait_for_reboot(host, port)
 
     # Best-effort error decode -- the firmware always returns
     # {"ok":false,"error":"<token>"} on failure paths.
@@ -131,6 +157,48 @@ def _conn(host: str, port: int, timeout: float) -> http.client.HTTPConnection:
     c = http.client.HTTPConnection(host, port, timeout=timeout)
     c.connect()
     return c
+
+
+def _wait_for_reboot(host: str, port: int, deadline_s: float = 90.0) -> int:
+    """Poll /api/status until the device answers (it just rebooted into
+    the new image) or until deadline. Returns 0 on success, 4 on
+    timeout. Mirrors what the SPA does in otaWaitForReboot."""
+    started = time.monotonic()
+    print("  ", end="", flush=True)
+    while time.monotonic() - started < deadline_s:
+        try:
+            c = _conn(host, port, timeout=3.0)
+            try:
+                c.request("GET", "/api/status")
+                r = c.getresponse()
+                _ = r.read()
+                # Both 200 (printer attached) and 503 (no_printer) mean
+                # the device is back -- we just want a TCP+HTTP signal.
+                if r.status in (200, 503):
+                    elapsed = time.monotonic() - started
+                    print(f" up after {elapsed:.0f} s", flush=True)
+                    # Try to surface the new running version for confirmation.
+                    try:
+                        c2 = _conn(host, port, timeout=5.0)
+                        c2.request("GET", "/api/ota/status")
+                        r2 = c2.getresponse()
+                        st = json.loads(r2.read())
+                        v  = st.get("app", {}).get("version", "?")
+                        print(f"running version: {v}")
+                        c2.close()
+                    except Exception:
+                        pass
+                    return 0
+            finally:
+                c.close()
+        except (socket.error, http.client.HTTPException, json.JSONDecodeError):
+            pass
+        print(".", end="", flush=True)
+        time.sleep(2.0)
+    print(f" timeout after {deadline_s:.0f} s", flush=True)
+    print("warning: device did not come back. Check serial / power-cycle.",
+          file=sys.stderr)
+    return 4
 
 
 def main(argv=None) -> int:
