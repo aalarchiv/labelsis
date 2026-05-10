@@ -1206,13 +1206,26 @@ if (!Number.isFinite(lastSeenTapeMm) || !TAPES[lastSeenTapeMm]) lastSeenTapeMm =
  * device's small socket pool can starve the multi-MB POST: Firefox
  * queues the upload behind pending status GETs and abandons it
  * before sending any bytes (HAR proof). Reset on completion / error
- * inside otaUpload's xhr handlers. */
-let otaInFlight = false;
+ * inside otaUpload's xhr handlers.
+ *
+ * We also keep the AbortController of the *currently in-flight*
+ * refreshStatus fetch so otaUpload can cancel it before issuing the
+ * POST -- otherwise an in-flight GET that's already past Firefox's
+ * per-host TCP cap would still block the OTA POST from leaving the
+ * browser. The flag alone only stops the *next* tick. */
+let otaInFlight    = false;
+let statusAbortCtl = null;
 
 async function refreshStatus() {
   if (otaInFlight) return;
+  /* If a previous tick is somehow still pending, cancel it -- a hung
+   * fetch (e.g. device briefly unreachable) shouldn't pin a socket
+   * for the next tick. */
+  if (statusAbortCtl) { try { statusAbortCtl.abort(); } catch {} }
+  statusAbortCtl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  const sig = statusAbortCtl ? statusAbortCtl.signal : undefined;
   try {
-    const r = await fetch(apiURL("/api/status"));
+    const r = await fetch(apiURL("/api/status"), { signal: sig });
     const j = await r.json();
     printer = j;
     /* Cache the live tape width on every successful poll so a later
@@ -1227,6 +1240,10 @@ async function refreshStatus() {
     renderStatus(j);
     redraw();
   } catch (e) {
+    /* AbortError is intentional (otaUpload cancels in-flight polls
+     * to free a socket for the multi-MB POST) -- don't flip the UI
+     * to "offline" just because we cancelled ourselves. */
+    if (e && e.name === "AbortError") return;
     /* Network unreachable -- treat as "no printer" so the dot goes
      * red and Print disables. Stays that way until the next poll
      * comes back or the user fixes the apiHost setting. */
@@ -5404,6 +5421,14 @@ function otaUpload() {
   prog.hidden  = false;
   otaLog(`uploading ${file.name} (${file.size.toLocaleString()} bytes)…`);
 
+  /* Pause the 3-s status poll AND cancel any in-flight status fetch.
+   * The flag alone wouldn't help -- a fetch already past Firefox's
+   * per-host TCP cap would still pin a socket and queue our POST
+   * behind it (HAR proof from 2026-05-10). Aborting frees the
+   * socket immediately. */
+  otaInFlight = true;
+  if (statusAbortCtl) { try { statusAbortCtl.abort(); } catch {} statusAbortCtl = null; }
+
   const xhr = new XMLHttpRequest();
   xhr.open("POST", apiURL("/api/ota"));
   xhr.setRequestHeader("Content-Type", "application/octet-stream");
@@ -5436,7 +5461,6 @@ function otaUpload() {
     btn.disabled = false;
     otaInFlight = false;             /* resume status polling */
   };
-  otaInFlight = true;                /* pause refreshStatus until done */
   xhr.send(file);
 }
 
