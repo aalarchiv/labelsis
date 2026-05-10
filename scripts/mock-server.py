@@ -282,8 +282,9 @@ class Handler(BaseHTTPRequestHandler):
                 "available":    open_,
                 "reason":       "P-Lite mode" if open_
                                 else "printer must be in P-Lite mode (slide switch to EL)",
-                "running_slot": "ota_0",
-                "next_slot":    "ota_1",
+                "running_slot":    "ota_0",
+                "next_slot":       "ota_1",
+                "next_slot_state": "new",
                 "app": {"name": "labelsis", "version": STATE["fw_version"]},
             })
             return
@@ -408,6 +409,17 @@ class Handler(BaseHTTPRequestHandler):
                 "version":      STATE["fw_version"],
                 "reboot_in_ms": 2000,
             })
+            return
+
+        if path == "/api/reboot":
+            # Same gate as /api/ota -- mock approximates with the
+            # same transport=="plite" check. Real firmware uses
+            # ota_gate_open() (P-Lite OR BOOT button override).
+            if STATE["transport"] != "plite":
+                self._send_json(403, {"ok": False, "error": "gate_closed"})
+                return
+            self.log_extra("reboot: would soft-reboot")
+            self._send_json(202, {"ok": True, "reboot_in_ms": 500})
             return
 
         self.send_error(404, "not found")

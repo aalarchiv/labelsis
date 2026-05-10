@@ -84,13 +84,36 @@ for full options.
 
 ## What can fail
 
+Every error response now includes the underlying `esp_err_t` name
+in an `esp_err` field alongside the coarse `error` token, so a
+deployed device without serial access can still surface the actual
+flash / OTA failure mode:
+
+```
+{"ok":false,"error":"ota_write","esp_err":"ESP_ERR_FLASH_OP_TIMEOUT"}
+```
+
 | Result | Meaning |
 |---|---|
 | `403 gate_closed` | Neither gate is open at upload start. Slide to EL, or hold BOOT 2-30 s + release (device must be online). |
 | `403 gate_closed_mid_upload` | The gate that was open dropped while the upload was in flight (slider back to E, or BOOT toggled off). Half-written image discarded; retry. |
 | `400 image_validate` | SHA256 from the image header didn't match the bytes received -- truncated upload, network corruption, or a non-IDF binary. |
 | `400 wrong_project` | Image is structurally valid but its `project_name` is not "labelsis". Image is on disk but never set as boot target; next OTA overwrites it. |
-| `500 ota_*` | Flash hardware error or out-of-space. Check `idf.py monitor` for the underlying esp-idf log line. |
+| `500 ota_begin` | The OTA partition is in a bad state and the firmware's auto-erase-and-retry didn't recover it. Check the `esp_err` field for the underlying cause. Try `POST /api/reboot` (see below) and retry. |
+| `500 ota_write` | Flash write failed mid-upload. Check `esp_err` (e.g. `ESP_ERR_FLASH_OP_TIMEOUT`). The firmware drains the rest of the request body before responding, so the client sees a clean response instead of a connection RST. |
+| `500 ota_end` / `500 set_boot` | Late-stage failure after the bytes are in flash. Rare; check the `esp_err` field. |
+
+## Soft reboot
+
+`POST /api/reboot` (behind the same gate) lets you cycle the device
+remotely. Useful when a botched OTA leaves the next slot wedged --
+power-cycling clears whatever flash transient was in the way. Returns
+`202 Accepted` with `{"ok":true,"reboot_in_ms":500}`; device comes
+back ~5 s later (Wi-Fi reassoc + HTTP up).
+
+```sh
+curl -X POST http://labelsis.local/api/reboot
+```
 
 ## Recovery
 

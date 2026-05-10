@@ -1328,74 +1328,200 @@ static esp_err_t api_ota_status(httpd_req_t *req)
     else if (ota_plite_gate())                            reason = "P-Lite mode";
     else reason = "printer must be in P-Lite mode (slide switch to EL), "
                   "or hold the BOOT button 2-30 s and release (device must be online)";
-    char body[320];
+    /* next_slot_state surfaces the bootloader's view of the inactive
+     * slot -- "valid" / "invalid" / "aborted" tells the user (or a
+     * client like labelsis-ota.py) whether the slot is healthy enough
+     * to accept the next OTA. Without it, a wedged slot looks
+     * identical to a fresh one until the upload actually fails. */
+    const char *next_state = "unknown";
+    esp_ota_img_states_t st_next;
+    if (next && esp_ota_get_state_partition(next, &st_next) == ESP_OK) {
+        switch (st_next) {
+            case ESP_OTA_IMG_NEW:            next_state = "new";            break;
+            case ESP_OTA_IMG_PENDING_VERIFY: next_state = "pending_verify"; break;
+            case ESP_OTA_IMG_VALID:          next_state = "valid";          break;
+            case ESP_OTA_IMG_INVALID:        next_state = "invalid";        break;
+            case ESP_OTA_IMG_ABORTED:        next_state = "aborted";        break;
+            case ESP_OTA_IMG_UNDEFINED:      next_state = "undefined";      break;
+        }
+    }
+    char body[400];
     int n = snprintf(body, sizeof body,
         "{\"available\":%s,\"reason\":\"%s\","
         "\"running_slot\":\"%s\",\"next_slot\":\"%s\","
+        "\"next_slot_state\":\"%s\","
         "\"app\":{\"name\":\"%s\",\"version\":\"%s\"}}",
         open ? "true" : "false",
         reason,
         run  ? run->label  : "?",
         next ? next->label : "?",
+        next_state,
         app ? app->project_name : "",
         app ? app->version      : "");
     return httpd_resp_send(req, body, n);
 }
 
+/* Drain (discard) up to `total` bytes from the request body. Used by
+ * ota_fail before sending the error response so the client gets a
+ * clean read of the response instead of an RST mid-stream -- httpd
+ * closes the connection when the handler returns, so any unread
+ * request body becomes a connection reset that pre-empts the
+ * response. Bounded by httpd's recv_wait_timeout (5 s); a stalled
+ * client can't hold the handler hostage. */
+static void drain_request_body(httpd_req_t *req, int total)
+{
+    char buf[1024];
+    while (total > 0) {
+        int want = total < (int)sizeof buf ? total : (int)sizeof buf;
+        int got  = httpd_req_recv(req, buf, want);
+        if (got <= 0) return;     /* timeout / RST / EOF -- stop */
+        total -= got;
+    }
+}
+
+/* Always include esp_err name + Connection: close so:
+ *  - the client (CLI / SPA) can surface the underlying ESP-IDF
+ *    failure (ESP_ERR_FLASH_OP_TIMEOUT etc.) instead of just the
+ *    coarse token (ota_write).
+ *  - the FIN is well-defined; clients don't try to reuse the socket.
+ * `drain_bytes` is how many request-body bytes the caller hasn't
+ * read yet (0 if the body wasn't streamed, or content_len - written
+ * if it was); see drain_request_body for why this matters. */
 static esp_err_t ota_fail(httpd_req_t *req, esp_ota_handle_t h,
-                          const char *status, const char *reason)
+                          const char *status, const char *reason,
+                          esp_err_t esp_err, int drain_bytes)
 {
     if (h) esp_ota_abort(h);
+    if (drain_bytes > 0) drain_request_body(req, drain_bytes);
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Connection", "close");
     httpd_resp_set_status(req, status);
-    char body[128];
-    int n = snprintf(body, sizeof body,
+    char body[192];
+    int n;
+    if (esp_err == ESP_OK) {
+        n = snprintf(body, sizeof body,
                      "{\"ok\":false,\"error\":\"%s\"}", reason);
+    } else {
+        n = snprintf(body, sizeof body,
+                     "{\"ok\":false,\"error\":\"%s\",\"esp_err\":\"%s\"}",
+                     reason, esp_err_to_name(esp_err));
+    }
     return httpd_resp_send(req, body, n);
 }
 
-static esp_err_t api_ota_upload(httpd_req_t *req)
+/* Serialise concurrent OTA uploads. Two simultaneous POSTs would
+ * race in esp_ota_begin and corrupt each other's writes; the second
+ * gets 409 ota_busy. Set on entry, cleared on every non-success
+ * exit (success doesn't return -- esp_restart() reboots). */
+#include <stdatomic.h>
+static atomic_flag s_ota_busy = ATOMIC_FLAG_INIT;
+
+/* Try esp_ota_begin once; on failure, force-erase the partition and
+ * retry once. Recovers a slot that's been left in a bad state by a
+ * prior aborted upload (RST mid-stream, gate closed mid-upload, etc.)
+ * without requiring a power-cycle. If the retry also fails, the
+ * caller surfaces esp_err to the client. */
+static esp_err_t ota_begin_with_retry(const esp_partition_t *part,
+                                      esp_ota_handle_t *out)
 {
+    esp_err_t err = esp_ota_begin(part, OTA_SIZE_UNKNOWN, out);
+    if (err == ESP_OK) return ESP_OK;
+    ESP_LOGW(TAG, "ota: esp_ota_begin failed (%s) -- erasing %s and retrying",
+             esp_err_to_name(err), part->label);
+    esp_err_t e2 = esp_partition_erase_range(part, 0, part->size);
+    if (e2 != ESP_OK) {
+        ESP_LOGE(TAG, "ota: erase_range failed: %s", esp_err_to_name(e2));
+        return err;   /* original error -- erase didn't help */
+    }
+    return esp_ota_begin(part, OTA_SIZE_UNKNOWN, out);
+}
+
+static esp_err_t api_ota_upload_inner(httpd_req_t *req)
+{
+    int total = req->content_len;
     if (!ota_gate_open()) {
-        return ota_fail(req, 0, "403 Forbidden", "gate_closed");
+        return ota_fail(req, 0, "403 Forbidden", "gate_closed",
+                        ESP_OK, total);
     }
     const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
     if (!next) {
-        return ota_fail(req, 0, "500 Internal Server Error", "no_ota_slot");
+        return ota_fail(req, 0, "500 Internal Server Error", "no_ota_slot",
+                        ESP_OK, total);
     }
-    ESP_LOGI(TAG, "ota: starting upload to slot %s (%lu bytes incoming)",
-             next->label, (unsigned long)req->content_len);
+    /* Reject up-front instead of writing megabytes only to fail when
+     * the partition runs out. Saves flash wear on a malformed client. */
+    if (total > (int)next->size) {
+        ESP_LOGW(TAG, "ota: rejecting Content-Length %d > slot %s size %d",
+                 total, next->label, (int)next->size);
+        return ota_fail(req, 0, "413 Payload Too Large", "too_large",
+                        ESP_OK, total);
+    }
+    ESP_LOGI(TAG, "ota: starting upload to slot %s (%d bytes incoming)",
+             next->label, total);
 
     esp_ota_handle_t ota = 0;
-    esp_err_t err = esp_ota_begin(next, OTA_SIZE_UNKNOWN, &ota);
+    esp_err_t err = ota_begin_with_retry(next, &ota);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "ota: esp_ota_begin failed: %s", esp_err_to_name(err));
-        return ota_fail(req, 0, "500 Internal Server Error", "ota_begin");
+        ESP_LOGE(TAG, "ota: esp_ota_begin failed (after retry): %s",
+                 esp_err_to_name(err));
+        return ota_fail(req, 0, "500 Internal Server Error", "ota_begin",
+                        err, total);
     }
 
     /* Stream the request body straight into flash. 1 KB chunks keep
      * the stack budget and the per-write erase-cycle overhead modest;
      * the limiting factor is flash write throughput, not RAM. */
     char buf[1024];
-    int  remaining = req->content_len;
-    int  written   = 0;
+    int  remaining       = total;
+    int  written         = 0;
+    bool hdr_validated   = false;
+    /* esp_app_desc_t lives at offset 0x20 in an ESP-IDF app image
+     * (right after the 24-byte image header + 8-byte segment header).
+     * Validating its magic + project_name from the very first chunk
+     * lets us reject a wrong-project / non-IDF binary in <1 s instead
+     * of after the full multi-MB upload. */
+    const int hdr_offset_bytes = 0x20 + (int)sizeof(esp_app_desc_t);
     while (remaining > 0) {
         if (!ota_gate_open()) {
             ESP_LOGW(TAG, "ota: gate closed mid-upload after %d bytes -- aborting", written);
-            return ota_fail(req, ota, "403 Forbidden", "gate_closed_mid_upload");
+            return ota_fail(req, ota, "403 Forbidden",
+                            "gate_closed_mid_upload", ESP_OK, remaining);
         }
         int want = remaining < (int)sizeof buf ? remaining : (int)sizeof buf;
         int got  = httpd_req_recv(req, buf, want);
         if (got <= 0) {
+            /* Recv already failed -- the connection is dead, no
+             * point trying to drain. ota_fail still cleans up the
+             * OTA handle and best-effort sends the response (it
+             * won't reach the client but at least we don't leak). */
             ESP_LOGE(TAG, "ota: recv failed at %d bytes (got=%d)", written, got);
-            return ota_fail(req, ota, "400 Bad Request", "recv_failed");
+            return ota_fail(req, ota, "400 Bad Request", "recv_failed",
+                            ESP_OK, 0);
+        }
+        /* First chunk: validate magic + project_name BEFORE flushing
+         * to flash. The 1 KB recv buffer comfortably contains the
+         * full app desc (~256 B). For tiny uploads where the first
+         * chunk is shorter, hdr_validated stays false and the
+         * existing post-end check catches the mismatch. */
+        if (!hdr_validated && written == 0 && got >= hdr_offset_bytes) {
+            const esp_app_desc_t *desc = (const esp_app_desc_t *)(buf + 0x20);
+            if (desc->magic_word != ESP_APP_DESC_MAGIC_WORD ||
+                strncmp(desc->project_name, "labelsis",
+                        sizeof desc->project_name) != 0) {
+                ESP_LOGW(TAG, "ota: early reject -- magic=0x%08lx project=%.32s",
+                         (unsigned long)desc->magic_word, desc->project_name);
+                return ota_fail(req, ota, "400 Bad Request", "wrong_project",
+                                ESP_OK, remaining - got);
+            }
+            hdr_validated = true;
         }
         err = esp_ota_write(ota, buf, got);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "ota: esp_ota_write failed at %d bytes: %s",
                      written, esp_err_to_name(err));
-            return ota_fail(req, ota, "500 Internal Server Error", "ota_write");
+            return ota_fail(req, ota, "500 Internal Server Error",
+                            "ota_write", err, remaining - got);
         }
         written   += got;
         remaining -= got;
@@ -1409,7 +1535,8 @@ static esp_err_t api_ota_upload(httpd_req_t *req)
         ESP_LOGE(TAG, "ota: esp_ota_end failed: %s", esp_err_to_name(err));
         return ota_fail(req, 0, "400 Bad Request",
                         err == ESP_ERR_OTA_VALIDATE_FAILED
-                            ? "image_validate" : "ota_end");
+                            ? "image_validate" : "ota_end",
+                        err, 0);
     }
 
     /* After SHA passes, sanity-check that this is actually a LabelSis
@@ -1422,22 +1549,27 @@ static esp_err_t api_ota_upload(httpd_req_t *req)
                  new_desc.project_name);
         /* Image is on disk but never made boot target; next OTA will
          * overwrite the slot. */
-        return ota_fail(req, 0, "400 Bad Request", "wrong_project");
+        return ota_fail(req, 0, "400 Bad Request", "wrong_project",
+                        ESP_OK, 0);
     }
 
     err = esp_ota_set_boot_partition(next);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ota: set_boot failed: %s", esp_err_to_name(err));
-        return ota_fail(req, 0, "500 Internal Server Error", "set_boot");
+        return ota_fail(req, 0, "500 Internal Server Error", "set_boot",
+                        err, 0);
     }
 
     ESP_LOGI(TAG, "ota: %d bytes accepted, version=\"%s\", booting from %s",
              written, new_desc.version, next->label);
 
     /* Send the response BEFORE rebooting so the SPA gets confirmation
-     * (and can show its countdown) instead of a connection-reset. */
+     * (and can show its countdown) instead of a connection-reset.
+     * Connection: close so the client sees a clean FIN and doesn't
+     * attempt to reuse the socket while we're rebooting. */
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Connection", "close");
     char body[160];
     int n = snprintf(body, sizeof body,
         "{\"ok\":true,\"slot\":\"%s\",\"version\":\"%s\",\"reboot_in_ms\":2000}",
@@ -1447,6 +1579,43 @@ static esp_err_t api_ota_upload(httpd_req_t *req)
     /* Defer the reboot to a small delay so the response actually
      * lands. esp_restart returns void and triggers SoC reset. */
     vTaskDelay(pdMS_TO_TICKS(2000));
+    esp_restart();
+    return ESP_OK;   /* unreachable */
+}
+
+/* Public handler -- guards api_ota_upload_inner with a busy flag so
+ * two concurrent OTA POSTs can't race in esp_ota_begin. The success
+ * path doesn't return (esp_restart() reboots), so we only need to
+ * clear the flag on every error path -- that happens here. */
+static esp_err_t api_ota_upload(httpd_req_t *req)
+{
+    if (atomic_flag_test_and_set(&s_ota_busy)) {
+        ESP_LOGW(TAG, "ota: rejecting concurrent OTA POST -- ota_busy");
+        return ota_fail(req, 0, "409 Conflict", "ota_busy",
+                        ESP_OK, req->content_len);
+    }
+    esp_err_t r = api_ota_upload_inner(req);
+    atomic_flag_clear(&s_ota_busy);
+    return r;
+}
+
+/* POST /api/reboot -- soft reboot, behind the same gate as /api/ota.
+ * Lets us recover a wedged device (e.g. an OTA slot left in a bad
+ * state by a prior aborted upload) without needing physical access
+ * to power-cycle. Same gate so a stray LAN visitor can't toggle it. */
+static esp_err_t api_reboot(httpd_req_t *req)
+{
+    if (!ota_gate_open()) {
+        return ota_fail(req, 0, "403 Forbidden", "gate_closed",
+                        ESP_OK, req->content_len);
+    }
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_set_status(req, "202 Accepted");
+    httpd_resp_sendstr(req, "{\"ok\":true,\"reboot_in_ms\":500}");
+    ESP_LOGW(TAG, "reboot: soft reboot requested via /api/reboot");
+    vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
     return ESP_OK;   /* unreachable */
 }
@@ -1492,9 +1661,9 @@ static esp_err_t http_up(uint16_t port)
     /* Wildcard matching enables the OPTIONS catch-all below; specific
      * routes still match exactly. */
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    /* Default is 8; we register 19 routes (status, info, print, cut,
+    /* Default is 8; we register 20 routes (status, info, print, cut,
      * feed, scan, setup, index, fonts*2, favicon, ota*2, wifi*5,
-     * OPTIONS catch-all) and want headroom. */
+     * reboot, OPTIONS catch-all) and want headroom. */
     cfg.max_uri_handlers = 24;
     /* Leave max_open_sockets at the default 7. esp_http_server caps
      * it at CONFIG_LWIP_MAX_SOCKETS - 3, which is 7 with the default
@@ -1583,6 +1752,10 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/wifi/prescan", .method = HTTP_POST,
         .handler = api_wifi_prescan, .user_ctx = NULL,
     };
+    static const httpd_uri_t reboot_route = {
+        .uri = "/api/reboot", .method = HTTP_POST,
+        .handler = api_reboot, .user_ctx = NULL,
+    };
     static const httpd_uri_t cors_route = {
         .uri = "/*", .method = HTTP_OPTIONS,
         .handler = cors_preflight, .user_ctx = NULL,
@@ -1605,6 +1778,7 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &wifi_delete_route);
     httpd_register_uri_handler(s_http, &wifi_order_route);
     httpd_register_uri_handler(s_http, &wifi_prescan_route);
+    httpd_register_uri_handler(s_http, &reboot_route);
     httpd_register_uri_handler(s_http, &cors_route);
     /* HTTP is serving requests now -- if we just OTA'd into this
      * image, that's enough proof of life to cancel the rollback

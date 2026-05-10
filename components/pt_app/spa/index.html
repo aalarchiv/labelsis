@@ -5467,18 +5467,41 @@ async function otaUpload() {
   /* Capture the pre-OTA slot so otaWaitForReboot can prove the
    * install happened by checking that running_slot flipped.
    * Best-effort: if the device is unreachable here, fail fast
-   * before wasting a multi-MB upload. */
+   * before wasting a multi-MB upload. AbortController gives the
+   * fetch a hard 5 s timeout -- without it, an unresponsive device
+   * leaves the panel stuck on "checking gate…" with no way to
+   * cancel short of a tab close. */
   otaLog("checking gate…");
   try {
-    const r = await fetch(apiURL("/api/ota/status"));
-    const j = await r.json();
+    const ac = new AbortController();
+    const tmo = setTimeout(() => ac.abort(), 5000);
+    let j;
+    try {
+      const r = await fetch(apiURL("/api/ota/status"), { signal: ac.signal });
+      j = await r.json();
+    } finally {
+      clearTimeout(tmo);
+    }
     if (!j.available) {
       otaLog(`OTA gate closed: ${j.reason || "(unknown reason)"}`, false);
       btn.disabled = false; otaInFlight = false; return;
     }
+    /* If we already know the next slot is in a wedged state, surface
+     * it now -- the user (or a watching dashboard) can hit /api/reboot
+     * before wasting a multi-MB upload that's going to fail. */
+    if (j.next_slot_state && j.next_slot_state !== "valid"
+                          && j.next_slot_state !== "new"
+                          && j.next_slot_state !== "undefined") {
+      otaLog(`warning: next slot (${j.next_slot}) is in state ` +
+             `"${j.next_slot_state}" -- consider POST /api/reboot first ` +
+             `if the upload fails with ota_write.`);
+    }
     otaPreSlot = j.running_slot || null;
   } catch (e) {
-    otaLog(`cannot reach device: ${e.message}`, false);
+    const msg = (e && e.name === "AbortError")
+                ? "device unresponsive (5 s timeout on gate check)"
+                : `cannot reach device: ${e.message}`;
+    otaLog(msg, false);
     btn.disabled = false; otaInFlight = false; return;
   }
 
@@ -5514,17 +5537,36 @@ async function otaUpload() {
       setTimeout(otaWaitForReboot, (j.reboot_in_ms || 2000) + 1500);
     } else {
       const err = (j && j.error) || `HTTP ${xhr.status}`;
-      otaLog(`failed: ${err}`, false);
+      const ctx = j && j.esp_err ? ` (esp_err: ${j.esp_err})` : "";
+      otaLog(`failed: ${err}${ctx}`, false);
       otaSpinner(false);
       btn.disabled = false;
       otaInFlight = false;          /* resume status polling */
     }
   };
   xhr.onerror = () => {
-    /* The actual cause of "network error" here is most often the
-     * firmware sending its 200 + esp_restart()ing before the FIN
-     * flushes -- so the install probably succeeded. Don't claim
-     * failure; instead poll /api/status and check via slot-flip. */
+    /* xhr.onerror fires when the connection RSTs / FIN is lost. Two
+     * possibilities:
+     *   1. The firmware sent a clean response then esp_restart()'d
+     *      before the FIN flushed (typical successful OTA path).
+     *   2. The firmware returned an error response (500 ota_write,
+     *      400 image_validate, etc.) but with the body-drain fix
+     *      it should now reach the client cleanly -- xhr.onload
+     *      handles that case.
+     * In rare races, the response body may already be in
+     * xhr.responseText even though onerror fires. Try to parse it
+     * before falling through to slot-flip polling. */
+    let j = null;
+    try { j = JSON.parse(xhr.responseText); } catch {}
+    if (j && j.ok === false) {
+      const tag = j.error || `HTTP ${xhr.status}`;
+      const ctx = j.esp_err ? ` (esp_err: ${j.esp_err})` : "";
+      otaLog(`failed: ${tag}${ctx}`, false);
+      otaSpinner(false);
+      btn.disabled = false;
+      otaInFlight  = false;
+      return;
+    }
     otaLog("upload finished, no clean response (typical -- device " +
            "may have rebooted before FIN). checking install via " +
            "/api/status…");

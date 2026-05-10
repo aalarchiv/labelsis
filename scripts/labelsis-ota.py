@@ -220,14 +220,18 @@ def upload(host: str, port: int, path: Path, timeout: float, chunk: int) -> int:
         time.sleep(ms / 1000.0 + 1.5)
         return _wait_for_reboot(host, port, expect_slot_flip=pre_run_slot)
 
-    # Best-effort error decode -- the firmware always returns
-    # {"ok":false,"error":"<token>"} on failure paths.
+    # Best-effort error decode -- the firmware returns
+    # {"ok":false,"error":"<token>","esp_err":"ESP_ERR_..."} on
+    # failure paths (esp_err only present when there's an underlying
+    # ESP-IDF error worth surfacing -- ota_write, ota_begin, etc.).
     try:
         j   = json.loads(body)
         err = j.get("error", body)
+        ctx = f" (esp_err: {j['esp_err']})" if "esp_err" in j else ""
     except json.JSONDecodeError:
         err = body
-    print(f"error: HTTP {r.status} {r.reason}: {err}", file=sys.stderr)
+        ctx = ""
+    print(f"error: HTTP {r.status} {r.reason}: {err}{ctx}", file=sys.stderr)
     return 3
 
 
