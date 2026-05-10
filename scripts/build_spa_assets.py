@@ -6,8 +6,11 @@ Reads from --spa-dir, writes to --output-dir:
 
     index.html              original index.html with qrcode.min.js
                             inlined as a <script>...</script> block
-                            (saves the round-trip + lets the bundle
-                            ride the same gzip pass)
+                            and the LabelSis app icon (--icon-path)
+                            inlined as a base64 data: URL into the
+                            __LABELSIS_ICON_DATA_URL__ placeholder
+                            (saves an HTTP round-trip + a separate
+                            embed; lets both ride the SPA gzip pass)
     index.html.gz           gzip(index.html) at level 9
     setup.html              unchanged copy
     setup.html.gz           gzip(setup.html)
@@ -30,10 +33,12 @@ produce identical outputs (binary diffs only when content changes).
 Usage:
     scripts/build_spa_assets.py \\
         --spa-dir    components/pt_app/spa \\
+        --icon-path  doc/labelsis_favicon_64.png \\
         --output-dir build/spa-bundle
 """
 
 import argparse
+import base64
 import gzip
 import json
 import os
@@ -65,6 +70,28 @@ def inline_qrcode(html_text, qrcode_text):
     return QRCODE_TAG_RE.sub(lambda _: inline, html_text, count=1)
 
 
+# Single placeholder string emitted by index.html in src="..."; we
+# replace it with the data: URL of the icon PNG. Programmatic
+# substitution (vs hand-pasted base64) is the entire point: a manual
+# copy-paste of multi-KB base64 corrupted three chars before -- the
+# decoded PNG was structurally valid but visibly broken in browsers.
+ICON_PLACEHOLDER = "__LABELSIS_ICON_DATA_URL__"
+
+
+def inline_icon(html_text, icon_bytes):
+    """Replace ICON_PLACEHOLDER with a data:image/png;base64,... URL
+    built from icon_bytes. Errors out unless exactly one occurrence
+    is present so a typo / drift can't silently no-op."""
+    n = html_text.count(ICON_PLACEHOLDER)
+    if n != 1:
+        raise RuntimeError(
+            f"expected exactly 1 {ICON_PLACEHOLDER!r} in index.html, "
+            f"found {n}"
+        )
+    data_url = "data:image/png;base64," + base64.b64encode(icon_bytes).decode("ascii")
+    return html_text.replace(ICON_PLACEHOLDER, data_url, 1)
+
+
 def write_pair(out_dir, name, body_bytes):
     """Write out_dir/name and out_dir/name.gz from the same bytes."""
     plain_path = os.path.join(out_dir, name)
@@ -83,6 +110,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--spa-dir",    required=True)
+    p.add_argument("--icon-path",  required=True,
+                   help="PNG file inlined as a data: URL into the SPA's "
+                        "About panel icon placeholder")
     p.add_argument("--output-dir", required=True)
     args = p.parse_args()
 
@@ -103,7 +133,11 @@ def main():
     # sort_keys for stable byte-for-byte builds; separators trim whitespace.
     icons_json  = json.dumps(icons_dec, sort_keys=True, separators=(",", ":"))
 
+    with open(args.icon_path, "rb") as f:
+        icon_bytes = f.read()
+
     bundled = inline_qrcode(index_html, qrcode_js)
+    bundled = inline_icon(bundled, icon_bytes)
     write_pair(args.output_dir, "index.html",          bundled.encode("utf-8"))
     write_pair(args.output_dir, "setup.html",          setup_html.encode("utf-8"))
     write_pair(args.output_dir, "material-icons.json", icons_json.encode("utf-8"))

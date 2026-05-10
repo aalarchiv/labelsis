@@ -31,11 +31,13 @@ set(SPA_BUNDLE_OUTPUTS
     ${SPA_BUNDLE_DIR}/material-icons.json
     ${SPA_BUNDLE_DIR}/material-icons.json.gz
 )
+set(LABELSIS_ICON ${CMAKE_SOURCE_DIR}/doc/labelsis_favicon_64.png)
 set(SPA_BUNDLE_INPUTS
     ${CMAKE_CURRENT_SOURCE_DIR}/spa/index.html
     ${CMAKE_CURRENT_SOURCE_DIR}/spa/qrcode.min.js
     ${CMAKE_CURRENT_SOURCE_DIR}/spa/setup.html
     ${CMAKE_CURRENT_SOURCE_DIR}/spa/fonts/material-icons-codepoints.json
+    ${LABELSIS_ICON}
     ${CMAKE_SOURCE_DIR}/scripts/build_spa_assets.py
 )
 # ESP-IDF processes this CMakeLists twice: once in script mode (just
@@ -49,6 +51,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SPA_BUNDLE_DIR}
         COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/build_spa_assets.py
                 --spa-dir    ${CMAKE_CURRENT_SOURCE_DIR}/spa
+                --icon-path  ${LABELSIS_ICON}
                 --output-dir ${SPA_BUNDLE_DIR}
         DEPENDS ${SPA_BUNDLE_INPUTS}
         COMMENT "Bundling + gzipping SPA assets"
