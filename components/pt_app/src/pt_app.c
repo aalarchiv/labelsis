@@ -294,7 +294,7 @@ static esp_err_t prescan_save_enabled(bool enabled)
  * taps -- BOOT is also the bootloader-mode pin on power-on, so people
  * tend to press it. */
 
-#define OTA_HOLD_MS    3000    /* min hold-then-release to toggle OTA gate */
+#define OTA_HOLD_MS    2000    /* min hold-then-release to toggle OTA gate */
 #define RESET_HOLD_MS  30000   /* sustained hold past this = wipe creds.
                                 * Deliberately long: wipe is destructive
                                 * and brushing against the BOOT button
@@ -307,6 +307,15 @@ static esp_err_t prescan_save_enabled(bool enabled)
  * task writes it and the HTTP handler thread reads it; bool is
  * word-sized atomic on Xtensa, so no further locking needed. */
 static volatile bool s_ota_button_gate = false;
+
+/* Goes true once Wi-Fi STA has an IP and the HTTP server is serving.
+ * The button task gates the OTA-toggle gesture on this so a tap
+ * during boot (e.g. pulling the device from a box, fingers near the
+ * BOOT button before it powers up) can't pre-arm the OTA gate before
+ * the device is reachable. The wipe gesture (30 s+) ignores it
+ * intentionally -- if the device is bricked and never comes online,
+ * holding for 30 s must still recover. */
+static volatile bool s_device_online = false;
 
 static bool ota_button_gate_active(void) { return s_ota_button_gate; }
 
@@ -342,19 +351,25 @@ static void reset_button_task(void *arg)
                 esp_restart();
             } else if (held >= pdMS_TO_TICKS(OTA_HOLD_MS) && !wipe_arm_logged) {
                 ESP_LOGI(TAG, "button: held %lu ms -- release any time before %d s "
-                              "to toggle OTA gate; keep holding to %d s to wipe creds",
+                              "to toggle OTA gate%s; keep holding to %d s to wipe creds",
                          (unsigned long)pdTICKS_TO_MS(held),
-                         RESET_HOLD_MS / 1000, RESET_HOLD_MS / 1000);
+                         RESET_HOLD_MS / 1000,
+                         s_device_online ? "" : " (waiting for device to come online)",
+                         RESET_HOLD_MS / 1000);
                 wipe_arm_logged = true;
             }
         } else if (!down && pressed_at != 0) {
             TickType_t held = now - pressed_at;
             pressed_at = 0;
             if (held >= pdMS_TO_TICKS(OTA_HOLD_MS)) {
-                s_ota_button_gate = !s_ota_button_gate;
-                ESP_LOGW(TAG, "button: OTA gate %s",
-                         s_ota_button_gate ? "OPEN -- /api/ota now accepts uploads"
-                                           : "closed");
+                if (!s_device_online) {
+                    ESP_LOGW(TAG, "button: ignoring OTA toggle -- device not online yet");
+                } else {
+                    s_ota_button_gate = !s_ota_button_gate;
+                    ESP_LOGW(TAG, "button: OTA gate %s",
+                             s_ota_button_gate ? "OPEN -- /api/ota now accepts uploads"
+                                               : "closed");
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(RESET_POLL_MS));
@@ -371,7 +386,8 @@ static void reset_button_up(int gpio)
                                (void *)(intptr_t)gpio,
                                tskIDLE_PRIORITY + 1, NULL);
     if (r != pdPASS) ESP_LOGW(TAG, "reset: task create failed");
-    else             ESP_LOGI(TAG, "reset: gpio %d, hold %d ms", gpio, RESET_HOLD_MS);
+    else             ESP_LOGI(TAG, "reset: gpio %d, OTA-toggle %d s, wipe-creds %d s",
+                              gpio, OTA_HOLD_MS / 1000, RESET_HOLD_MS / 1000);
 }
 
 /* Wi-Fi */
@@ -752,6 +768,14 @@ static esp_err_t api_status(httpd_req_t *req)
 {
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
+    /* Tell the browser to close the TCP connection after this poll.
+     * Status is the highest-frequency endpoint; without this, HTTP/1.1
+     * keep-alive plus the SPA's 3 s polling cadence pins one socket
+     * per active tab on the device's small pool, leaving no room for
+     * a parallel multi-MB POST /api/ota when the user clicks Install.
+     * The cost (TCP setup per poll, ~10-20 ms on Wi-Fi) is invisible
+     * next to the 200+ ms wifi/server roundtrip. */
+    httpd_resp_set_hdr(req, "Connection", "close");
     /* No printer attached yet (booted without USB device). Reply
      * "ok=false" with the current transport name so the SPA can show
      * "waiting" / "P-Lite" instead of a misleading green dot. The
@@ -1468,10 +1492,24 @@ static esp_err_t http_up(uint16_t port)
     /* Wildcard matching enables the OPTIONS catch-all below; specific
      * routes still match exactly. */
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    /* Default is 8; we register 18 routes (status, info, print, cut,
-     * feed, scan, setup, index, fonts*2, favicon, ota*2, wifi*4,
+    /* Default is 8; we register 19 routes (status, info, print, cut,
+     * feed, scan, setup, index, fonts*2, favicon, ota*2, wifi*5,
      * OPTIONS catch-all) and want headroom. */
     cfg.max_uri_handlers = 24;
+    /* Default max_open_sockets is 7. The SPA polls /api/status every
+     * 3 s; with HTTP/1.1 keep-alive plus the initial page-load burst
+     * (HTML + qrcode.js + icon font + codepoints.json + favicon) the
+     * pool can pin under load and the browser starves new requests --
+     * notably the multi-MB POST /api/ota. 13 leaves room for two
+     * tabs of polling plus a parallel OTA upload. */
+    cfg.max_open_sockets = 13;
+    /* Tighten the per-connection idle window so keep-alive sockets
+     * don't squat on the pool between polls. The SPA polls every 3 s,
+     * so 5 s of idle is a comfortable floor that still amortises the
+     * TCP setup cost across a poll pair, while quickly reclaiming
+     * sockets held by departed tabs / dropped Wi-Fi clients. */
+    cfg.recv_wait_timeout = 5;
+    cfg.send_wait_timeout = 5;
 
     if (httpd_start(&s_http, &cfg) != ESP_OK) return ESP_FAIL;
 
@@ -2052,5 +2090,9 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "http: serving on port %u", cfg->http_port ? cfg->http_port : 80);
+    /* Arm the BOOT button's OTA-gate gesture only now that the device
+     * is actually serving requests -- otherwise an early tap could
+     * flip the gate before any client could reach /api/ota anyway. */
+    s_device_online = true;
     return ESP_OK;
 }

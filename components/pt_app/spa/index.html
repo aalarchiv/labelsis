@@ -1146,7 +1146,16 @@ const LAST_TAPE_KEY = "labelsis:lastTapeMm";
 let lastSeenTapeMm = parseInt(localStorage.getItem(LAST_TAPE_KEY) || "24", 10);
 if (!Number.isFinite(lastSeenTapeMm) || !TAPES[lastSeenTapeMm]) lastSeenTapeMm = 24;
 
+/* Set true while the OTA upload is in flight so the 3-s status poll
+ * stays out of its way. Without this, HTTP/1.1 keep-alive + the
+ * device's small socket pool can starve the multi-MB POST: Firefox
+ * queues the upload behind pending status GETs and abandons it
+ * before sending any bytes (HAR proof). Reset on completion / error
+ * inside otaUpload's xhr handlers. */
+let otaInFlight = false;
+
 async function refreshStatus() {
+  if (otaInFlight) return;
   try {
     const r = await fetch(apiURL("/api/status"));
     const j = await r.json();
@@ -5354,18 +5363,25 @@ function otaUpload() {
     if (xhr.status >= 200 && xhr.status < 300 && j && j.ok) {
       otaLog(`installed v${j.version} into ${j.slot} - rebooting in ${j.reboot_in_ms}ms`, true);
       /* Wait a beat past the device's own reboot delay, then start
-       * polling /api/status. Once a 200 comes back, full reload. */
+       * polling /api/status. Once a 200 comes back, full reload.
+       * otaInFlight stays true through the wait -- otaWaitForReboot
+       * does its own fetches and we don't want refreshStatus
+       * competing with it for sockets. location.reload() at the end
+       * blows away the flag anyway. */
       setTimeout(otaWaitForReboot, (j.reboot_in_ms || 2000) + 1500);
     } else {
       const err = (j && j.error) || `HTTP ${xhr.status}`;
       otaLog(`failed: ${err}`, false);
       btn.disabled = false;
+      otaInFlight = false;          /* resume status polling */
     }
   };
   xhr.onerror = () => {
     otaLog("network error during upload", false);
     btn.disabled = false;
+    otaInFlight = false;             /* resume status polling */
   };
+  otaInFlight = true;                /* pause refreshStatus until done */
   xhr.send(file);
 }
 

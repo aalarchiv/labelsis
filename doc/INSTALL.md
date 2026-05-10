@@ -91,13 +91,15 @@ how long you hold it (release time matters):
 
 | Gesture | What happens |
 |---|---|
-| Hold 3-30 s, then **release** | Toggle the OTA gate. Lets a dev board test OTA without a printer attached. The Status view's "Firmware update" panel appears; press again to close. |
-| Hold **30+ s without releasing** | NVS Wi-Fi creds wiped, board reboots into AP-mode onboarding. Deliberately long because the action is destructive. |
-| Tap (< 3 s) | Ignored (avoids accidental triggers; BOOT is also the bootloader-mode pin on power-on). |
+| Hold 2-30 s, then **release** (device online) | Toggle the OTA gate. Lets a dev board test OTA without a printer attached. The Status view's "Firmware update" panel appears; press again to close. The "online" guard means the gesture only counts after Wi-Fi STA is up and the HTTP server is serving -- a tap at boot can't pre-arm the gate. |
+| Hold **30+ s without releasing** | NVS Wi-Fi creds wiped, board reboots into AP-mode onboarding. Deliberately long because the action is destructive. Works regardless of online state, so a bricked-Wi-Fi board can still recover. |
+| Tap (< 2 s) | Ignored (avoids accidental triggers; BOOT is also the bootloader-mode pin on power-on). |
 
-The serial log announces the disarm window: hold past 3 s and you'll
-see `button: held 3050 ms -- release any time before 30 s to toggle
-OTA gate; keep holding to 30 s to wipe creds`.
+The serial log announces the disarm window: hold past 2 s and you'll
+see `button: held 2050 ms -- release any time before 30 s to toggle
+OTA gate; keep holding to 30 s to wipe creds`. If the device isn't
+online yet, the log adds `(waiting for device to come online)` and
+the OTA toggle is suppressed until Wi-Fi + HTTP are up.
 
 To use a different GPIO, change `pt_app_config.reset_gpio_num` in
 `main/main.c`. Negative value disables it.

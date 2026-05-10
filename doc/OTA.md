@@ -12,11 +12,13 @@ OTA endpoint. Either one is enough; both close on reboot.
    path on a deployed device. The window naturally coincides with
    "printer cannot print", so it doubles as a maintenance moment.
 2. **BOOT button override** -- hold the device's BOOT button for
-   3-5 seconds and release. The OTA gate toggles open. Useful on a
-   dev board with no printer connected, or on a model whose printer
-   has no P-Lite slider (handhelds). Hold the same button past 5 s
-   without releasing and you get the older Wi-Fi-reset gesture
-   instead (creds wiped + reboot).
+   2-30 seconds and release. The OTA gate toggles open. The button
+   only acts after the device is online (Wi-Fi STA up + HTTP serving)
+   so a tap during boot can't pre-arm the gate. Useful on a dev
+   board with no printer connected, or on a model whose printer has
+   no P-Lite slider (handhelds). Hold the same button past 30 s
+   without releasing and you get the Wi-Fi-reset gesture instead
+   (creds wiped + reboot, regardless of online state).
 
 While either gate is open, an OTA section appears on the SPA's
 Status view.
@@ -38,6 +40,22 @@ Status view.
    SPA reloads automatically once it can reach the device again.
 
 4. Slide the switch back to **E** so printing resumes.
+
+## CLI alternative
+
+For headless flashing, scripted rollouts, or any case where the
+SPA can't reach the device, use `scripts/labelsis-ota.py`:
+
+```sh
+scripts/labelsis-ota.py --host labelsis.local \
+                        --file build/labelsis.bin
+```
+
+It pre-flights `/api/ota/status` (so a closed gate fails fast
+instead of after a 1.5 MB upload), streams the image with a
+progress bar, and surfaces the firmware's error tokens directly
+on failure. Stdlib-only -- no `pip install` needed. Pass `--help`
+for full options.
 
 ## What the device does
 
@@ -62,7 +80,7 @@ Status view.
 
 | Result | Meaning |
 |---|---|
-| `403 gate_closed` | Neither gate is open at upload start. Slide to EL, or hold BOOT 3-5 s + release. |
+| `403 gate_closed` | Neither gate is open at upload start. Slide to EL, or hold BOOT 2-30 s + release (device must be online). |
 | `403 gate_closed_mid_upload` | The gate that was open dropped while the upload was in flight (slider back to E, or BOOT toggled off). Half-written image discarded; retry. |
 | `400 image_validate` | SHA256 from the image header didn't match the bytes received -- truncated upload, network corruption, or a non-IDF binary. |
 | `400 wrong_project` | Image is structurally valid but its `project_name` is not "labelsis". Image is on disk but never set as boot target; next OTA overwrites it. |
