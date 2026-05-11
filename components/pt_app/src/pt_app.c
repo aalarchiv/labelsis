@@ -1413,9 +1413,19 @@ static esp_err_t ota_fail(httpd_req_t *req, esp_ota_handle_t h,
 /* Serialise concurrent OTA uploads. Two simultaneous POSTs would
  * race in esp_ota_begin and corrupt each other's writes; the second
  * gets 409 ota_busy. Set on entry, cleared on every non-success
- * exit (success doesn't return -- esp_restart() reboots). */
+ * exit (success doesn't return -- esp_restart() reboots).
+ *
+ * s_ota_busy_acquired_ms is the esp_timer epoch (ms) when the flag
+ * was last acquired. If the wrapper's handler crashes / task panics
+ * without clearing, the flag would otherwise stay set forever and
+ * brick OTA over Wi-Fi until manual reboot. Auto-clear after 5 min
+ * gives any legitimately long OTA plenty of margin (real ones are
+ * ~30 s) while bounding the worst-case "OTA blocked" window. */
 #include <stdatomic.h>
-static atomic_flag s_ota_busy = ATOMIC_FLAG_INIT;
+#include "esp_timer.h"
+#define OTA_BUSY_STALE_MS (5 * 60 * 1000)
+static atomic_flag s_ota_busy           = ATOMIC_FLAG_INIT;
+static int64_t    s_ota_busy_acquired_ms = 0;
 
 /* Try esp_ota_begin once; on failure, force-erase the partition and
  * retry once. Recovers a slot that's been left in a bad state by a
@@ -1623,17 +1633,73 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
 /* Public handler -- guards api_ota_upload_inner with a busy flag so
  * two concurrent OTA POSTs can't race in esp_ota_begin. The success
  * path doesn't return (esp_restart() reboots), so we only need to
- * clear the flag on every error path -- that happens here. */
+ * clear the flag on every error path -- that happens here.
+ *
+ * If the flag is currently set BUT the timestamp is >5 min old, the
+ * previous handler must have panicked / been killed without clearing
+ * (FreeRTOS task crash, stack overflow, etc.). Treat as stale and
+ * proceed -- otherwise a single buggy OTA could brick the device's
+ * Wi-Fi-only update path until the next physical reboot. */
 static esp_err_t api_ota_upload(httpd_req_t *req)
 {
+    int64_t now_ms = esp_timer_get_time() / 1000;
     if (atomic_flag_test_and_set(&s_ota_busy)) {
-        ESP_LOGW(TAG, "ota: rejecting concurrent OTA POST -- ota_busy");
-        return ota_fail(req, 0, "409 Conflict", "ota_busy",
-                        ESP_OK, req->content_len);
+        int64_t age_ms = now_ms - s_ota_busy_acquired_ms;
+        if (s_ota_busy_acquired_ms != 0 && age_ms > OTA_BUSY_STALE_MS) {
+            ESP_LOGW(TAG, "ota: stale s_ota_busy (held %lld ms) -- "
+                          "clearing and proceeding", age_ms);
+            /* Flag already set; we now own it (no real concurrent
+             * caller -- previous handler died). Fall through. */
+        } else {
+            ESP_LOGW(TAG, "ota: rejecting concurrent OTA POST -- ota_busy "
+                          "(held %lld ms so far)", age_ms);
+            return ota_fail(req, 0, "409 Conflict", "ota_busy",
+                            ESP_OK, req->content_len);
+        }
     }
+    s_ota_busy_acquired_ms = now_ms;
     esp_err_t r = api_ota_upload_inner(req);
+    s_ota_busy_acquired_ms = 0;
     atomic_flag_clear(&s_ota_busy);
     return r;
+}
+
+/* POST /api/ota/erase-next -- explicit erase of the inactive OTA
+ * slot, behind the same gate. Recovery path for the case where the
+ * automatic write-failure retry in api_ota_upload_inner can't fix
+ * the wedge (silent flash failure, etc.). The next OTA upload then
+ * writes to a guaranteed-fresh slot.
+ *
+ * Synchronous -- esp_partition_erase_range blocks until done; on a
+ * 1.94 MB S2 slot that's ~5-10 s. Doesn't reboot. */
+static esp_err_t api_ota_erase_next(httpd_req_t *req)
+{
+    if (!ota_gate_open()) {
+        return ota_fail(req, 0, "403 Forbidden", "gate_closed",
+                        ESP_OK, req->content_len);
+    }
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    if (!next) {
+        return ota_fail(req, 0, "500 Internal Server Error", "no_ota_slot",
+                        ESP_OK, req->content_len);
+    }
+    ESP_LOGW(TAG, "ota: explicit erase of slot %s requested (size %u)",
+             next->label, (unsigned)next->size);
+    esp_err_t err = esp_partition_erase_range(next, 0, next->size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota: erase_range failed: %s", esp_err_to_name(err));
+        return ota_fail(req, 0, "500 Internal Server Error",
+                        "erase_failed", err, req->content_len);
+    }
+    ESP_LOGI(TAG, "ota: slot %s erased", next->label);
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    char body[128];
+    int n = snprintf(body, sizeof body,
+                     "{\"ok\":true,\"slot\":\"%s\",\"size\":%u}",
+                     next->label, (unsigned)next->size);
+    return httpd_resp_send(req, body, n);
 }
 
 /* POST /api/reboot -- soft reboot, behind the same gate as /api/ota.
@@ -1698,9 +1764,9 @@ static esp_err_t http_up(uint16_t port)
     /* Wildcard matching enables the OPTIONS catch-all below; specific
      * routes still match exactly. */
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    /* Default is 8; we register 20 routes (status, info, print, cut,
+    /* Default is 8; we register 21 routes (status, info, print, cut,
      * feed, scan, setup, index, fonts*2, favicon, ota*2, wifi*5,
-     * reboot, OPTIONS catch-all) and want headroom. */
+     * reboot, ota/erase-next, OPTIONS catch-all) and want headroom. */
     cfg.max_uri_handlers = 24;
     /* Leave max_open_sockets at the default 7. esp_http_server caps
      * it at CONFIG_LWIP_MAX_SOCKETS - 3, which is 7 with the default
@@ -1793,6 +1859,10 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/reboot", .method = HTTP_POST,
         .handler = api_reboot, .user_ctx = NULL,
     };
+    static const httpd_uri_t ota_erase_next_route = {
+        .uri = "/api/ota/erase-next", .method = HTTP_POST,
+        .handler = api_ota_erase_next, .user_ctx = NULL,
+    };
     static const httpd_uri_t cors_route = {
         .uri = "/*", .method = HTTP_OPTIONS,
         .handler = cors_preflight, .user_ctx = NULL,
@@ -1816,6 +1886,7 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &wifi_order_route);
     httpd_register_uri_handler(s_http, &wifi_prescan_route);
     httpd_register_uri_handler(s_http, &reboot_route);
+    httpd_register_uri_handler(s_http, &ota_erase_next_route);
     httpd_register_uri_handler(s_http, &cors_route);
     /* HTTP is serving requests now -- if we just OTA'd into this
      * image, that's enough proof of life to cancel the rollback

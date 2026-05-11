@@ -422,6 +422,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(202, {"ok": True, "reboot_in_ms": 500})
             return
 
+        if path == "/api/ota/erase-next":
+            # Explicit erase of the inactive slot -- recovery path for
+            # wedges that the in-handler retry can't fix.
+            if STATE["transport"] != "plite":
+                self._send_json(403, {"ok": False, "error": "gate_closed"})
+                return
+            self.log_extra("ota: would erase next slot (mock no-op)")
+            self._send_json(200, {"ok": True, "slot": "ota_1", "size": 0x1F0000})
+            return
+
         self.send_error(404, "not found")
 
 

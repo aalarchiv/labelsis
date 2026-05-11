@@ -103,19 +103,52 @@ flash / OTA failure mode:
 | `500 ota_write` | Flash write failed mid-upload. Check `esp_err` (e.g. `ESP_ERR_FLASH_OP_TIMEOUT`). The firmware drains the rest of the request body before responding, so the client sees a clean response instead of a connection RST. |
 | `500 ota_end` / `500 set_boot` | Late-stage failure after the bytes are in flash. Rare; check the `esp_err` field. |
 
-## Soft reboot
+## Recovery ladder (Wi-Fi-only deployed devices)
 
-`POST /api/reboot` (behind the same gate) lets you cycle the device
-remotely. Useful when a botched OTA leaves the next slot wedged --
-power-cycling clears whatever flash transient was in the way. Returns
-`202 Accepted` with `{"ok":true,"reboot_in_ms":500}`; device comes
-back ~5 s later (Wi-Fi reassoc + HTTP up).
+For a device that's been built into a printer or otherwise inaccessible
+to USB, escalate in this order:
 
-```sh
-curl -X POST http://labelsis.local/api/reboot
-```
+1. **Retry the OTA**. `api_ota_upload_inner` will try once to recover
+   a wedged slot via `esp_partition_erase_range + esp_ota_begin` on
+   first-write failure. If the flash settles between attempts, the
+   second OTA often succeeds.
+
+2. **`POST /api/ota/erase-next`** (behind the same gate). Synchronously
+   erases the inactive slot via `esp_partition_erase_range`. Use when
+   the OTA upload keeps failing with `ota_write` / `ota_begin` and
+   the in-handler retry didn't help. Returns `200 OK` with `{"ok":
+   true, "slot": "ota_X", "size": ...}`. Takes ~5-10 s; doesn't reboot.
+
+   ```sh
+   curl -X POST http://labelsis.local/api/ota/erase-next
+   ```
+
+3. **`POST /api/reboot`** (behind the same gate). Soft reboot via
+   `esp_restart()`. Resets the flash controller's transient state,
+   which is the only cure for some hardware-level wedges. Returns
+   `202 Accepted` with `{"ok":true,"reboot_in_ms":500}`; device comes
+   back ~5 s later.
+
+   ```sh
+   curl -X POST http://labelsis.local/api/reboot
+   ```
+
+4. **Hold the BOOT button for 30+ s** (physical). Wipes Wi-Fi creds
+   and reboots into AP-mode onboarding. Useful if Wi-Fi itself is
+   wedged. Bypasses the device-online guard so it works even from
+   a hung state.
+
+5. **Power-cycle the printer** (physical). Cuts power to the whole
+   device. Last-resort recovery; equivalent to /api/reboot but works
+   when the device isn't responding to HTTP at all.
+
+6. **USB re-flash via `idf.py flash`**. Use when nothing else works
+   or you need to install a firmware version that doesn't have the
+   recovery endpoints yet.
 
 ## Recovery
+
+If the new image somehow boots far enough to confirm itself as valid
 
 If the new image somehow boots far enough to confirm itself as valid
 but is then unusable (e.g., wrong board profile), Wi-Fi reset (BOOT

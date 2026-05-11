@@ -76,6 +76,7 @@ idf_component_register(
         nvs_flash
         mdns
         esp_driver_gpio
+        esp_timer
         lwip
         led_strip
     # EMBED_FILES (not EMBED_TXTFILES) -- the latter appends a NUL
