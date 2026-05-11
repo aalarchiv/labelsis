@@ -56,6 +56,8 @@ I used a _Wemos Lolin S2 mini ESP32-S2_ which does not come with an addition USB
 
 The PT700 microcontroller needs to detect a voltage on the VBUS pins of the USB port. 3.3V is sufficient for detection.
 
+**This is why `3.3V` is connected to `VBUS`.**
+
 ## Supported printers
 
 Same protocol family per Brother's SDM v1.11. All must be in normal
