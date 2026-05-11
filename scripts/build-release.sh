@@ -8,6 +8,7 @@
 #   scripts/build-release.sh -b lolin_s2_mini   # one board (repeatable)
 #   scripts/build-release.sh -v 1.2.3-rc1       # override version
 #   scripts/build-release.sh -o /tmp/labelsis   # override output dir
+#   scripts/build-release.sh -n NOTES.md        # bundle release notes
 #
 # Output layout:
 #   release/<version>/
@@ -16,6 +17,7 @@
 #     labelsis-<board>-<version>-bootloader.bin   <- bootloader-only
 #     labelsis-<board>-<version>-partitions.bin   <- partition table
 #     labelsis-<board>-<version>-flash.sh         <- esptool one-liner
+#     RELEASE.md                                  <- only when -n was passed
 #     SHA256SUMS
 #     manifest.txt
 #
@@ -27,22 +29,17 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
-# Sanity: ESP-IDF environment must be sourced.
-if [ -z "${IDF_PATH:-}" ]; then
-    echo "ERROR: IDF_PATH not set. Source ~/esp/esp-idf/export.sh first." >&2
-    exit 1
-fi
-command -v idf.py >/dev/null || { echo "ERROR: idf.py not on PATH" >&2; exit 1; }
-
 # CLI parsing.
 boards=()
 version=""
 out_root="release"
+notes_src=""
 while [ $# -gt 0 ]; do
     case "$1" in
         -b|--board)   boards+=("$2"); shift 2;;
         -v|--version) version="$2"; shift 2;;
         -o|--out-dir) out_root="$2"; shift 2;;
+        -n|--notes)   notes_src="$2"; shift 2;;
         -h|--help)
             sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
             exit 0;;
@@ -51,6 +48,29 @@ while [ $# -gt 0 ]; do
             exit 2;;
     esac
 done
+
+# Validate the notes file BEFORE we kick off any builds -- a 5-minute
+# build that then fails on a missing file would be cruel. The contents
+# are copied to <out_dir>/RELEASE.md and the manifest links to them.
+if [ -n "$notes_src" ]; then
+    if [ ! -f "$notes_src" ]; then
+        echo "ERROR: --notes path does not exist: $notes_src" >&2
+        exit 2
+    fi
+    if [ ! -r "$notes_src" ]; then
+        echo "ERROR: --notes path not readable: $notes_src" >&2
+        exit 2
+    fi
+fi
+
+# Sanity: ESP-IDF environment must be sourced. Checked AFTER argument
+# parsing + notes validation so --help and obvious argument errors
+# don't require sourcing IDF first.
+if [ -z "${IDF_PATH:-}" ]; then
+    echo "ERROR: IDF_PATH not set. Source ~/esp/esp-idf/export.sh first." >&2
+    exit 1
+fi
+command -v idf.py >/dev/null || { echo "ERROR: idf.py not on PATH" >&2; exit 1; }
 
 # Default to every board profile that carries a target file.
 if [ ${#boards[@]} -eq 0 ]; then
@@ -148,6 +168,14 @@ for b in "${boards[@]}"; do
     if build_one "$b"; then ok+=("$b"); else fail+=("$b"); fi
 done
 
+# Release notes (optional) -- copy into the archive as RELEASE.md so
+# whoever opens the bundle sees the human-readable changelog
+# alongside the binaries.
+if [ -n "$notes_src" ]; then
+    cp -f "$notes_src" "$out_dir/RELEASE.md"
+    echo "==> Notes:   $notes_src -> $out_dir/RELEASE.md ($(wc -c < "$notes_src") bytes)"
+fi
+
 # Manifest + checksums.
 (
     cd "$out_dir"
@@ -160,6 +188,7 @@ Built:       $(date -u +"%Y-%m-%dT%H:%M:%SZ") (UTC)
 Built by:    $(git config user.name 2>/dev/null || echo unknown)
 Boards:      ${ok[*]}
 Skipped:     ${fail[*]:-(none)}
+$([ -n "$notes_src" ] && echo "Notes:       RELEASE.md (from $notes_src)")
 
 For OTA (printer in P-Lite mode):
   upload labelsis-<board>-$version.bin via the SPA Status view.
