@@ -1505,18 +1505,55 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
          * chunk is shorter, hdr_validated stays false and the
          * existing post-end check catches the mismatch. */
         if (!hdr_validated && written == 0 && got >= hdr_offset_bytes) {
-            const esp_app_desc_t *desc = (const esp_app_desc_t *)(buf + 0x20);
-            if (desc->magic_word != ESP_APP_DESC_MAGIC_WORD ||
-                strncmp(desc->project_name, "labelsis",
-                        sizeof desc->project_name) != 0) {
+            /* memcpy into a stack-aligned esp_app_desc_t -- buf+0x20
+             * happens to be 4-byte aligned today (buf is 16-aligned
+             * stack memory) but the unaligned pointer cast is UB on
+             * Xtensa per the ABI; copy is portable + free-ish. */
+            esp_app_desc_t desc;
+            memcpy(&desc, buf + 0x20, sizeof desc);
+            if (desc.magic_word != ESP_APP_DESC_MAGIC_WORD ||
+                strncmp(desc.project_name, "labelsis",
+                        sizeof desc.project_name) != 0) {
                 ESP_LOGW(TAG, "ota: early reject -- magic=0x%08lx project=%.32s",
-                         (unsigned long)desc->magic_word, desc->project_name);
+                         (unsigned long)desc.magic_word, desc.project_name);
                 return ota_fail(req, ota, "400 Bad Request", "wrong_project",
                                 ESP_OK, remaining - got);
             }
             hdr_validated = true;
         }
         err = esp_ota_write(ota, buf, got);
+        if (err != ESP_OK && written == 0) {
+            /* First-write failure: classic symptom of a slot wedged
+             * by a prior aborted OTA -- esp_ota_begin returned OK
+             * (claimed erase succeeded) but the underlying flash
+             * sectors weren't actually erased. Force a full erase
+             * via esp_partition_erase_range, restart the OTA
+             * transaction, and retry the write once. We can do this
+             * because the failed chunk is still in `buf` and no
+             * earlier data has been committed (written == 0).
+             *
+             * For chunks past the first, the prior N chunks are
+             * already in flash; an abort+erase would discard them
+             * and we can't replay them from the wire. So this
+             * recovery only fires on the first chunk; subsequent
+             * failures bail. */
+            ESP_LOGW(TAG, "ota: first esp_ota_write failed (%s) -- "
+                          "abort + force-erase + retry once",
+                     esp_err_to_name(err));
+            esp_ota_abort(ota);
+            ota = 0;
+            esp_err_t e2 = esp_partition_erase_range(next, 0, next->size);
+            if (e2 == ESP_OK) e2 = esp_ota_begin(next, OTA_SIZE_UNKNOWN, &ota);
+            if (e2 == ESP_OK) e2 = esp_ota_write(ota, buf, got);
+            if (e2 != ESP_OK) {
+                ESP_LOGE(TAG, "ota: write recovery failed: %s",
+                         esp_err_to_name(e2));
+                return ota_fail(req, ota, "500 Internal Server Error",
+                                "ota_write", e2, remaining - got);
+            }
+            ESP_LOGI(TAG, "ota: write recovery OK -- continuing");
+            err = ESP_OK;
+        }
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "ota: esp_ota_write failed at %d bytes: %s",
                      written, esp_err_to_name(err));
