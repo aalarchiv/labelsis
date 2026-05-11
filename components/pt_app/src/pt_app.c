@@ -332,6 +332,10 @@ static void reset_button_task(void *arg)
     if (gpio_config(&gc) != ESP_OK) {
         ESP_LOGW(TAG, "reset: gpio %d config failed -- disabling", gpio);
         vTaskDelete(NULL);
+        return;   /* defensive: vTaskDelete(NULL) doesn't return to this
+                   * task in practice, but if it ever did, gpio_get_level
+                   * on an unconfigured pin reads garbage and could
+                   * spuriously trigger the 30 s wipe. */
     }
 
     TickType_t pressed_at      = 0;
